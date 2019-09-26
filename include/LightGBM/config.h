@@ -382,6 +382,13 @@ struct Config {
   // desc = when number of categories of one feature smaller than or equal to ``max_cat_to_onehot``, one-vs-other split algorithm will be used
   int max_cat_to_onehot = 4;
 
+  //desc = whether to use ctr 
+  bool use_ctr = true;
+
+  // check = >= 2
+  // desc = the number of folds that the training data is partitioned to calculate the ctr
+  int num_folds_for_ctr = 4;
+
   // alias = topk
   // check = >0
   // desc = used in `Voting parallel <./Parallel-Learning-Guide.rst#choose-appropriate-parallel-algorithm>`__

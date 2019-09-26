@@ -177,18 +177,22 @@ class FeatureHistogram {
 
       l2 += meta_->config->cat_l2;
 
-      auto ctr_fun = [this](double sum_grad, double sum_hess) {
-        return (sum_grad) / (sum_hess + meta_->config->cat_smooth);
-      };
-      std::sort(sorted_idx.begin(), sorted_idx.end(),
-                [this, &ctr_fun](int i, int j) {
-        return ctr_fun(data_[i].sum_gradients, data_[i].sum_hessians) < ctr_fun(data_[j].sum_gradients, data_[j].sum_hessians);
-      });
+      if(!meta_->config->use_ctr) {
+        auto ctr_fun = [this](double sum_grad, double sum_hess) {
+          return (sum_grad) / (sum_hess + meta_->config->cat_smooth);
+        };
+        std::sort(sorted_idx.begin(), sorted_idx.end(),
+                  [this, &ctr_fun](int i, int j) {
+          return ctr_fun(data_[i].sum_gradients, data_[i].sum_hessians) < ctr_fun(data_[j].sum_gradients, data_[j].sum_hessians);
+        });
+      }
 
       std::vector<int> find_direction(1, 1);
       std::vector<int> start_position(1, 0);
-      find_direction.push_back(-1);
-      start_position.push_back(used_bin - 1);
+      if(!meta_->config->use_ctr) {
+        find_direction.push_back(-1);
+        start_position.push_back(used_bin - 1);
+      }
       const int max_num_cat = std::min(meta_->config->max_cat_threshold, (used_bin + 1) / 2);
 
       is_splittable_ = false;

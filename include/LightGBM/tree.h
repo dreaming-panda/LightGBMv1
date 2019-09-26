@@ -18,6 +18,7 @@ namespace LightGBM {
 
 #define kCategoricalMask (1)
 #define kDefaultLeftMask (2)
+#define kCTRMask (3)
 
 /*!
 * \brief Tree model
@@ -78,11 +79,37 @@ class Tree {
   * \param left_weight Weight of left child
   * \param right_weight Weight of right child
   * \param gain Split gain
+  * \param missing_type missing type of the categorical feature
   * \return The index of new leaf.
   */
   int SplitCategorical(int leaf, int feature, int real_feature, const uint32_t* threshold_bin, int num_threshold_bin,
                        const uint32_t* threshold, int num_threshold, double left_value, double right_value,
                        int left_cnt, int right_cnt, double left_weight, double right_weight, float gain, MissingType missing_type);
+
+  /*!
+  * \brief Performing a split on tree leaves, with categorical feature
+  * \param leaf Index of leaf to be split
+  * \param feature Index of feature; the converted index after removing useless features
+  * \param real_feature Index of feature, the original index on data
+  * \param threshold_bin Threshold(bin) of split, use bitset to represent
+  * \param num_threshold_bin size of threshold_bin
+  * \param threshold Thresholds of real feature value, use bitset to represent
+  * \param num_threshold size of threshold
+  * \param seen_categories Categories met in training data
+  * \param num_seen_categories Number of seen categories
+  * \param left_value Model Left child output
+  * \param right_value Model Right child output
+  * \param left_cnt Count of left child
+  * \param right_cnt Count of right child
+  * \param left_weight Weight of left child
+  * \param right_weight Weight of right child
+  * \param gain Split gain
+  * \param missing_type missing type of the categorical feature
+  * \return The index of new leaf.
+  */
+  int SplitCTR(int leaf, int feature, int real_feature, const uint32_t* threshold_bin, int num_threshold_bin,
+               const uint32_t* threshold, int num_threshold, const uint32_t* seen_categories, int num_seen_categories, double left_value, double right_value,
+               int left_cnt, int right_cnt, double left_weight, double right_weight, float gain, MissingType missing_type);
 
   /*! \brief Get the output of one leaf */
   inline double LeafOutput(int leaf) const { return leaf_value_[leaf]; }

@@ -25,6 +25,7 @@ namespace LightGBM {
 
 /*! \brief forward declaration */
 class DatasetLoader;
+class CTRProvider;
 /*!
 * \brief This class is used to store some meta(non-feature) data for training data,
 *        e.g. labels, weights, initial scores, qurey level informations.
@@ -283,6 +284,7 @@ class Parser {
 class Dataset {
  public:
   friend DatasetLoader;
+  friend CTRProvider;
 
   LIGHTGBM_EXPORT Dataset();
 
@@ -634,6 +636,8 @@ class Dataset {
   int min_data_in_bin_;
   bool use_missing_;
   bool zero_as_missing_;
+  /*! \brief CTR provider, responsible for CTR calculation, and CTR bin mapping */
+  CTRProvider* ctr_provider_;
 };
 
 }  // namespace LightGBM

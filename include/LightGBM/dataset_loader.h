@@ -45,17 +45,19 @@ class DatasetLoader {
 
   std::vector<std::string> LoadTextDataToMemory(const char* filename, const Metadata& metadata, int rank, int num_machines, int* num_global_data, std::vector<data_size_t>* used_data_indices);
 
-  std::vector<std::string> SampleTextDataFromMemory(const std::vector<std::string>& data);
+  std::vector<std::string> SampleTextDataFromMemory(const std::vector<std::string>& data, std::vector<int>& all_sample_indices);
 
-  std::vector<std::string> SampleTextDataFromFile(const char* filename, const Metadata& metadata, int rank, int num_machines, int* num_global_data, std::vector<data_size_t>* used_data_indices);
+  std::vector<std::string> SampleTextDataFromFile(const char* filename, const Metadata& metadata, int rank, int num_machines, int* num_global_data, 
+    std::vector<data_size_t>* used_data_indices, std::vector<int>& all_sample_indices);
 
-  void ConstructBinMappersFromTextData(int rank, int num_machines, const std::vector<std::string>& sample_data, const Parser* parser, Dataset* dataset);
+  void ConstructBinMappersFromTextData(int rank, int num_machines, const std::vector<std::string>& sample_data, const Parser* parser, 
+    Dataset* dataset, const std::vector<int>& all_sample_indices);
 
   /*! \brief Extract local features from memory */
-  void ExtractFeaturesFromMemory(std::vector<std::string>& text_data, const Parser* parser, Dataset* dataset);
+  void ExtractFeaturesFromMemory(std::vector<std::string>& text_data, const Parser* parser, Dataset* dataset, bool is_valid);
 
   /*! \brief Extract local features from file */
-  void ExtractFeaturesFromFile(const char* filename, const Parser* parser, const std::vector<data_size_t>& used_data_indices, Dataset* dataset);
+  void ExtractFeaturesFromFile(const char* filename, const Parser* parser, const std::vector<data_size_t>& used_data_indices, Dataset* dataset, bool is_valid);
 
   /*! \brief Check can load from binary file */
   std::string CheckCanLoadFromBin(const char* filename);

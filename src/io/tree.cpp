@@ -98,6 +98,14 @@ int Tree::SplitCategorical(int leaf, int feature, int real_feature, const uint32
   return num_leaves_ - 1;
 }
 
+int Tree::SplitCTR(int leaf, int feature, int real_feature, const uint32_t* threshold_bin, int num_threshold_bin,
+               const uint32_t* threshold, int num_threshold, const uint32_t* seen_categories, int num_seen_categories, double left_value, double right_value,
+               int left_cnt, int right_cnt, double left_weight, double right_weight, float gain, MissingType missing_type) {
+  int right = SplitCategorical(leaf, feature, real_feature, threshold_bin, num_threshold_bin, threshold, num_threshold, 
+    left_value, right_value, left_cnt, right_cnt, left_weight, right_weight, gain, missing_type);
+  
+}
+
 #define PredictionFun(niter, fidx_in_iter, start_pos, decision_fun, iter_idx, data_idx) \
 std::vector<std::unique_ptr<BinIterator>> iter((niter)); \
 for (int i = 0; i < (niter); ++i) { \

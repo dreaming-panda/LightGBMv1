@@ -638,6 +638,7 @@ void SerialTreeLearner::FindBestSplitsFromHistograms(const std::vector<int8_t>& 
 int32_t SerialTreeLearner::ForceSplits(Tree* tree, Json& forced_split_json, int* left_leaf,
                                        int* right_leaf, int *cur_depth,
                                        bool *aborted_last_force_split) {
+  Log::Fatal("force splits");
   int32_t result_count = 0;
   // start at root leaf
   *left_leaf = 0;
@@ -824,7 +825,8 @@ void SerialTreeLearner::Split(Tree* tree, int best_leaf, int* left_leaf, int* ri
 
   // left = parent
   *left_leaf = best_leaf;
-  bool is_numerical_split = train_data_->FeatureBinMapper(inner_feature_index)->bin_type() == BinType::NumericalBin;
+  bool is_ctr_split = train_data_->FeatureBinMapper(inner_feature_index)->is_ctr();
+  bool is_numerical_split = train_data_->FeatureBinMapper(inner_feature_index)->bin_type() == BinType::NumericalBin && !is_ctr_split;
   if (is_numerical_split) {
     auto threshold_double = train_data_->RealThreshold(inner_feature_index, best_split_info.threshold);
     // split tree, will return right leaf
@@ -844,6 +846,50 @@ void SerialTreeLearner::Split(Tree* tree, int best_leaf, int* left_leaf, int* ri
                               best_split_info.default_left);
     data_partition_->Split(best_leaf, train_data_, inner_feature_index,
                            &best_split_info.threshold, 1, best_split_info.default_left, *right_leaf);
+  } else if(is_ctr_split) {
+    std::vector<uint32_t> cat_threshold;
+    const BinMapper* ctr_bin_mapper = train_data_->FeatureBinMapper(inner_feature_index);
+    ctr_bin_mapper->ConstructInnerCatThresholdFromCTRThreshold(best_split_info.threshold, best_split_info.default_left, cat_threshold);
+    const int num_cat_threshold = static_cast<int>(cat_threshold.size());
+    std::vector<uint32_t> cat_bitset_inner = Common::ConstructBitset(cat_threshold.data(), num_cat_threshold);
+    const int real_cat_fid = ctr_bin_mapper->real_cat_fid();
+    int inner_cat_fid = train_data_->InnerFeatureIndex(real_cat_fid);
+    const BinMapper* cat_bin_mapper = train_data_->FeatureBinMapper(inner_cat_fid);
+    std::vector<int> threshold_int(num_cat_threshold);
+    for (int i = 0; i < num_cat_threshold; ++i) {
+      double real_value = train_data_->RealThreshold(inner_cat_fid, cat_threshold[i]);
+      CHECK(cat_bin_mapper->HasValueInCat(real_value));
+      threshold_int[i] = static_cast<int>(real_value);
+    }
+    std::vector<uint32_t> cat_bitset = Common::ConstructBitset(threshold_int.data(), num_cat_threshold);
+
+    std::vector<int> seen_categories;
+    cat_bin_mapper->GetSeenCategories(seen_categories);
+    std::vector<uint32_t> seen_categories_bitset = Common::ConstructBitset(seen_categories.data(), static_cast<int>(seen_categories.size()));
+
+    *right_leaf = tree->SplitCTR(best_leaf,
+                                         inner_cat_fid,
+                                         real_cat_fid,
+                                         cat_bitset_inner.data(),
+                                         static_cast<int>(cat_bitset_inner.size()),
+                                         cat_bitset.data(),
+                                         static_cast<int>(cat_bitset.size()),
+                                         seen_categories_bitset.data(),
+                                         static_cast<int>(seen_categories_bitset.size()),
+                                         static_cast<double>(best_split_info.left_output),
+                                         static_cast<double>(best_split_info.right_output),
+                                         static_cast<data_size_t>(best_split_info.left_count),
+                                         static_cast<data_size_t>(best_split_info.right_count),
+                                         static_cast<double>(best_split_info.left_sum_hessian),
+                                         static_cast<double>(best_split_info.right_sum_hessian),
+                                         static_cast<float>(best_split_info.gain),
+                                         train_data_->FeatureBinMapper(inner_cat_fid)->missing_type());
+    CHECK(train_data_->FeatureBinMapper(inner_cat_fid)->missing_type() == MissingType::None);
+    CHECK(ctr_bin_mapper->missing_type() == MissingType::None);
+    data_partition_->Split(best_leaf, train_data_, inner_feature_index,
+                           &best_split_info.threshold, 1, best_split_info.default_left, *right_leaf);
+    //data_partition_->Split(best_leaf, train_data_, inner_cat_fid,
+    //                       cat_bitset_inner.data(), static_cast<int>(cat_bitset_inner.size()), false, *right_leaf);
   } else {
     std::vector<uint32_t> cat_bitset_inner = Common::ConstructBitset(best_split_info.cat_threshold.data(), best_split_info.num_cat_threshold);
     std::vector<int> threshold_int(best_split_info.num_cat_threshold);
