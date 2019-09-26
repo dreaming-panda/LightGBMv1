@@ -48,7 +48,7 @@ class SerialTreeLearner: public TreeLearner {
 
   void ResetConfig(const Config* config) override;
 
-  Tree* Train(const score_t* gradients, const score_t *hessians, bool is_constant_hessian,
+  virtual Tree* Train(const score_t* gradients, const score_t *hessians, bool is_constant_hessian,
               Json& forced_split_json) override;
 
   Tree* FitByExistingTree(const Tree* old_tree, const score_t* gradients, const score_t* hessians) const override;
@@ -186,6 +186,32 @@ class SerialTreeLearner: public TreeLearner {
 };
 
 inline data_size_t SerialTreeLearner::GetGlobalDataCountInLeaf(int leaf_idx) const {
+  if (leaf_idx >= 0) {
+    return data_partition_->leaf_count(leaf_idx);
+  } else {
+    return 0;
+  }
+}
+
+class SymmetricTreeLearner : public SerialTreeLearner {
+  public:
+    SymmetricTreeLearner(const Config* config): SerialTreeLearner(config) {}
+
+    Tree* Train(const score_t* gradients, const score_t *hessians, bool is_constant_hessian,
+              Json& forced_split_json) override;
+
+  private:
+  /*!
+  * \brief Get the number of data in a leaf
+  * \param leaf_idx The index of leaf
+  * \return The number of data in the leaf_idx leaf
+  */
+  inline virtual data_size_t GetGlobalDataCountInLeaf(int leaf_idx) const;
+
+  void FindBestSplitForFeature(int left_leaf, int right_leaf, int left_inner_feature_index, int right_inner_feature_index);
+};
+
+inline data_size_t SymmetricTreeLearner::GetGlobalDataCountInLeaf(int leaf_idx) const {
   if (leaf_idx >= 0) {
     return data_partition_->leaf_count(leaf_idx);
   } else {

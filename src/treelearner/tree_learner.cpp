@@ -11,10 +11,15 @@
 namespace LightGBM {
 
 TreeLearner* TreeLearner::CreateTreeLearner(const std::string& learner_type, const std::string& device_type, const Config* config) {
+  Log::Warning((std::string("learning_type ") + learner_type).c_str());
   if (device_type == std::string("cpu")) {
     if (learner_type == std::string("serial")) {
       return new SerialTreeLearner(config);
-    } else if (learner_type == std::string("feature")) {
+    } else if(learner_type == std::string("symmetric")) {
+      Log::Warning("use symmetric tree");
+      return new SymmetricTreeLearner(config);
+    } 
+    else if (learner_type == std::string("feature")) {
       return new FeatureParallelTreeLearner<SerialTreeLearner>(config);
     } else if (learner_type == std::string("data")) {
       return new DataParallelTreeLearner<SerialTreeLearner>(config);

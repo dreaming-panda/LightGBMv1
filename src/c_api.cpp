@@ -124,7 +124,9 @@ class Booster {
     }
     if (Network::num_machines() == 1 && config_.tree_learner != std::string("serial")) {
       Log::Warning("Only find one worker, will switch to serial tree learner");
-      config_.tree_learner = "serial";
+      if(config_.tree_learner != std::string("symmetric")) {
+        config_.tree_learner = "serial";
+      }
     }
     boosting_->Init(&config_, train_data_, objective_fun_.get(),
                     Common::ConstPtrInVectorWrapper<Metric>(train_metric_));
