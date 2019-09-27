@@ -505,6 +505,8 @@ class GBDT : public GBDTBase {
   bool balanced_bagging_;
   std::string loaded_parameter_;
   std::vector<int8_t> monotone_constraints_;
+  /*! \brief seen categories in train data sampling process, maps a real categorical feature (of CTR) index ot its seen categories  */
+  std::unordered_map<int, std::vector<uint32_t>> seen_cat_values_;
 
   Json forced_splits_json_;
 };

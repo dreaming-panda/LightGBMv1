@@ -115,6 +115,8 @@ void GBDT::Init(const Config* config, const Dataset* train_data, const Objective
       class_need_train_[i] = objective_function_->ClassNeedTrain(i);
     }
   }
+
+  seen_cat_values_ = train_data_->GetSeenCatValues();
 }
 
 void GBDT::AddValidDataset(const Dataset* valid_data,
@@ -396,6 +398,7 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
         hess = hessians_.data() + bias;
       }
       new_tree.reset(tree_learner_->Train(grad, hess, is_constant_hessian_, forced_splits_json_));
+      new_tree->SetSeenCatValues(&seen_cat_values_);
     }
 
     if (new_tree->num_leaves() > 1) {

@@ -98,7 +98,7 @@ inline void CTRProvider::PushCTRData(const int cat_fid, const int tid, const int
             const BinMapper* ctr_bin_mapper = data->FeatureBinMapper(inner_ctr_fid);
             CHECK(ctr_bin_mapper->missing_type() == cat_bin_mapper->missing_type());
             if(cat_bin_mapper->missing_type() == MissingType::NaN) {
-                Log::Fatal("missing cat");
+                Log::Warning("missing cat");
                 if(cat_value == cat_bin_mapper->num_bin() - 1) {
                     ctr_value = NaN;
                 }
@@ -110,36 +110,6 @@ inline void CTRProvider::PushCTRData(const int cat_fid, const int tid, const int
                 data->PushOneData(tid, static_cast<data_size_t>(real_index), group_id, sub_feature_id, ctr_value);
             }
         } 
-        /*else {
-            const BinMapper* cat_bin_mapper = data->FeatureBinMapper(data->InnerFeatureIndex(cat_fid));
-            CHECK(data->FeatureBinMapper(data->InnerFeatureIndex(cat_fid))->bin_type() == BinType::CategoricalBin);
-            const bool value_seen_in_train = cat_bin_mapper->HasValueInCat(value);
-            const int cat_value = static_cast<int>(data->FeatureBinMapper(data->InnerFeatureIndex(cat_fid))->ValueToBin(value));
-            const int inner_cat_fid = cat_fid_2_inner_cat_fid_.at(cat_fid);
-            double ctr_value = ctr_values_[inner_cat_fid][cat_value];
-            //CHECK(ctr_values_[inner_cat_fid].back() == 1.1f);
-            const int ctr_fid = cat_fid_2_ctr_fid_.at(cat_fid);
-
-            const int inner_ctr_fid = data->used_feature_map_[ctr_fid];
-            const BinMapper* ctr_bin_mapper = data->FeatureBinMapper(inner_ctr_fid);
-            CHECK(ctr_bin_mapper->missing_type() == cat_bin_mapper->missing_type());
-            if(cat_bin_mapper->missing_type() == MissingType::NaN) {
-                Log::Fatal("missing cat");
-                if(cat_value == cat_bin_mapper->num_bin() - 1 && value_seen_in_train) {
-                    ctr_value = NaN;
-                }
-            }
-            //always set unseen to right
-            if(!value_seen_in_train) {
-                ctr_value = 1.1f;
-            }
-
-            if(inner_ctr_fid >= 0) {
-                const int group_id = data->feature2group_[inner_ctr_fid];
-                const int sub_feature_id = data->feature2subfeature_[inner_ctr_fid];
-                data->PushOneData(tid, static_cast<data_size_t>(real_index), group_id, sub_feature_id, ctr_value);
-            }           
-        }*/
     }
 }
 

@@ -194,19 +194,26 @@ BinMapper* CTRProvider::ConstructCTRBinMapper(const std::vector<double>& sample_
         const int index = sample_indices_one_column[i];
         const int real_index = all_sample_indices[index];
         const double value = sample_values_one_column[i];
-        const int fold = fold_ids_[real_index];
-        const uint32_t bin = bin_mapper->ValueToBin(value);
-        ctr_values[i] = out_fold_ctr_values[fold][bin];
+        if(std::isnan(value) || value < 0.0) {
+            CHECK(bin_mapper->missing_type() == MissingType::NaN);
+            ctr_values[i] = NaN;
+        }
+        else {
+            const int fold = fold_ids_[real_index];
+            const uint32_t bin = bin_mapper->ValueToBin(value);
+            ctr_values[i] = out_fold_ctr_values[fold][bin];
+            CHECK(ctr_values[i] > 0.0);
+        }
     }
-
-    //out_ctr_values.back() = 1.1f;
 
     BinMapper* ctr_bin_mapper = new BinMapper(); 
     const data_size_t filter_cnt = static_cast<data_size_t>(
         static_cast<double>(min_data_in_leaf_ * num_sample_data) / num_data_);
     ctr_bin_mapper->FindBin(ctr_values.data(), num_sample_data_one_column, num_sample_data, max_bin_, min_data_in_bin_,
         filter_cnt, BinType::NumericalBin, use_missing_, false, true); 
-    ctr_bin_mapper->set_ctr_info(real_cat_fid, out_ctr_values);
+    ctr_bin_mapper->set_ctr_info(real_cat_fid, out_ctr_values, bin_mapper->GetSeenCategories());
+
+    CHECK(ctr_bin_mapper->missing_type() == bin_mapper->missing_type());
 
     return ctr_bin_mapper; 
 }
@@ -282,9 +289,16 @@ BinMapper* CTRProvider::ConstructCTRBinMapperParallel(const std::vector<double>&
         const int index = sample_indices_one_column[i];
         const int real_index = all_sample_indices[index];
         const double value = sample_values_one_column[i];
-        const int fold = fold_ids_[real_index];
-        const uint32_t bin = bin_mapper->ValueToBin(value);
-        ctr_values[i] = out_fold_ctr_values[fold][bin];
+        if(std::isnan(value) || value < 0.0) {
+            CHECK(bin_mapper->missing_type() == MissingType::NaN);
+            ctr_values[i] = NaN;
+        }
+        else {
+            const int fold = fold_ids_[real_index];
+            const uint32_t bin = bin_mapper->ValueToBin(value);
+            ctr_values[i] = out_fold_ctr_values[fold][bin];
+            CHECK(ctr_values[i] > 0.0);
+        }
     }
 
     BinMapper* ctr_bin_mapper = new BinMapper(); 
@@ -294,7 +308,9 @@ BinMapper* CTRProvider::ConstructCTRBinMapperParallel(const std::vector<double>&
     //TODO: optmize FindBin for parallelism
     ctr_bin_mapper->FindBin(ctr_values.data(), num_sample_data_one_column, num_sample_data, max_bin_, min_data_in_bin_,
         filter_cnt, BinType::NumericalBin, use_missing_, false, true); 
-    ctr_bin_mapper->set_ctr_info(real_cat_fid, ctr_values);
+    ctr_bin_mapper->set_ctr_info(real_cat_fid, ctr_values, bin_mapper->GetSeenCategories());
+
+    CHECK(ctr_bin_mapper->missing_type() == bin_mapper->missing_type());
 
     return ctr_bin_mapper;   
 }

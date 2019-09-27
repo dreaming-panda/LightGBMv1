@@ -18,7 +18,8 @@ namespace LightGBM {
 
 #define kCategoricalMask (1)
 #define kDefaultLeftMask (2)
-#define kCTRMask (3)
+#define kCTRMask (16)
+#define KCTRMissingToLeft (32)
 
 /*!
 * \brief Tree model
@@ -105,11 +106,12 @@ class Tree {
   * \param right_weight Weight of right child
   * \param gain Split gain
   * \param missing_type missing type of the categorical feature
+  * \param missing_to_left whether missing value is split to left or right
   * \return The index of new leaf.
   */
   int SplitCTR(int leaf, int feature, int real_feature, const uint32_t* threshold_bin, int num_threshold_bin,
-               const uint32_t* threshold, int num_threshold, const uint32_t* seen_categories, int num_seen_categories, double left_value, double right_value,
-               int left_cnt, int right_cnt, double left_weight, double right_weight, float gain, MissingType missing_type);
+               const uint32_t* threshold, int num_threshold, double left_value, double right_value,
+               int left_cnt, int right_cnt, double left_weight, double right_weight, float gain, MissingType missing_type, bool missing_to_left);
 
   /*! \brief Get the output of one leaf */
   inline double LeafOutput(int leaf) const { return leaf_value_[leaf]; }
@@ -240,6 +242,10 @@ class Tree {
 
   void RecomputeMaxDepth();
 
+  void SetSeenCatValues(const std::unordered_map<int, std::vector<uint32_t>>* seen_cat_values) {
+    seen_cat_values_ = seen_cat_values;
+  }
+
  private:
   std::string NumericalDecisionIfElse(int node) const;
 
@@ -304,6 +310,37 @@ class Tree {
     return right_child_[node];
   }
 
+  inline int CTRDecision(double fval, int node) const {
+    bool missing_to_left = GetDecisionType(decision_type_[node], KCTRMissingToLeft);
+    int int_fval = static_cast<int>(fval);
+    if (int_fval < 0 || std::isnan(fval)) {
+      if(missing_to_left) {
+        return left_child_[node];
+      }
+      else {
+        return right_child_[node];
+      }
+    } 
+    int cat_idx = static_cast<int>(threshold_[node]);
+    const std::vector<uint32_t>& seen_cat_bitset = seen_cat_values_->at(split_feature_[node]);
+    CHECK(seen_cat_bitset.size() > 0);
+    if(Common::FindInBitset(seen_cat_bitset.data(), static_cast<int>(seen_cat_bitset.size()), int_fval)) {
+      if (Common::FindInBitset(cat_threshold_.data() + cat_boundaries_[cat_idx],
+                             cat_boundaries_[cat_idx + 1] - cat_boundaries_[cat_idx], int_fval)) {
+        return left_child_[node];
+      }
+      return right_child_[node];
+    }
+    else {
+      if(missing_to_left) {
+        return left_child_[node];
+      }
+      else {
+        return right_child_[node];
+      }
+    }
+  }
+
   inline int CategoricalDecisionInner(uint32_t fval, int node) const {
     int cat_idx = static_cast<int>(threshold_in_bin_[node]);
     if (Common::FindInBitset(cat_threshold_inner_.data() + cat_boundaries_inner_[cat_idx],
@@ -314,7 +351,10 @@ class Tree {
   }
 
   inline int Decision(double fval, int node) const {
-    if (GetDecisionType(decision_type_[node], kCategoricalMask)) {
+    if(GetDecisionType(decision_type_[node], kCTRMask)) {
+      return CTRDecision(fval, node);
+    }
+    else if (GetDecisionType(decision_type_[node], kCategoricalMask)) {
       return CategoricalDecision(fval, node);
     } else {
       return NumericalDecision(fval, node);
@@ -322,7 +362,7 @@ class Tree {
   }
 
   inline int DecisionInner(uint32_t fval, int node, uint32_t default_bin, uint32_t max_bin) const {
-    if (GetDecisionType(decision_type_[node], kCategoricalMask)) {
+    if (GetDecisionType(decision_type_[node], kCategoricalMask) || GetDecisionType(decision_type_[node], kCTRMask)) {
       return CategoricalDecisionInner(fval, node);
     } else {
       return NumericalDecisionInner(fval, node, default_bin, max_bin);
@@ -429,6 +469,8 @@ class Tree {
   std::vector<int> leaf_depth_;
   double shrinkage_;
   int max_depth_;
+  /*! \brief seen categories in train data sampling process, maps a real categorical feature (of CTR) index ot its seen categories  */
+  const std::unordered_map<int, std::vector<uint32_t>>* seen_cat_values_;
 };
 
 inline void Tree::Split(int leaf, int feature, int real_feature,

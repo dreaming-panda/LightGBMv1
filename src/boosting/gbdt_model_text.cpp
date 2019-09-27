@@ -278,6 +278,8 @@ std::string GBDT::SaveModelToString(int start_iteration, int num_iteration) cons
 
   ss << "feature_infos=" << Common::Join(feature_infos_, " ") << '\n';
 
+  ss << "seen_cat_values=" << Common::UnorderedIntVectorMapToString(seen_cat_values_) << '\n';
+
   int num_used_model = static_cast<int>(models_.size());
   int total_iteration = num_used_model / num_tree_per_iteration_;
   start_iteration = std::max(start_iteration, 0);
@@ -458,6 +460,12 @@ bool GBDT::LoadModelFromString(const char* buffer, size_t len) {
     loaded_objective_.reset(ObjectiveFunction::CreateObjectiveFunction(str));
     objective_function_ = loaded_objective_.get();
   }
+
+  if(key_vals.count("seen_cat_values")) {
+    auto str = key_vals["seen_cat_values"];
+    seen_cat_values_ = Common::UnorderedIntVectorMapFromString(str);
+  }
+
   if (!key_vals.count("tree_sizes")) {
     while (p < end) {
       auto line_len = Common::GetLine(p);
@@ -468,6 +476,7 @@ bool GBDT::LoadModelFromString(const char* buffer, size_t len) {
           p = Common::SkipNewLine(p);
           size_t used_len = 0;
           models_.emplace_back(new Tree(p, &used_len));
+          models_.back()->SetSeenCatValues(&seen_cat_values_);
           p += used_len;
         } else {
           break;
@@ -495,6 +504,7 @@ bool GBDT::LoadModelFromString(const char* buffer, size_t len) {
         cur_p = Common::SkipNewLine(cur_p);
         size_t used_len = 0;
         models_[i].reset(new Tree(cur_p, &used_len));
+        models_[i]->SetSeenCatValues(&seen_cat_values_);
       } else {
         Log::Fatal("Model format error, expect a tree here. met %s", cur_line.c_str());
       }

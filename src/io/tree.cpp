@@ -99,11 +99,34 @@ int Tree::SplitCategorical(int leaf, int feature, int real_feature, const uint32
 }
 
 int Tree::SplitCTR(int leaf, int feature, int real_feature, const uint32_t* threshold_bin, int num_threshold_bin,
-               const uint32_t* threshold, int num_threshold, const uint32_t* seen_categories, int num_seen_categories, double left_value, double right_value,
-               int left_cnt, int right_cnt, double left_weight, double right_weight, float gain, MissingType missing_type) {
-  int right = SplitCategorical(leaf, feature, real_feature, threshold_bin, num_threshold_bin, threshold, num_threshold, 
-    left_value, right_value, left_cnt, right_cnt, left_weight, right_weight, gain, missing_type);
-  
+               const uint32_t* threshold, int num_threshold, double left_value, double right_value,
+               int left_cnt, int right_cnt, double left_weight, double right_weight, float gain, MissingType missing_type, bool missing_to_left) {
+  Split(leaf, feature, real_feature, left_value, right_value, left_cnt, right_cnt, left_weight, right_weight, gain);
+  int new_node_idx = num_leaves_ - 1;
+  decision_type_[new_node_idx] = 0;
+  //no zero as missing for ctr
+  CHECK(missing_type != MissingType::Zero);
+  if (missing_type == MissingType::None) {
+    SetMissingType(&decision_type_[new_node_idx], 0);
+  }  else if (missing_type == MissingType::NaN) {
+    SetMissingType(&decision_type_[new_node_idx], 2);
+  }
+  //set after setting missing type, since setting missing type clears the higher order bits
+  SetDecisionType(&decision_type_[new_node_idx], true, kCTRMask);
+  SetDecisionType(&decision_type_[new_node_idx], missing_to_left, KCTRMissingToLeft);
+  threshold_in_bin_[new_node_idx] = num_cat_;
+  threshold_[new_node_idx] = num_cat_;
+  ++num_cat_;
+  cat_boundaries_.push_back(cat_boundaries_.back() + num_threshold);
+  for (int i = 0; i < num_threshold; ++i) {
+    cat_threshold_.push_back(threshold[i]);
+  }
+  cat_boundaries_inner_.push_back(cat_boundaries_inner_.back() + num_threshold_bin);
+  for (int i = 0; i < num_threshold_bin; ++i) {
+    cat_threshold_inner_.push_back(threshold_bin[i]);
+  }
+  ++num_leaves_;
+  return num_leaves_ - 1;                
 }
 
 #define PredictionFun(niter, fidx_in_iter, start_pos, decision_fun, iter_idx, data_idx) \

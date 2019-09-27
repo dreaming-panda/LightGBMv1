@@ -195,10 +195,11 @@ class BinMapper {
     }
   }
 
-  inline void set_ctr_info(int real_cat_fid, const std::vector<double>& ctr_values) {
+  inline void set_ctr_info(int real_cat_fid, const std::vector<double>& ctr_values, const std::vector<int>& seen_cat_value) {
     ctr_info_.is_ctr = true;
     ctr_info_.real_cat_fid = real_cat_fid;
     ctr_info_.ctr_values = ctr_values;
+    ctr_info_.seen_cat_values = seen_cat_value;
   }
 
   inline bool is_ctr() const {
@@ -213,9 +214,13 @@ class BinMapper {
     return ctr_info_.ctr_values;
   }
 
+  inline const std::vector<int>& seen_cat_values() const {
+    return ctr_info_.seen_cat_values;
+  }
+
   bool ConstructInnerCatThresholdFromCTRThreshold(uint32_t ctr_threshold, bool default_left, std::vector<uint32_t>& out_threshold_inner) const;
 
-  void GetSeenCategories(std::vector<int>& out_seen_categories) const;
+  std::vector<int> GetSeenCategories() const;
 
  private:
   /*! \brief Number of bins */
@@ -244,6 +249,7 @@ class BinMapper {
     bool is_ctr;
     int real_cat_fid;
     std::vector<double> ctr_values;
+    std::vector<int> seen_cat_values;
 
     CTRInfo() {
       is_ctr = false;

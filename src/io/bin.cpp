@@ -234,6 +234,7 @@ namespace LightGBM {
     bin_type_ = bin_type;
     default_bin_ = 0;
     int zero_cnt = static_cast<int>(total_sample_cnt - num_sample_values - na_cnt);
+
     // find distinct_values first
     std::vector<double> distinct_values;
     std::vector<int> counts;
@@ -408,15 +409,11 @@ namespace LightGBM {
     CHECK(ctr_info_.is_ctr);
     bool missing_to_left = false;
     if(ctr_info_.is_ctr) {
-      uint32_t last_bin = ValueToBin(1.1f);
-      CHECK(last_bin > ctr_threshold);
-      //uint32_t last_ctr_bin = ValueToBin(ctr_info_.ctr_values.back());
-      //CHECK(last_ctr_bin > ctr_threshold);
       for(uint32_t bin = 0; bin < static_cast<uint32_t>(ctr_info_.ctr_values.size()); ++bin) {
         double ctr_value = ctr_info_.ctr_values[bin];
         uint32_t ctr_bin = ValueToBin(ctr_value);
         if(missing_type_ == MissingType::NaN) {
-          Log::Fatal("missing");
+          Log::Warning("missing");
           if(bin == ctr_info_.ctr_values.size() - 1) {
             if(default_left) {
               out_threshold_inner.push_back(bin);
@@ -433,20 +430,27 @@ namespace LightGBM {
           CHECK(missing_type_ == MissingType::None);
           if(ctr_bin <= ctr_threshold) {
             out_threshold_inner.push_back(bin);
-            missing_to_left = true;
           }
         }
       }
+
+      if(missing_type_ == MissingType::None && ValueToBin(ctr_info_.ctr_values.back()) <= ctr_threshold) {
+        missing_to_left = true;
+      } 
     }
     return missing_to_left;
   }
 
-  void BinMapper::GetSeenCategories(std::vector<int>& out_seen_categories) const {
+  std::vector<int> BinMapper::GetSeenCategories() const {
+    std::vector<int> out_seen_categories;
     if(bin_type_ == BinType::CategoricalBin) {
       for(auto pair : categorical_2_bin_) {
-        out_seen_categories.push_back(pair.first);
+        if(pair.first >= 0) {
+          out_seen_categories.push_back(pair.first);
+        }
       }
     }
+    return out_seen_categories;
   }
 
   int BinMapper::SizeForSpecificBin(int bin) {
