@@ -413,7 +413,6 @@ namespace LightGBM {
         double ctr_value = ctr_info_.ctr_values[bin];
         uint32_t ctr_bin = ValueToBin(ctr_value);
         if(missing_type_ == MissingType::NaN) {
-          Log::Warning("missing");
           if(bin == ctr_info_.ctr_values.size() - 1) {
             if(default_left) {
               out_threshold_inner.push_back(bin);

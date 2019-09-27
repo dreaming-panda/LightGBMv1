@@ -98,7 +98,6 @@ inline void CTRProvider::PushCTRData(const int cat_fid, const int tid, const int
             const BinMapper* ctr_bin_mapper = data->FeatureBinMapper(inner_ctr_fid);
             CHECK(ctr_bin_mapper->missing_type() == cat_bin_mapper->missing_type());
             if(cat_bin_mapper->missing_type() == MissingType::NaN) {
-                Log::Warning("missing cat");
                 if(cat_value == cat_bin_mapper->num_bin() - 1) {
                     ctr_value = NaN;
                 }
