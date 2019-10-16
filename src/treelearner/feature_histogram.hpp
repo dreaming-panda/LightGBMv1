@@ -58,10 +58,12 @@ class FeatureHistogram {
     data_ = data;
     if (meta_->bin_type == BinType::NumericalBin) {
       find_best_threshold_fun_ = std::bind(&FeatureHistogram::FindBestThresholdNumerical, this, std::placeholders::_1
-                                           , std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6);
+                                           , std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6, 
+                                           std::placeholders::_7, std::placeholders::_8);
     } else {
       find_best_threshold_fun_ = std::bind(&FeatureHistogram::FindBestThresholdCategorical, this, std::placeholders::_1
-                                           , std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6);
+                                           , std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6, 
+                                           std::placeholders::_7, std::placeholders::_8);
     }
   }
 
@@ -81,29 +83,33 @@ class FeatureHistogram {
   }
 
   void FindBestThreshold(double sum_gradient, double sum_hessian, data_size_t num_data, double min_constraint, double max_constraint,
-                         SplitInfo* output) {
+                         SplitInfo* output, std::vector<double>* threshold_gains = nullptr, std::vector<SplitInfo>* threshold_split_info = nullptr) {
     output->default_left = true;
     output->gain = kMinScore;
-    find_best_threshold_fun_(sum_gradient, sum_hessian + 2 * kEpsilon, num_data, min_constraint, max_constraint, output);
+    find_best_threshold_fun_(sum_gradient, sum_hessian + 2 * kEpsilon, num_data, min_constraint, max_constraint, output, threshold_gains, threshold_split_info);
     output->gain *= meta_->penalty;
   }
 
   void FindBestThresholdNumerical(double sum_gradient, double sum_hessian, data_size_t num_data, double min_constraint, double max_constraint,
-                                  SplitInfo* output) {
+                                  SplitInfo* output, std::vector<double>* threshold_gains, std::vector<SplitInfo>* threshold_split_info) {
     is_splittable_ = false;
     double gain_shift = GetLeafSplitGain(sum_gradient, sum_hessian,
                                          meta_->config->lambda_l1, meta_->config->lambda_l2, meta_->config->max_delta_step);
     double min_gain_shift = gain_shift + meta_->config->min_gain_to_split;
     if (meta_->num_bin > 2 && meta_->missing_type != MissingType::None) {
       if (meta_->missing_type == MissingType::Zero) {
-        FindBestThresholdSequence(sum_gradient, sum_hessian, num_data, min_constraint, max_constraint, min_gain_shift, output, -1, true, false);
-        FindBestThresholdSequence(sum_gradient, sum_hessian, num_data, min_constraint, max_constraint, min_gain_shift, output, 1, true, false);
+        FindBestThresholdSequence(sum_gradient, sum_hessian, num_data, min_constraint, max_constraint, min_gain_shift, output, -1, true, false, threshold_gains, threshold_split_info);
+        if(threshold_gains == nullptr) {
+          FindBestThresholdSequence(sum_gradient, sum_hessian, num_data, min_constraint, max_constraint, min_gain_shift, output, 1, true, false, threshold_gains, threshold_split_info);
+        }
       } else {
-        FindBestThresholdSequence(sum_gradient, sum_hessian, num_data, min_constraint, max_constraint, min_gain_shift, output, -1, false, true);
-        FindBestThresholdSequence(sum_gradient, sum_hessian, num_data, min_constraint, max_constraint, min_gain_shift, output, 1, false, true);
+        FindBestThresholdSequence(sum_gradient, sum_hessian, num_data, min_constraint, max_constraint, min_gain_shift, output, -1, false, true, threshold_gains, threshold_split_info);
+        if(threshold_gains == nullptr) {
+          FindBestThresholdSequence(sum_gradient, sum_hessian, num_data, min_constraint, max_constraint, min_gain_shift, output, 1, false, true, threshold_gains, threshold_split_info);
+        }
       }
     } else {
-      FindBestThresholdSequence(sum_gradient, sum_hessian, num_data, min_constraint, max_constraint, min_gain_shift, output, -1, false, false);
+      FindBestThresholdSequence(sum_gradient, sum_hessian, num_data, min_constraint, max_constraint, min_gain_shift, output, -1, false, false, threshold_gains, threshold_split_info);
       // fix the direction error when only have 2 bins
       if (meta_->missing_type == MissingType::NaN) {
         output->default_left = false;
@@ -117,7 +123,7 @@ class FeatureHistogram {
 
   void FindBestThresholdCategorical(double sum_gradient, double sum_hessian, data_size_t num_data,
                                     double min_constraint, double max_constraint,
-                                    SplitInfo* output) {
+                                    SplitInfo* output, std::vector<double>* threshold_gains, std::vector<SplitInfo>* threshold_split_info) {
     output->default_left = false;
     double best_gain = kMinScore;
     data_size_t best_left_count = 0;
@@ -153,6 +159,20 @@ class FeatureHistogram {
         double current_gain = GetSplitGains(sum_other_gradient, sum_other_hessian, data_[t].sum_gradients, data_[t].sum_hessians + kEpsilon,
                                             meta_->config->lambda_l1, l2, meta_->config->max_delta_step,
                                             min_constraint, max_constraint, 0);
+
+        if(threshold_gains != nullptr) {
+          SplitInfo& split_info = (*threshold_split_info)[t];
+          split_info.gain = current_gain;
+          split_info.left_count = data_[t].cnt;
+          split_info.left_sum_gradient = data_[t].sum_gradients;
+          split_info.left_sum_hessian = data_[t].sum_hessians + kEpsilon;
+          split_info.right_count = num_data - data_[t].cnt;
+          split_info.right_sum_gradient = sum_gradient - data_[t].sum_gradients;
+          split_info.right_sum_hessian = sum_hessian - data_[t].sum_hessians - kEpsilon;
+          split_info.threshold = t;
+          (*threshold_gains)[t] += current_gain;
+        }
+
         // gain with split is worse than without split
         if (current_gain <= min_gain_shift) continue;
 
@@ -187,9 +207,9 @@ class FeatureHistogram {
 
       std::vector<int> find_direction(1, 1);
       std::vector<int> start_position(1, 0);
-      find_direction.push_back(-1);
-      start_position.push_back(used_bin - 1);
-      const int max_num_cat = std::min(meta_->config->max_cat_threshold, (used_bin + 1) / 2);
+      //find_direction.push_back(-1);
+      //start_position.push_back(used_bin - 1);
+      const int max_num_cat = meta_->config->max_cat_threshold; //std::min(meta_->config->max_cat_threshold, (used_bin + 1) / 2);
 
       is_splittable_ = false;
       for (size_t out_i = 0; out_i < find_direction.size(); ++out_i) {
@@ -225,6 +245,38 @@ class FeatureHistogram {
           double current_gain = GetSplitGains(sum_left_gradient, sum_left_hessian, sum_right_gradient, sum_right_hessian,
                                               meta_->config->lambda_l1, l2, meta_->config->max_delta_step,
                                               min_constraint, max_constraint, 0);
+
+          if(threshold_gains != nullptr) {
+            SplitInfo& split_info = (*threshold_split_info)[i];
+            split_info.gain = current_gain;
+            split_info.left_count = left_count;
+            split_info.left_sum_gradient = sum_left_gradient;
+            split_info.left_sum_hessian = sum_left_hessian - kEpsilon;
+            split_info.right_count = num_data - left_count;
+            split_info.right_sum_gradient = sum_gradient - sum_left_gradient;
+            split_info.right_sum_hessian = sum_hessian - sum_left_hessian - kEpsilon;
+            split_info.threshold = i;
+            split_info.num_cat_threshold = split_info.threshold + 1;
+            split_info.cat_threshold = std::vector<uint32_t>(split_info.num_cat_threshold);
+            split_info.default_left = false;
+            split_info.monotone_type = 0;
+            split_info.min_constraint = min_constraint;
+            split_info.max_constraint = max_constraint;
+            if(dir == 1) {
+              for (int i = 0; i < split_info.num_cat_threshold; ++i) {
+                auto t = sorted_idx[i];
+                split_info.cat_threshold[i] = t;
+              }
+            }
+            else {
+              for (int i = 0; i < split_info.num_cat_threshold; ++i) {
+                auto t = sorted_idx[used_bin - 1 - i];
+                split_info.cat_threshold[i] = t;
+              }
+            }
+            (*threshold_gains)[i] += current_gain;
+          }
+          
           if (current_gain <= min_gain_shift) continue;
           is_splittable_ = true;
           if (current_gain > best_gain) {
@@ -506,7 +558,8 @@ class FeatureHistogram {
   }
 
   void FindBestThresholdSequence(double sum_gradient, double sum_hessian, data_size_t num_data, double min_constraint, double max_constraint,
-                                 double min_gain_shift, SplitInfo* output, int dir, bool skip_default_bin, bool use_na_as_missing) {
+                                 double min_gain_shift, SplitInfo* output, int dir, bool skip_default_bin, bool use_na_as_missing, 
+                                 std::vector<double>* threshold_gains, std::vector<SplitInfo>* threshold_split_info) {
     const int8_t bias = meta_->bias;
 
     double best_sum_left_gradient = NAN;
@@ -547,6 +600,21 @@ class FeatureHistogram {
         double current_gain = GetSplitGains(sum_left_gradient, sum_left_hessian, sum_right_gradient, sum_right_hessian,
                                             meta_->config->lambda_l1, meta_->config->lambda_l2, meta_->config->max_delta_step,
                                             min_constraint, max_constraint, meta_->monotone_type);
+
+        if(threshold_gains != nullptr) {
+          SplitInfo& split_info = (*threshold_split_info)[t - 1 + bias];
+          split_info.gain = current_gain;
+          split_info.left_count = left_count;
+          split_info.left_sum_gradient = sum_left_gradient;
+          split_info.left_sum_hessian = sum_left_hessian - kEpsilon;
+          split_info.right_count = num_data - left_count;
+          split_info.right_sum_gradient = sum_gradient - sum_left_gradient;
+          split_info.right_sum_hessian = sum_hessian - sum_left_hessian - kEpsilon;
+          split_info.threshold = static_cast<uint32_t>(t - 1 + bias);
+          split_info.default_left = dir == -1;
+          (*threshold_gains)[split_info.threshold] += current_gain;
+        }
+
         // gain with split is worse than without split
         if (current_gain <= min_gain_shift) continue;
 
@@ -606,6 +674,20 @@ class FeatureHistogram {
         double current_gain = GetSplitGains(sum_left_gradient, sum_left_hessian, sum_right_gradient, sum_right_hessian,
                                             meta_->config->lambda_l1, meta_->config->lambda_l2, meta_->config->max_delta_step,
                                             min_constraint, max_constraint, meta_->monotone_type);
+        if(threshold_gains != nullptr) {
+          SplitInfo& split_info = (*threshold_split_info)[t + bias];
+          split_info.gain = current_gain;
+          split_info.left_count = left_count;
+          split_info.left_sum_gradient = sum_left_gradient;
+          split_info.left_sum_hessian = sum_left_hessian - kEpsilon;
+          split_info.right_count = num_data - left_count;
+          split_info.right_sum_gradient = sum_gradient - sum_left_gradient;
+          split_info.right_sum_hessian = sum_hessian - sum_left_hessian - kEpsilon;
+          split_info.threshold = static_cast<uint32_t>(t + bias);
+          split_info.default_left = dir == -1;
+          (*threshold_gains)[split_info.threshold] += current_gain;
+        }
+
         // gain with split is worse than without split
         if (current_gain <= min_gain_shift) continue;
 
@@ -649,7 +731,7 @@ class FeatureHistogram {
   // std::vector<HistogramBinEntry> data_;
   bool is_splittable_ = true;
 
-  std::function<void(double, double, data_size_t, double, double, SplitInfo*)> find_best_threshold_fun_;
+  std::function<void(double, double, data_size_t, double, double, SplitInfo*, std::vector<double>*, std::vector<SplitInfo>*)> find_best_threshold_fun_;
 };
 class HistogramPool {
  public:

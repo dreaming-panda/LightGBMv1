@@ -174,7 +174,6 @@ struct Config {
   // options = serial, feature, data, voting
   // alias = tree, tree_type, tree_learner_type
   // desc = ``serial``, single machine tree learner
-  // desc = ``symmetric``, symmetric tree learner
   // desc = ``feature``, feature parallel tree learner, aliases: ``feature_parallel``
   // desc = ``data``, data parallel tree learner, aliases: ``data_parallel``
   // desc = ``voting``, voting parallel tree learner, aliases: ``voting_parallel``

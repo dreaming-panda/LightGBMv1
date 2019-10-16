@@ -17,6 +17,7 @@
 #include <memory>
 #include <random>
 #include <vector>
+#include <queue>
 
 #include "data_partition.hpp"
 #include "feature_histogram.hpp"
@@ -200,7 +201,7 @@ class SymmetricTreeLearner : public SerialTreeLearner {
     Tree* Train(const score_t* gradients, const score_t *hessians, bool is_constant_hessian,
               Json& forced_split_json) override;
 
-  private:
+  protected:
   /*!
   * \brief Get the number of data in a leaf
   * \param leaf_idx The index of leaf
@@ -208,7 +209,7 @@ class SymmetricTreeLearner : public SerialTreeLearner {
   */
   inline virtual data_size_t GetGlobalDataCountInLeaf(int leaf_idx) const;
 
-  void FindBestSplitForFeature(int left_leaf, int right_leaf, int left_inner_feature_index, int right_inner_feature_index);
+  virtual void FindBestSplitForFeature(int left_leaf, int right_leaf, int left_inner_feature_index, int right_inner_feature_index);
 };
 
 inline data_size_t SymmetricTreeLearner::GetGlobalDataCountInLeaf(int leaf_idx) const {
@@ -218,6 +219,30 @@ inline data_size_t SymmetricTreeLearner::GetGlobalDataCountInLeaf(int leaf_idx) 
     return 0;
   }
 }
+
+class SymmetricTreeShareThresholdLearner : public SymmetricTreeLearner {
+  public:
+    SymmetricTreeShareThresholdLearner(const Config* config): SymmetricTreeLearner(config) {}
+
+    Tree* Train(const score_t* gradients, const score_t *hessians, bool is_constant_hessian,
+              Json& forced_split_json) override;
+  
+  private:
+    std::vector<double> feature_threshold_gain_;
+    std::vector<std::vector<SplitInfo>> feature_threshold_split_info_;
+
+    std::vector<double> next_feature_threshold_gain_;
+    std::vector<std::vector<SplitInfo>> next_feature_threshold_split_info_;
+
+    double sum_gradients_ = 0.0;
+    double sum_hessians_ = 0.0;
+
+    int cur_leaf_id_in_level_ = 0;
+
+    void SetShareThreshold(const std::queue<int>& level_leaf_queue, int feature);
+
+    void FindBestSplitForFeature(int left_leaf, int right_leaf, int left_inner_feature_index, int right_inner_feature_index) override;
+};
 
 }  // namespace LightGBM
 #endif   // LightGBM_TREELEARNER_SERIAL_TREE_LEARNER_H_
