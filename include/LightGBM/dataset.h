@@ -25,6 +25,7 @@ namespace LightGBM {
 
 /*! \brief forward declaration */
 class DatasetLoader;
+class CTRProvider;
 /*!
 * \brief This class is used to store some meta(non-feature) data for training data,
 *        e.g. labels, weights, initial scores, qurey level informations.
@@ -283,6 +284,7 @@ class Parser {
 class Dataset {
  public:
   friend DatasetLoader;
+  friend CTRProvider;
 
   LIGHTGBM_EXPORT Dataset();
 
@@ -584,6 +586,20 @@ class Dataset {
     return bufs;
   }
 
+  inline std::unordered_map<int, std::vector<uint32_t>> GetSeenCatValues() const {
+    std::unordered_map<int, std::vector<uint32_t>> seen_cat_values;
+    for(int inner_feature_index = 0; inner_feature_index < num_features_; ++inner_feature_index) {
+      const BinMapper* bin_mapper = FeatureBinMapper(inner_feature_index);
+      if(bin_mapper->is_ctr()) {
+        int real_cat_fid = bin_mapper->real_cat_fid();
+        const std::vector<int>& values = bin_mapper->seen_cat_values();
+        //convert to bitset
+        seen_cat_values[real_cat_fid] = Common::ConstructBitset(values.data(), static_cast<int>(values.size()));
+      }
+    }
+    return seen_cat_values;
+  }
+
   void ResetConfig(const char* parameters);
 
   /*! \brief Get Number of data */
@@ -634,6 +650,8 @@ class Dataset {
   int min_data_in_bin_;
   bool use_missing_;
   bool zero_as_missing_;
+  /*! \brief CTR provider, responsible for CTR calculation, and CTR bin mapping */
+  CTRProvider* ctr_provider_;
 };
 
 }  // namespace LightGBM

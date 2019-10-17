@@ -184,6 +184,8 @@ class SerialTreeLearner: public TreeLearner {
 
   std::vector<bool> is_feature_used_in_split_;
   std::vector<uint32_t> feature_used_in_data;
+
+  std::chrono::duration<double> hist_time_;
 };
 
 inline data_size_t SerialTreeLearner::GetGlobalDataCountInLeaf(int leaf_idx) const {
@@ -227,21 +229,69 @@ class SymmetricTreeShareThresholdLearner : public SymmetricTreeLearner {
     Tree* Train(const score_t* gradients, const score_t *hessians, bool is_constant_hessian,
               Json& forced_split_json) override;
   
-  private:
-    std::vector<double> feature_threshold_gain_;
-    std::vector<std::vector<SplitInfo>> feature_threshold_split_info_;
+  protected:
+    std::vector<std::vector<double>> feature_threshold_gain_;
+    std::vector<std::vector<std::vector<SplitInfo>>> feature_threshold_split_info_;
 
-    std::vector<double> next_feature_threshold_gain_;
-    std::vector<std::vector<SplitInfo>> next_feature_threshold_split_info_;
+    std::vector<std::vector<double>> next_feature_threshold_gain_;
+    std::vector<std::vector<std::vector<SplitInfo>>> next_feature_threshold_split_info_;
 
     double sum_gradients_ = 0.0;
     double sum_hessians_ = 0.0;
 
     int cur_leaf_id_in_level_ = 0;
 
-    void SetShareThreshold(const std::queue<int>& level_leaf_queue, int feature);
+    virtual void SetShareThreshold(const std::queue<int>& level_leaf_queue, int feature);
 
     void FindBestSplitForFeature(int left_leaf, int right_leaf, int left_inner_feature_index, int right_inner_feature_index) override;
+};
+
+class SymmetricTreeShareThresholdMultiFeatureLearner : public SymmetricTreeShareThresholdLearner {
+  public:
+    SymmetricTreeShareThresholdMultiFeatureLearner(const Config* config): SymmetricTreeShareThresholdLearner(config) {}
+
+    Tree* Train(const score_t* gradients, const score_t *hessians, bool is_constant_hessian,
+              Json& forced_split_json) override;
+  
+  private:
+    std::vector<std::vector<std::vector<double>>> feature_threshold_gain_;
+    std::vector<std::vector<std::vector<std::vector<SplitInfo>>>> feature_threshold_split_info_;
+
+    std::vector<std::vector<std::vector<double>>> next_feature_threshold_gain_;
+    std::vector<std::vector<std::vector<std::vector<SplitInfo>>>> next_feature_threshold_split_info_;
+    
+    std::vector<int> all_used_features_;
+    std::vector<int> used_features_;
+    std::vector<int8_t> is_feature_used_;
+
+    void SetShareThreshold(const std::queue<int>& level_leaf_queue, int feature) override;
+
+    void FindBestSplitForFeature(int left_leaf, int right_leaf, int left_inner_feature_index, int right_inner_feature_index) override;
+
+    void InitializeThresholdStats(const size_t level_size);
+};
+
+class SymmetricTreeShareThresholdRefreshLearner : public SymmetricTreeShareThresholdLearner {
+  public:
+    SymmetricTreeShareThresholdRefreshLearner(const Config* config): SymmetricTreeShareThresholdLearner(config) {}
+
+    Tree* Train(const score_t* gradients, const score_t *hessians, bool is_constant_hessian,
+              Json& forced_split_json) override;
+  
+  private:
+    std::vector<std::vector<std::vector<double>>> feature_threshold_gain_;
+    std::vector<std::vector<std::vector<std::vector<SplitInfo>>>> feature_threshold_split_info_;
+
+    std::vector<std::vector<std::vector<double>>> next_feature_threshold_gain_;
+    std::vector<std::vector<std::vector<std::vector<SplitInfo>>>> next_feature_threshold_split_info_;
+
+    std::vector<int> used_features_;
+
+    void SetShareThreshold(const std::queue<int>& level_leaf_queue, int feature) override;
+
+    void FindBestSplitForFeature(int left_leaf, int right_leaf, int left_inner_feature_index, int right_inner_feature_index) override;
+
+    void InitializeThresholdStats(const size_t level_size);
 };
 
 }  // namespace LightGBM

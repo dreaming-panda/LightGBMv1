@@ -23,6 +23,7 @@ Dataset::Dataset() {
   data_filename_ = "noname";
   num_data_ = 0;
   is_finish_load_ = false;
+  ctr_provider_ = nullptr;
 }
 
 Dataset::Dataset(data_size_t num_data) {
@@ -32,6 +33,7 @@ Dataset::Dataset(data_size_t num_data) {
   metadata_.Init(num_data_, NO_SPECIFIC, NO_SPECIFIC);
   is_finish_load_ = false;
   group_bin_boundaries_.push_back(0);
+  ctr_provider_ = nullptr;
 }
 
 Dataset::~Dataset() {
@@ -484,6 +486,7 @@ void Dataset::CreateValid(const Dataset* dataset) {
   }
   monotone_types_ = dataset->monotone_types_;
   feature_penalty_ = dataset->feature_penalty_;
+  ctr_provider_ = dataset->ctr_provider_;
 }
 
 void Dataset::ReSize(data_size_t num_data) {

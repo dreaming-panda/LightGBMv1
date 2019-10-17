@@ -83,7 +83,7 @@ class FeatureHistogram {
   }
 
   void FindBestThreshold(double sum_gradient, double sum_hessian, data_size_t num_data, double min_constraint, double max_constraint,
-                         SplitInfo* output, std::vector<double>* threshold_gains = nullptr, std::vector<SplitInfo>* threshold_split_info = nullptr) {
+                         SplitInfo* output, std::vector<std::vector<double>>* threshold_gains = nullptr, std::vector<std::vector<SplitInfo>>* threshold_split_info = nullptr) {
     output->default_left = true;
     output->gain = kMinScore;
     find_best_threshold_fun_(sum_gradient, sum_hessian + 2 * kEpsilon, num_data, min_constraint, max_constraint, output, threshold_gains, threshold_split_info);
@@ -91,7 +91,7 @@ class FeatureHistogram {
   }
 
   void FindBestThresholdNumerical(double sum_gradient, double sum_hessian, data_size_t num_data, double min_constraint, double max_constraint,
-                                  SplitInfo* output, std::vector<double>* threshold_gains, std::vector<SplitInfo>* threshold_split_info) {
+                                  SplitInfo* output, std::vector<std::vector<double>>* threshold_gains, std::vector<std::vector<SplitInfo>>* threshold_split_info) {
     is_splittable_ = false;
     double gain_shift = GetLeafSplitGain(sum_gradient, sum_hessian,
                                          meta_->config->lambda_l1, meta_->config->lambda_l2, meta_->config->max_delta_step);
@@ -99,14 +99,10 @@ class FeatureHistogram {
     if (meta_->num_bin > 2 && meta_->missing_type != MissingType::None) {
       if (meta_->missing_type == MissingType::Zero) {
         FindBestThresholdSequence(sum_gradient, sum_hessian, num_data, min_constraint, max_constraint, min_gain_shift, output, -1, true, false, threshold_gains, threshold_split_info);
-        if(threshold_gains == nullptr) {
-          FindBestThresholdSequence(sum_gradient, sum_hessian, num_data, min_constraint, max_constraint, min_gain_shift, output, 1, true, false, threshold_gains, threshold_split_info);
-        }
+        FindBestThresholdSequence(sum_gradient, sum_hessian, num_data, min_constraint, max_constraint, min_gain_shift, output, 1, true, false, threshold_gains, threshold_split_info);
       } else {
         FindBestThresholdSequence(sum_gradient, sum_hessian, num_data, min_constraint, max_constraint, min_gain_shift, output, -1, false, true, threshold_gains, threshold_split_info);
-        if(threshold_gains == nullptr) {
-          FindBestThresholdSequence(sum_gradient, sum_hessian, num_data, min_constraint, max_constraint, min_gain_shift, output, 1, false, true, threshold_gains, threshold_split_info);
-        }
+        FindBestThresholdSequence(sum_gradient, sum_hessian, num_data, min_constraint, max_constraint, min_gain_shift, output, 1, false, true, threshold_gains, threshold_split_info);
       }
     } else {
       FindBestThresholdSequence(sum_gradient, sum_hessian, num_data, min_constraint, max_constraint, min_gain_shift, output, -1, false, false, threshold_gains, threshold_split_info);
@@ -123,7 +119,8 @@ class FeatureHistogram {
 
   void FindBestThresholdCategorical(double sum_gradient, double sum_hessian, data_size_t num_data,
                                     double min_constraint, double max_constraint,
-                                    SplitInfo* output, std::vector<double>* threshold_gains, std::vector<SplitInfo>* threshold_split_info) {
+                                    SplitInfo* output, std::vector<std::vector<double>>* threshold_gains, std::vector<std::vector<SplitInfo>>* threshold_split_info) {
+    return;
     output->default_left = false;
     double best_gain = kMinScore;
     data_size_t best_left_count = 0;
@@ -161,7 +158,7 @@ class FeatureHistogram {
                                             min_constraint, max_constraint, 0);
 
         if(threshold_gains != nullptr) {
-          SplitInfo& split_info = (*threshold_split_info)[t];
+          SplitInfo& split_info = (*threshold_split_info)[t][0];
           split_info.gain = current_gain;
           split_info.left_count = data_[t].cnt;
           split_info.left_sum_gradient = data_[t].sum_gradients;
@@ -170,7 +167,7 @@ class FeatureHistogram {
           split_info.right_sum_gradient = sum_gradient - data_[t].sum_gradients;
           split_info.right_sum_hessian = sum_hessian - data_[t].sum_hessians - kEpsilon;
           split_info.threshold = t;
-          (*threshold_gains)[t] += current_gain;
+          (*threshold_gains)[t][0] += current_gain;
         }
 
         // gain with split is worse than without split
@@ -188,6 +185,7 @@ class FeatureHistogram {
         }
       }
     } else {
+      return;
       for (int i = 0; i < used_bin; ++i) {
         if (data_[i].cnt >= meta_->config->cat_smooth) {
           sorted_idx.push_back(i);
@@ -197,19 +195,23 @@ class FeatureHistogram {
 
       l2 += meta_->config->cat_l2;
 
-      auto ctr_fun = [this](double sum_grad, double sum_hess) {
-        return (sum_grad) / (sum_hess + meta_->config->cat_smooth);
-      };
-      std::sort(sorted_idx.begin(), sorted_idx.end(),
-                [this, &ctr_fun](int i, int j) {
-        return ctr_fun(data_[i].sum_gradients, data_[i].sum_hessians) < ctr_fun(data_[j].sum_gradients, data_[j].sum_hessians);
-      });
+      if(!meta_->config->use_ctr) {
+        auto ctr_fun = [this](double sum_grad, double sum_hess) {
+          return (sum_grad) / (sum_hess + meta_->config->cat_smooth);
+        };
+        std::sort(sorted_idx.begin(), sorted_idx.end(),
+                  [this, &ctr_fun](int i, int j) {
+          return ctr_fun(data_[i].sum_gradients, data_[i].sum_hessians) < ctr_fun(data_[j].sum_gradients, data_[j].sum_hessians);
+        });
+      }
 
       std::vector<int> find_direction(1, 1);
       std::vector<int> start_position(1, 0);
-      //find_direction.push_back(-1);
-      //start_position.push_back(used_bin - 1);
-      const int max_num_cat = meta_->config->max_cat_threshold; //std::min(meta_->config->max_cat_threshold, (used_bin + 1) / 2);
+      if(!meta_->config->use_ctr) {
+        find_direction.push_back(-1);
+        start_position.push_back(used_bin - 1);
+      }
+      const int max_num_cat = std::min(meta_->config->max_cat_threshold, (used_bin + 1) / 2);
 
       is_splittable_ = false;
       for (size_t out_i = 0; out_i < find_direction.size(); ++out_i) {
@@ -247,7 +249,7 @@ class FeatureHistogram {
                                               min_constraint, max_constraint, 0);
 
           if(threshold_gains != nullptr) {
-            SplitInfo& split_info = (*threshold_split_info)[i];
+            SplitInfo& split_info = (*threshold_split_info)[i][0];
             split_info.gain = current_gain;
             split_info.left_count = left_count;
             split_info.left_sum_gradient = sum_left_gradient;
@@ -274,7 +276,7 @@ class FeatureHistogram {
                 split_info.cat_threshold[i] = t;
               }
             }
-            (*threshold_gains)[i] += current_gain;
+            (*threshold_gains)[i][0] += current_gain;
           }
           
           if (current_gain <= min_gain_shift) continue;
@@ -559,7 +561,7 @@ class FeatureHistogram {
 
   void FindBestThresholdSequence(double sum_gradient, double sum_hessian, data_size_t num_data, double min_constraint, double max_constraint,
                                  double min_gain_shift, SplitInfo* output, int dir, bool skip_default_bin, bool use_na_as_missing, 
-                                 std::vector<double>* threshold_gains, std::vector<SplitInfo>* threshold_split_info) {
+                                 std::vector<std::vector<double>>* threshold_gains, std::vector<std::vector<SplitInfo>>* threshold_split_info) {
     const int8_t bias = meta_->bias;
 
     double best_sum_left_gradient = NAN;
@@ -579,21 +581,22 @@ class FeatureHistogram {
       // from right to left, and we don't need data in bin0
       for (; t >= t_end; --t) {
         // need to skip default bin
-        if (skip_default_bin && (t + bias) == static_cast<int>(meta_->default_bin)) { continue; }
+        if (skip_default_bin && (t + bias) == static_cast<int>(meta_->default_bin) && meta_->config->tree_learner != "symmetric_share"
+           && meta_->config->tree_learner != "symmetric_share_multi") { continue; }
 
         sum_right_gradient += data_[t].sum_gradients;
         sum_right_hessian += data_[t].sum_hessians;
         right_count += data_[t].cnt;
         // if data not enough, or sum hessian too small
-        if (right_count < meta_->config->min_data_in_leaf
-            || sum_right_hessian < meta_->config->min_sum_hessian_in_leaf) continue;
+        if ((right_count < meta_->config->min_data_in_leaf
+            || sum_right_hessian < meta_->config->min_sum_hessian_in_leaf) && meta_->config->tree_learner != "symmetric_share" && meta_->config->tree_learner != "symmetric_share_multi") continue;
         data_size_t left_count = num_data - right_count;
         // if data not enough
-        if (left_count < meta_->config->min_data_in_leaf) break;
+        if (left_count < meta_->config->min_data_in_leaf && meta_->config->tree_learner != "symmetric_share" && meta_->config->tree_learner != "symmetric_share_multi") break;
 
         double sum_left_hessian = sum_hessian - sum_right_hessian;
         // if sum hessian too small
-        if (sum_left_hessian < meta_->config->min_sum_hessian_in_leaf) break;
+        if (sum_left_hessian < meta_->config->min_sum_hessian_in_leaf && meta_->config->tree_learner != "symmetric_share" && meta_->config->tree_learner != "symmetric_share_multi") break;
 
         double sum_left_gradient = sum_gradient - sum_right_gradient;
         // current split gain
@@ -602,7 +605,7 @@ class FeatureHistogram {
                                             min_constraint, max_constraint, meta_->monotone_type);
 
         if(threshold_gains != nullptr) {
-          SplitInfo& split_info = (*threshold_split_info)[t - 1 + bias];
+          SplitInfo& split_info = (*threshold_split_info)[t - 1 + bias][0];
           split_info.gain = current_gain;
           split_info.left_count = left_count;
           split_info.left_sum_gradient = sum_left_gradient;
@@ -612,7 +615,7 @@ class FeatureHistogram {
           split_info.right_sum_hessian = sum_hessian - sum_left_hessian - kEpsilon;
           split_info.threshold = static_cast<uint32_t>(t - 1 + bias);
           split_info.default_left = dir == -1;
-          (*threshold_gains)[split_info.threshold] += current_gain;
+          (*threshold_gains)[split_info.threshold][0] += current_gain;
         }
 
         // gain with split is worse than without split
@@ -652,22 +655,22 @@ class FeatureHistogram {
 
       for (; t <= t_end; ++t) {
         // need to skip default bin
-        if (skip_default_bin && (t + bias) == static_cast<int>(meta_->default_bin)) { continue; }
+        if (skip_default_bin && (t + bias) == static_cast<int>(meta_->default_bin) && meta_->config->tree_learner != "symmetric_share" && meta_->config->tree_learner != "symmetric_share_multi") { continue; }
         if (t >= 0) {
           sum_left_gradient += data_[t].sum_gradients;
           sum_left_hessian += data_[t].sum_hessians;
           left_count += data_[t].cnt;
         }
         // if data not enough, or sum hessian too small
-        if (left_count < meta_->config->min_data_in_leaf
-            || sum_left_hessian < meta_->config->min_sum_hessian_in_leaf) continue;
+        if ((left_count < meta_->config->min_data_in_leaf
+            || sum_left_hessian < meta_->config->min_sum_hessian_in_leaf) && meta_->config->tree_learner != "symmetric_share" && meta_->config->tree_learner != "symmetric_share_multi") continue;
         data_size_t right_count = num_data - left_count;
         // if data not enough
-        if (right_count < meta_->config->min_data_in_leaf) break;
+        if (right_count < meta_->config->min_data_in_leaf && meta_->config->tree_learner != "symmetric_share" && meta_->config->tree_learner != "symmetric_share_multi") break;
 
         double sum_right_hessian = sum_hessian - sum_left_hessian;
         // if sum hessian too small
-        if (sum_right_hessian < meta_->config->min_sum_hessian_in_leaf) break;
+        if (sum_right_hessian < meta_->config->min_sum_hessian_in_leaf && meta_->config->tree_learner != "symmetric_share" && meta_->config->tree_learner != "symmetric_share_multi") break;
 
         double sum_right_gradient = sum_gradient - sum_left_gradient;
         // current split gain
@@ -675,7 +678,7 @@ class FeatureHistogram {
                                             meta_->config->lambda_l1, meta_->config->lambda_l2, meta_->config->max_delta_step,
                                             min_constraint, max_constraint, meta_->monotone_type);
         if(threshold_gains != nullptr) {
-          SplitInfo& split_info = (*threshold_split_info)[t + bias];
+          SplitInfo& split_info = (*threshold_split_info)[t + bias][1];
           split_info.gain = current_gain;
           split_info.left_count = left_count;
           split_info.left_sum_gradient = sum_left_gradient;
@@ -685,7 +688,7 @@ class FeatureHistogram {
           split_info.right_sum_hessian = sum_hessian - sum_left_hessian - kEpsilon;
           split_info.threshold = static_cast<uint32_t>(t + bias);
           split_info.default_left = dir == -1;
-          (*threshold_gains)[split_info.threshold] += current_gain;
+          (*threshold_gains)[split_info.threshold][1] += current_gain;
         }
 
         // gain with split is worse than without split
@@ -731,7 +734,7 @@ class FeatureHistogram {
   // std::vector<HistogramBinEntry> data_;
   bool is_splittable_ = true;
 
-  std::function<void(double, double, data_size_t, double, double, SplitInfo*, std::vector<double>*, std::vector<SplitInfo>*)> find_best_threshold_fun_;
+  std::function<void(double, double, data_size_t, double, double, SplitInfo*, std::vector<std::vector<double>>*, std::vector<std::vector<SplitInfo>>*)> find_best_threshold_fun_;
 };
 class HistogramPool {
  public:

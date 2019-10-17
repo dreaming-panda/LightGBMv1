@@ -198,6 +198,8 @@ void GetTreeLearnerType(const std::unordered_map<std::string, std::string>& para
       *tree_learner = "symmetric";
     } else if(value == std::string("symmetric_share")) {
       *tree_learner = "symmetric_share";
+    } else if(value == std::string("symmetric_share_multi")) {
+      *tree_learner = "symmetric_share_multi";
     } else if (value == std::string("feature") || value == std::string("feature_parallel")) {
       *tree_learner = "feature";
     } else if (value == std::string("data") || value == std::string("data_parallel")) {
@@ -285,12 +287,13 @@ void Config::CheckParamConflict() {
     is_parallel = true;
   } else {
     is_parallel = false;
-    if(tree_learner != "symmetric" && tree_learner != "symmetric_share") {
+    if(tree_learner != "symmetric" && tree_learner != "symmetric_share" && tree_learner != "symmetric_share_multi") {
       tree_learner = "serial";
     }
   }
 
-  bool is_single_tree_learner = tree_learner == std::string("serial") || tree_learner == std::string("symmetric") || tree_learner == std::string("symmetric_share");
+  bool is_single_tree_learner = tree_learner == std::string("serial") || tree_learner == std::string("symmetric") || tree_learner == std::string("symmetric_share") || 
+    tree_learner == std::string("symmetric_share_multi");
 
   if (is_single_tree_learner) {
     is_parallel = false;

@@ -22,6 +22,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include <unordered_map>
 
 #ifdef _MSC_VER
 #include "intrin.h"
@@ -484,6 +485,35 @@ inline static std::string ArrayToString(const std::vector<double>& arr, size_t n
     str_buf << ' ' << buffer.data();
   }
   return str_buf.str();
+}
+
+inline static std::string UnorderedIntVectorMapToString(const std::unordered_map<int, std::vector<uint32_t>>& map) {
+  std::stringstream str_buf;
+  for(const auto& pair : map) {
+    str_buf << pair.first << ":";
+    const std::vector<uint32_t>& values = pair.second;
+    for(int i = 0; i < static_cast<int>(values.size()) - 1; ++i) {
+      str_buf << values[i] << ",";
+    }
+    if(!values.empty()) {
+      str_buf << values.back() << " ";
+    }
+  }
+  return str_buf.str();
+}
+
+inline static std::unordered_map<int, std::vector<uint32_t>> UnorderedIntVectorMapFromString(std::string str) {
+  std::stringstream sin(str);
+  std::unordered_map<int, std::vector<uint32_t>> map;
+  int id = 0;
+  while(sin >> id) {
+    while(sin.get() != ' ') {
+      uint32_t val = 0;
+      sin >> val;
+      map[id].push_back(val);
+    }
+  }
+  return map;
 }
 
 template<typename T, bool is_float>

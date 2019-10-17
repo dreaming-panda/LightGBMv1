@@ -177,6 +177,7 @@ std::unordered_set<std::string> Config::parameter_set({
   "learning_rate",
   "num_leaves",
   "tree_learner",
+  "symmetric_cycle",
   "num_threads",
   "device_type",
   "seed",
@@ -210,6 +211,8 @@ std::unordered_set<std::string> Config::parameter_set({
   "cat_l2",
   "cat_smooth",
   "max_cat_to_onehot",
+  "use_ctr",
+  "num_folds_for_ctr",
   "top_k",
   "monotone_constraints",
   "feature_contri",
@@ -390,6 +393,14 @@ void Config::GetMembersFromString(const std::unordered_map<std::string, std::str
 
   GetInt(params, "max_cat_to_onehot", &max_cat_to_onehot);
   CHECK(max_cat_to_onehot >0);
+
+  GetInt(params, "num_folds_for_ctr", &num_folds_for_ctr);
+  CHECK(num_folds_for_ctr >= 2); 
+
+  GetBool(params, "use_ctr", &use_ctr);
+
+  GetInt(params, "symmetric_cycle", &symmetric_cycle);
+  CHECK(symmetric_cycle >= 1);
 
   GetInt(params, "top_k", &top_k);
   CHECK(top_k >0);

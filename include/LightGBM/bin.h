@@ -129,6 +129,13 @@ class BinMapper {
   inline uint32_t ValueToBin(double value) const;
 
   /*!
+  * \brief Whether has value in categorical to bin
+  * \param value
+  * \return whether has value in categorical to bin
+  */
+  inline bool HasValueInCat(double value) const;
+
+  /*!
   * \brief Get the default bin when value is 0
   * \return default bin
   */
@@ -148,7 +155,7 @@ class BinMapper {
   * \param zero_as_missing True to use zero as missing value
   */
   void FindBin(double* values, int num_values, size_t total_sample_cnt, int max_bin, int min_data_in_bin, int min_split_data, BinType bin_type,
-               bool use_missing, bool zero_as_missing);
+               bool use_missing, bool zero_as_missing, bool use_ctr);
 
   /*!
   * \brief Use specific number of bin to calculate the size of this class
@@ -188,6 +195,33 @@ class BinMapper {
     }
   }
 
+  inline void set_ctr_info(int real_cat_fid, const std::vector<double>& ctr_values, const std::vector<int>& seen_cat_value) {
+    ctr_info_.is_ctr = true;
+    ctr_info_.real_cat_fid = real_cat_fid;
+    ctr_info_.ctr_values = ctr_values;
+    ctr_info_.seen_cat_values = seen_cat_value;
+  }
+
+  inline bool is_ctr() const {
+    return ctr_info_.is_ctr;
+  }
+
+  inline int real_cat_fid() const {
+    return ctr_info_.real_cat_fid;
+  }
+
+  inline const std::vector<double>& ctr_values() const {
+    return ctr_info_.ctr_values;
+  }
+
+  inline const std::vector<int>& seen_cat_values() const {
+    return ctr_info_.seen_cat_values;
+  }
+
+  bool ConstructInnerCatThresholdFromCTRThreshold(uint32_t ctr_threshold, bool default_left, std::vector<uint32_t>& out_threshold_inner) const;
+
+  std::vector<int> GetSeenCategories() const;
+
  private:
   /*! \brief Number of bins */
   int num_bin_;
@@ -210,6 +244,20 @@ class BinMapper {
   double max_val_;
   /*! \brief bin value of feature value 0 */
   uint32_t default_bin_;
+
+  struct CTRInfo {
+    bool is_ctr;
+    int real_cat_fid;
+    std::vector<double> ctr_values;
+    std::vector<int> seen_cat_values;
+
+    CTRInfo() {
+      is_ctr = false;
+      real_cat_fid = -1;
+    }
+  };
+
+  CTRInfo ctr_info_;
 };
 
 /*!
@@ -457,6 +505,11 @@ class Bin {
   */
   virtual Bin* Clone() = 0;
 };
+
+inline bool BinMapper::HasValueInCat(double value) const {
+  int value_int = static_cast<int>(value);
+  return categorical_2_bin_.count(value_int) > 0;
+}
 
 inline uint32_t BinMapper::ValueToBin(double value) const {
   if (std::isnan(value)) {

@@ -174,11 +174,17 @@ struct Config {
   // options = serial, feature, data, voting
   // alias = tree, tree_type, tree_learner_type
   // desc = ``serial``, single machine tree learner
+  // desc = ``symmetric``, symmetric tree with fined threshold
+  // desc = ``symmetric_share``, symmetric tree
+  // desc = ``symmetric_share_multi``, symmetric tree with multiple feature choices
   // desc = ``feature``, feature parallel tree learner, aliases: ``feature_parallel``
   // desc = ``data``, data parallel tree learner, aliases: ``data_parallel``
   // desc = ``voting``, voting parallel tree learner, aliases: ``voting_parallel``
   // desc = refer to `Parallel Learning Guide <./Parallel-Learning-Guide.rst>`__ to get more details
   std::string tree_learner = "serial";
+
+  //desc = number of features used in each symmetric_share_multi tree learner
+  int symmetric_cycle = 6;
 
   // alias = num_thread, nthread, nthreads, n_jobs
   // desc = number of threads for LightGBM
@@ -381,6 +387,13 @@ struct Config {
   // check = >0
   // desc = when number of categories of one feature smaller than or equal to ``max_cat_to_onehot``, one-vs-other split algorithm will be used
   int max_cat_to_onehot = 4;
+
+  //desc = whether to use ctr 
+  bool use_ctr = true;
+
+  // check = >= 2
+  // desc = the number of folds that the training data is partitioned to calculate the ctr
+  int num_folds_for_ctr = 4;
 
   // alias = topk
   // check = >0

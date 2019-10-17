@@ -21,6 +21,9 @@ TreeLearner* TreeLearner::CreateTreeLearner(const std::string& learner_type, con
     } else if(learner_type == std::string("symmetric_share")) {
       Log::Warning("use symmetric tree share");
       return new SymmetricTreeShareThresholdLearner(config);
+    } else if(learner_type == std::string("symmetric_share_multi")) {
+      Log::Warning("use symmetric tree share multi");
+      return new SymmetricTreeShareThresholdMultiFeatureLearner(config);
     }
     else if (learner_type == std::string("feature")) {
       return new FeatureParallelTreeLearner<SerialTreeLearner>(config);

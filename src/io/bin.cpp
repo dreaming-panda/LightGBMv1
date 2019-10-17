@@ -38,6 +38,7 @@ namespace LightGBM {
     min_val_ = other.min_val_;
     max_val_ = other.max_val_;
     default_bin_ = other.default_bin_;
+    ctr_info_ = other.ctr_info_;
   }
 
   BinMapper::BinMapper(const void* memory) {
@@ -208,7 +209,7 @@ namespace LightGBM {
   }
 
   void BinMapper::FindBin(double* values, int num_sample_values, size_t total_sample_cnt,
-    int max_bin, int min_data_in_bin, int min_split_data, BinType bin_type, bool use_missing, bool zero_as_missing) {
+    int max_bin, int min_data_in_bin, int min_split_data, BinType bin_type, bool use_missing, bool zero_as_missing, bool use_ctr) {
     int na_cnt = 0;
     int tmp_num_sample_values = 0;
     for (int i = 0; i < num_sample_values; ++i) {
@@ -233,6 +234,7 @@ namespace LightGBM {
     bin_type_ = bin_type;
     default_bin_ = 0;
     int zero_cnt = static_cast<int>(total_sample_cnt - num_sample_values - na_cnt);
+
     // find distinct_values first
     std::vector<double> distinct_values;
     std::vector<int> counts;
@@ -339,7 +341,8 @@ namespace LightGBM {
           std::swap(distinct_values_int[0], distinct_values_int[1]);
         }
         // will ignore the categorical of small counts
-        int cut_cnt = static_cast<int>((total_sample_cnt - na_cnt) * 0.99f);
+        const double cut_ratio = use_ctr ? 1.0f : 0.99f;
+        int cut_cnt = static_cast<int>((total_sample_cnt - na_cnt) * cut_ratio);
         size_t cur_cat = 0;
         categorical_2_bin_.clear();
         bin_2_categorical_.clear();
@@ -359,7 +362,8 @@ namespace LightGBM {
           ++cur_cat;
         }
         // need an additional bin for NaN
-        if (cur_cat == distinct_values_int.size() && na_cnt > 0) {
+        // spare one additional bin for unseen categories and NaN when using ctr
+        if ((cur_cat == distinct_values_int.size() && na_cnt > 0) || use_ctr) {
           // use -1 to represent NaN
           bin_2_categorical_.push_back(-1);
           categorical_2_bin_[-1] = num_bin_;
@@ -401,6 +405,52 @@ namespace LightGBM {
     }
   }
 
+  bool BinMapper::ConstructInnerCatThresholdFromCTRThreshold(uint32_t ctr_threshold, bool default_left, std::vector<uint32_t>& out_threshold_inner) const {
+    CHECK(ctr_info_.is_ctr);
+    bool missing_to_left = false;
+    if(ctr_info_.is_ctr) {
+      for(uint32_t bin = 0; bin < static_cast<uint32_t>(ctr_info_.ctr_values.size()); ++bin) {
+        double ctr_value = ctr_info_.ctr_values[bin];
+        uint32_t ctr_bin = ValueToBin(ctr_value);
+        if(missing_type_ == MissingType::NaN) {
+          if(bin == ctr_info_.ctr_values.size() - 1) {
+            if(default_left) {
+              out_threshold_inner.push_back(bin);
+              missing_to_left = true;
+            }
+          }
+          else {
+            if(ctr_bin <= ctr_threshold) {
+              out_threshold_inner.push_back(bin);
+            }
+          }
+        }
+        else {
+          CHECK(missing_type_ == MissingType::None);
+          if(ctr_bin <= ctr_threshold) {
+            out_threshold_inner.push_back(bin);
+          }
+        }
+      }
+
+      if(missing_type_ == MissingType::None && ValueToBin(ctr_info_.ctr_values.back()) <= ctr_threshold) {
+        missing_to_left = true;
+      } 
+    }
+    return missing_to_left;
+  }
+
+  std::vector<int> BinMapper::GetSeenCategories() const {
+    std::vector<int> out_seen_categories;
+    if(bin_type_ == BinType::CategoricalBin) {
+      for(auto pair : categorical_2_bin_) {
+        if(pair.first >= 0) {
+          out_seen_categories.push_back(pair.first);
+        }
+      }
+    }
+    return out_seen_categories;
+  }
 
   int BinMapper::SizeForSpecificBin(int bin) {
     int size = 0;
@@ -434,8 +484,17 @@ namespace LightGBM {
     buffer += sizeof(default_bin_);
     if (bin_type_ == BinType::NumericalBin) {
       std::memcpy(buffer, bin_upper_bound_.data(), num_bin_ * sizeof(double));
+      buffer += sizeof(double) * num_bin_;
     } else {
       std::memcpy(buffer, bin_2_categorical_.data(), num_bin_ * sizeof(int));
+      buffer += sizeof(int) * num_bin_;
+    }
+    std::memcpy(buffer, &ctr_info_.is_ctr, sizeof(bool));
+    if(ctr_info_.is_ctr) {
+      buffer += sizeof(bool);
+      std::memcpy(buffer, &ctr_info_.real_cat_fid, sizeof(int));
+      buffer += sizeof(int);
+      std::memcpy(buffer, ctr_info_.ctr_values.data(), sizeof(double) * num_bin_);
     }
   }
 
@@ -459,6 +518,7 @@ namespace LightGBM {
     if (bin_type_ == BinType::NumericalBin) {
       bin_upper_bound_ = std::vector<double>(num_bin_);
       std::memcpy(bin_upper_bound_.data(), buffer, num_bin_ * sizeof(double));
+      buffer += num_bin_ * sizeof(double);
     } else {
       bin_2_categorical_ = std::vector<int>(num_bin_);
       std::memcpy(bin_2_categorical_.data(), buffer, num_bin_ * sizeof(int));
@@ -466,6 +526,15 @@ namespace LightGBM {
       for (int i = 0; i < num_bin_; ++i) {
         categorical_2_bin_[bin_2_categorical_[i]] = static_cast<unsigned int>(i);
       }
+      buffer += num_bin_ * sizeof(int);
+    }
+    std::memcpy(&ctr_info_.is_ctr, buffer, sizeof(bool));
+    if(ctr_info_.is_ctr) {
+      buffer += sizeof(bool);
+      std::memcpy(&ctr_info_.real_cat_fid, buffer, sizeof(int));
+      buffer += sizeof(int);
+      ctr_info_.ctr_values.resize(num_bin_);
+      std::memcpy(ctr_info_.ctr_values.data(), buffer, sizeof(double) * num_bin_);
     }
   }
 
@@ -483,6 +552,11 @@ namespace LightGBM {
     } else {
       writer->Write(bin_2_categorical_.data(), sizeof(int) * num_bin_);
     }
+    writer->Write(&ctr_info_.is_ctr, sizeof(bool));
+    if(ctr_info_.is_ctr) {
+      writer->Write(&ctr_info_.real_cat_fid, sizeof(int));
+      writer->Write(ctr_info_.ctr_values.data(), sizeof(double) * num_bin_);
+    }
   }
 
   size_t BinMapper::SizesInByte() const {
@@ -492,6 +566,11 @@ namespace LightGBM {
       ret += sizeof(double) *  num_bin_;
     } else {
       ret += sizeof(int) * num_bin_;
+    }
+    ret += sizeof(bool);
+    if(ctr_info_.is_ctr) {
+      ret += sizeof(int);
+      ret += sizeof(double) * num_bin_;
     }
     return ret;
   }
