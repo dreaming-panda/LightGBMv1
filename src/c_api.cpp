@@ -124,7 +124,8 @@ class Booster {
     }
     if (Network::num_machines() == 1 && config_.tree_learner != std::string("serial")) {
       Log::Warning("Only find one worker, will switch to serial tree learner");
-      if(config_.tree_learner != std::string("symmetric") && config_.tree_learner != std::string("symmetric_share") && config_.tree_learner != std::string("symmetric_share_multi")) {
+      if(config_.tree_learner != std::string("symmetric") && config_.tree_learner != std::string("symmetric_share") && 
+          config_.tree_learner != std::string("symmetric_share_multi") && config_.tree_learner != std::string("symmetric_cycle")) {
         config_.tree_learner = "serial";
       }
     }

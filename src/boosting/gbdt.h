@@ -509,6 +509,8 @@ class GBDT : public GBDTBase {
   std::unordered_map<int, std::vector<uint32_t>> seen_cat_values_;
 
   Json forced_splits_json_;
+
+  std::chrono::time_point<std::chrono::steady_clock> training_start_time_;
 };
 
 }  // namespace LightGBM

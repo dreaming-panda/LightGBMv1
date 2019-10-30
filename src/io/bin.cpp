@@ -408,6 +408,7 @@ namespace LightGBM {
   bool BinMapper::ConstructInnerCatThresholdFromCTRThreshold(uint32_t ctr_threshold, bool default_left, std::vector<uint32_t>& out_threshold_inner) const {
     CHECK(ctr_info_.is_ctr);
     bool missing_to_left = false;
+    CHECK(missing_type_ == MissingType::None);
     if(ctr_info_.is_ctr) {
       for(uint32_t bin = 0; bin < static_cast<uint32_t>(ctr_info_.ctr_values.size()); ++bin) {
         double ctr_value = ctr_info_.ctr_values[bin];
@@ -428,13 +429,15 @@ namespace LightGBM {
         else {
           CHECK(missing_type_ == MissingType::None);
           if(ctr_bin <= ctr_threshold) {
-            out_threshold_inner.push_back(bin);
+            if(bin < ctr_info_.ctr_values.size() - 1) {
+              out_threshold_inner.push_back(bin);
+            }
           }
         }
       }
 
       if(missing_type_ == MissingType::None && ValueToBin(ctr_info_.ctr_values.back()) <= ctr_threshold) {
-        missing_to_left = true;
+        //missing_to_left = true;
       } 
     }
     return missing_to_left;

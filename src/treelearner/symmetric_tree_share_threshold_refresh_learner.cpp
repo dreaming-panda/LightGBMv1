@@ -8,7 +8,7 @@
 
 namespace LightGBM {
 
-Tree* SymmetricTreeShareThresholdMultiFeatureLearner::Train(const score_t* gradients, const score_t *hessians, bool is_constant_hessian,
+Tree* SymmetricTreeShareThresholdRefreshLearner::Train(const score_t* gradients, const score_t *hessians, bool is_constant_hessian,
               Json& /*forced_split_json*/) {
   sum_gradients_ = 0.0;
   sum_hessians_ = 0.0;
@@ -38,6 +38,8 @@ Tree* SymmetricTreeShareThresholdMultiFeatureLearner::Train(const score_t* gradi
   used_features_.clear();
   is_feature_used_.clear();
   is_feature_used_.resize(num_features_, 1);
+  prev_features_used_.clear();
+  prev_features_used_.resize(num_features_, 1);
   for(int level = 0; level < config_->max_depth; ++level) {
       std::queue<int> next_level_leaf_queue;
       if(level == 0) {
@@ -75,9 +77,17 @@ Tree* SymmetricTreeShareThresholdMultiFeatureLearner::Train(const score_t* gradi
             if(node_in_level == 0) {
               feature_threshold_gain_ = next_feature_threshold_gain_;
               feature_threshold_split_info_ = next_feature_threshold_split_info_;
-
+              prev_features_used_.clear();
+              prev_features_used_.resize(num_features_, 0);
+              for(int i = 0; i < static_cast<int>(used_features_.size()); ++i) {
+                prev_features_used_[used_features_[i]] = 1;
+              }
+              bool need_refresh = level % config_->symmetric_cycle == config_->symmetric_cycle - 1;
+              SetShareThreshold(level_leaf_queue, level % config_->symmetric_cycle == 0);
+              if(need_refresh) {
+                RefreshTopFeatures();
+              }
               InitializeThresholdStats(2 * level_leaf_queue.size());
-              SetShareThreshold(level_leaf_queue, -1);
               CHECK(cur_leaf_id_in_level_ == level_size);
               cur_leaf_id_in_level_ = 0;
             }
@@ -91,7 +101,6 @@ Tree* SymmetricTreeShareThresholdMultiFeatureLearner::Train(const score_t* gradi
             next_level_leaf_queue.push(right_leaf);
         }
       }
-
       level_leaf_queue = next_level_leaf_queue;
       if(level_leaf_queue.empty()) {
         break;
@@ -101,7 +110,7 @@ Tree* SymmetricTreeShareThresholdMultiFeatureLearner::Train(const score_t* gradi
   return tree.release();
 }
 
-void SymmetricTreeShareThresholdMultiFeatureLearner::FindBestSplitForFeature(int left_leaf, int right_leaf, int /*left_inner_feature_index*/, int /*right_inner_feature_index*/) {
+void SymmetricTreeShareThresholdRefreshLearner::FindBestSplitForFeature(int left_leaf, int right_leaf, int /*left_inner_feature_index*/, int /*right_inner_feature_index*/) {
 
   #ifdef TIMETAG
   auto start_time = std::chrono::steady_clock::now();
@@ -111,7 +120,6 @@ void SymmetricTreeShareThresholdMultiFeatureLearner::FindBestSplitForFeature(int
   int larger_in_level = cur_leaf_id_in_level_ + 1;
   int left_leaf_data_count = GetGlobalDataCountInLeaf(left_leaf);
   int right_leaf_data_count = GetGlobalDataCountInLeaf(right_leaf);
-  bool use_subtract = false;//parent_leaf_histogram_array_ != nullptr;
   if(right_leaf != -1 && left_leaf_data_count >= right_leaf_data_count) {
     smaller_in_level = cur_leaf_id_in_level_ + 1;
     larger_in_level = cur_leaf_id_in_level_;
@@ -129,14 +137,18 @@ void SymmetricTreeShareThresholdMultiFeatureLearner::FindBestSplitForFeature(int
   if(right_leaf != -1) {
     //construct larger leaf
     HistogramBinEntry* ptr_larger_leaf_hist_data = larger_leaf_histogram_array_[0].RawData() - 1;
-    if(!use_subtract) {
-      train_data_->ConstructHistograms(is_feature_used_,
-                                        larger_leaf_splits_->data_indices(), larger_leaf_splits_->num_data_in_leaf(),
-                                        larger_leaf_splits_->LeafIndex(),
-                                        ordered_bins_, gradients_, hessians_,
-                                        ordered_gradients_.data(), ordered_hessians_.data(), is_constant_hessian_,
-                                        ptr_larger_leaf_hist_data);
+    std::vector<int8_t> tmp_is_feature_used(num_features_, 0);
+    for(int i = 0; i < num_features_; ++i) {
+      if(is_feature_used_[i] && !prev_features_used_[i]) {
+        tmp_is_feature_used[i] = 1;
+      }
     }
+    train_data_->ConstructHistograms(tmp_is_feature_used,
+                                      larger_leaf_splits_->data_indices(), larger_leaf_splits_->num_data_in_leaf(),
+                                      larger_leaf_splits_->LeafIndex(),
+                                      ordered_bins_, gradients_, hessians_,
+                                      ordered_gradients_.data(), ordered_hessians_.data(), is_constant_hessian_,
+                                      ptr_larger_leaf_hist_data);
   }
 
   hist_time_ += std::chrono::steady_clock::now() - hist_start_time;
@@ -168,7 +180,7 @@ void SymmetricTreeShareThresholdMultiFeatureLearner::FindBestSplitForFeature(int
     for(size_t i = 0; i < used_features_.size(); ++i) {
       SplitInfo larger_split;
       int larger_inner_feature_index = used_features_[i];
-      if(use_subtract) {
+      if(prev_features_used_[larger_inner_feature_index]) {
         larger_leaf_histogram_array_[larger_inner_feature_index].Subtract(smaller_leaf_histogram_array_[larger_inner_feature_index]);
       }
       train_data_->FixHistogram(larger_inner_feature_index,
@@ -190,12 +202,14 @@ void SymmetricTreeShareThresholdMultiFeatureLearner::FindBestSplitForFeature(int
   }
 }
 
-void SymmetricTreeShareThresholdMultiFeatureLearner::SetShareThreshold(const std::queue<int>& level_leaf_queue, int /*feature*/) {
+void SymmetricTreeShareThresholdRefreshLearner::SetShareThreshold(const std::queue<int>& level_leaf_queue, bool need_refresh) {
   std::queue<int> copy_level_leaf_queue = level_leaf_queue;
   uint32_t best_threshold = 0;
   int best_dir = -1;
   double best_gain = kMinScore;
   size_t best_i = 0;
+  std::vector<double> feature_best_gain(num_features_, kMinScore);
+  CHECK(feature_threshold_gain_.size() == used_features_.size());
   for(size_t i = 0; i < feature_threshold_gain_.size(); ++i) {
     for(size_t j = 0; j < feature_threshold_gain_[i].size(); ++j) {
       if(feature_threshold_gain_[i][j][0] > best_gain) {
@@ -203,12 +217,20 @@ void SymmetricTreeShareThresholdMultiFeatureLearner::SetShareThreshold(const std
         best_threshold = j;
         best_dir = 0;
         best_i = i;
+        int inner_feature = used_features_[i];
+        if(best_gain > feature_best_gain[inner_feature]) {
+          feature_best_gain[inner_feature] = best_gain;
+        }
       }
       if(feature_threshold_gain_[i][j][1] > best_gain) {
         best_gain = feature_threshold_gain_[i][j][1];
         best_threshold = j;
         best_dir = 1;
         best_i = i;
+        int inner_feature = used_features_[i];
+        if(best_gain > feature_best_gain[inner_feature]) {
+          feature_best_gain[inner_feature] = best_gain;
+        }
       }
     }
   }
@@ -253,9 +275,24 @@ void SymmetricTreeShareThresholdMultiFeatureLearner::SetShareThreshold(const std
     }
     CHECK(std::fabs(sum_hessians_ - tmp_sum_hessians) <= 1e-6);
   }
+
+  if(need_refresh) {
+    used_features_.clear();
+    used_features_.resize(num_features_, 0);
+    for(int i = 0; i < num_features_; ++i) {
+      used_features_[i] = i;
+    }
+    std::sort(used_features_.begin(), used_features_.end(), [&feature_best_gain](int a, int b) { return feature_best_gain[a] > feature_best_gain[b]; });
+    used_features_.resize(config_->symmetric_cycle);
+    is_feature_used_.clear();
+    is_feature_used_.resize(num_features_, 0);
+    for(int inner_feature : used_features_) {
+      is_feature_used_[inner_feature] = 1;
+    }
+  }
 }
 
-void SymmetricTreeShareThresholdMultiFeatureLearner::InitializeThresholdStats(const size_t level_size) {
+void SymmetricTreeShareThresholdRefreshLearner::InitializeThresholdStats(const size_t level_size) {
   next_feature_threshold_gain_.clear();
   next_feature_threshold_gain_.resize(used_features_.size());
   for(size_t i = 0; i < next_feature_threshold_gain_.size(); ++i) {
@@ -277,6 +314,15 @@ void SymmetricTreeShareThresholdMultiFeatureLearner::InitializeThresholdStats(co
         next_feature_threshold_split_info_[i][j][k].resize(2);
       }
     }
+  }
+}
+
+void SymmetricTreeShareThresholdRefreshLearner::RefreshTopFeatures() {
+  is_feature_used_.clear();
+  is_feature_used_.resize(num_features_, 1);
+  used_features_.clear();
+  for(int i = 0; i < num_features_; ++i) {
+    used_features_.push_back(i);
   }
 }
 

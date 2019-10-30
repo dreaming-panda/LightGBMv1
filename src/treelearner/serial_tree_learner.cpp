@@ -859,12 +859,12 @@ void SerialTreeLearner::Split(Tree* tree, int best_leaf, int* left_leaf, int* ri
     const int real_cat_fid = ctr_bin_mapper->real_cat_fid();
     int inner_cat_fid = train_data_->InnerFeatureIndex(real_cat_fid);
     std::vector<int> threshold_int(num_cat_threshold);
+
     for (int i = 0; i < num_cat_threshold; ++i) {
       double real_value = train_data_->RealThreshold(inner_cat_fid, cat_threshold[i]);
       threshold_int[i] = static_cast<int>(real_value);
     }
     std::vector<uint32_t> cat_bitset = Common::ConstructBitset(threshold_int.data(), num_cat_threshold);
-
     *right_leaf = tree->SplitCTR(best_leaf,
                                 inner_cat_fid,
                                 real_cat_fid,

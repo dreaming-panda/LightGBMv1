@@ -177,13 +177,14 @@ struct Config {
   // desc = ``symmetric``, symmetric tree with fined threshold
   // desc = ``symmetric_share``, symmetric tree
   // desc = ``symmetric_share_multi``, symmetric tree with multiple feature choices
+  // desc = ``symmetric_cycle`` symmetric tree that refinds candidate features every ``symmetric_cycle`` levels
   // desc = ``feature``, feature parallel tree learner, aliases: ``feature_parallel``
   // desc = ``data``, data parallel tree learner, aliases: ``data_parallel``
   // desc = ``voting``, voting parallel tree learner, aliases: ``voting_parallel``
   // desc = refer to `Parallel Learning Guide <./Parallel-Learning-Guide.rst>`__ to get more details
   std::string tree_learner = "serial";
 
-  //desc = number of features used in each symmetric_share_multi tree learner
+  //desc = number of features used in each symmetric_share_multi and symmetric_cycle tree learner
   int symmetric_cycle = 6;
 
   // alias = num_thread, nthread, nthreads, n_jobs
@@ -458,6 +459,8 @@ struct Config {
   // desc = controls the level of LightGBM's verbosity
   // desc = ``< 0``: Fatal, ``= 0``: Error (Warning), ``= 1``: Info, ``> 1``: Debug
   int verbosity = 1;
+
+  bool record_time = false;
 
   // check = >1
   // desc = max number of bins that feature values will be bucketed in

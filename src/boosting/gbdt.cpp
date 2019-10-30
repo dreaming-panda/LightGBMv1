@@ -368,6 +368,11 @@ double GBDT::BoostFromAverage(int class_id, bool update_scorer) {
 }
 
 bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
+
+  if(config_->record_time && iter_ == 0) {
+    training_start_time_ = std::chrono::steady_clock::now();
+  }
+
   std::vector<double> init_scores(num_tree_per_iteration_, 0.0);
   // boosting first
   if (gradients == nullptr || hessians == nullptr) {
@@ -435,6 +440,10 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
     }
     // add model
     models_.push_back(std::move(new_tree));
+  }
+
+  if(config_->record_time) {
+    Log::Warning("[LightGBM] [%d] time: %f s", iter_, (static_cast<std::chrono::duration<double>>((std::chrono::steady_clock::now() - training_start_time_))).count());
   }
 
   if (!should_continue) {

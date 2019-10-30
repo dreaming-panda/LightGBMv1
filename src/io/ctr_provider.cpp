@@ -308,7 +308,7 @@ BinMapper* CTRProvider::ConstructCTRBinMapperParallel(const std::vector<double>&
     //TODO: optmize FindBin for parallelism
     ctr_bin_mapper->FindBin(ctr_values.data(), num_sample_data_one_column, num_sample_data, max_bin_, min_data_in_bin_,
         filter_cnt, BinType::NumericalBin, use_missing_, false, true); 
-    ctr_bin_mapper->set_ctr_info(real_cat_fid, ctr_values, bin_mapper->GetSeenCategories());
+    ctr_bin_mapper->set_ctr_info(real_cat_fid, out_ctr_values, bin_mapper->GetSeenCategories());
 
     CHECK(ctr_bin_mapper->missing_type() == bin_mapper->missing_type());
 

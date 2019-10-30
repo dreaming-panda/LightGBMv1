@@ -910,6 +910,10 @@ inline static std::vector<uint32_t> ConstructBitset(const T* vals, int n) {
   for (int i = 0; i < n; ++i) {
     int i1 = vals[i] / 32;
     int i2 = vals[i] % 32;
+    if(i1 < 0 || i2 < 0) {
+      Log::Warning("vals[%d] = %d, i1 = %d, i2 = %d", i, vals[i], i1, i2);
+    }
+    CHECK(i1 >= 0 && i2 >= 0);
     if (static_cast<int>(ret.size()) < i1 + 1) {
       ret.resize(i1 + 1, 0);
     }

@@ -569,6 +569,8 @@ class FeatureHistogram {
     double best_gain = kMinScore;
     data_size_t best_left_count = 0;
     uint32_t best_threshold = static_cast<uint32_t>(meta_->num_bin);
+    bool leaf_size_control = meta_->config->tree_learner != std::string("symmetric_share") 
+          && meta_->config->tree_learner != std::string("symmetric_share_multi") && meta_->config->tree_learner != std::string("symmetric_cycle");
 
     if (dir == -1) {
       double sum_right_gradient = 0.0f;
@@ -581,22 +583,21 @@ class FeatureHistogram {
       // from right to left, and we don't need data in bin0
       for (; t >= t_end; --t) {
         // need to skip default bin
-        if (skip_default_bin && (t + bias) == static_cast<int>(meta_->default_bin) && meta_->config->tree_learner != "symmetric_share"
-           && meta_->config->tree_learner != "symmetric_share_multi") { continue; }
+        if (skip_default_bin && (t + bias) == static_cast<int>(meta_->default_bin) && leaf_size_control) { continue; }
 
         sum_right_gradient += data_[t].sum_gradients;
         sum_right_hessian += data_[t].sum_hessians;
         right_count += data_[t].cnt;
         // if data not enough, or sum hessian too small
         if ((right_count < meta_->config->min_data_in_leaf
-            || sum_right_hessian < meta_->config->min_sum_hessian_in_leaf) && meta_->config->tree_learner != "symmetric_share" && meta_->config->tree_learner != "symmetric_share_multi") continue;
+            || sum_right_hessian < meta_->config->min_sum_hessian_in_leaf) && leaf_size_control) continue;
         data_size_t left_count = num_data - right_count;
         // if data not enough
-        if (left_count < meta_->config->min_data_in_leaf && meta_->config->tree_learner != "symmetric_share" && meta_->config->tree_learner != "symmetric_share_multi") break;
+        if (left_count < meta_->config->min_data_in_leaf && leaf_size_control) break;
 
         double sum_left_hessian = sum_hessian - sum_right_hessian;
         // if sum hessian too small
-        if (sum_left_hessian < meta_->config->min_sum_hessian_in_leaf && meta_->config->tree_learner != "symmetric_share" && meta_->config->tree_learner != "symmetric_share_multi") break;
+        if (sum_left_hessian < meta_->config->min_sum_hessian_in_leaf && leaf_size_control) break;
 
         double sum_left_gradient = sum_gradient - sum_right_gradient;
         // current split gain
@@ -655,7 +656,7 @@ class FeatureHistogram {
 
       for (; t <= t_end; ++t) {
         // need to skip default bin
-        if (skip_default_bin && (t + bias) == static_cast<int>(meta_->default_bin) && meta_->config->tree_learner != "symmetric_share" && meta_->config->tree_learner != "symmetric_share_multi") { continue; }
+        if (skip_default_bin && (t + bias) == static_cast<int>(meta_->default_bin) && leaf_size_control) { continue; }
         if (t >= 0) {
           sum_left_gradient += data_[t].sum_gradients;
           sum_left_hessian += data_[t].sum_hessians;
@@ -663,14 +664,14 @@ class FeatureHistogram {
         }
         // if data not enough, or sum hessian too small
         if ((left_count < meta_->config->min_data_in_leaf
-            || sum_left_hessian < meta_->config->min_sum_hessian_in_leaf) && meta_->config->tree_learner != "symmetric_share" && meta_->config->tree_learner != "symmetric_share_multi") continue;
+            || sum_left_hessian < meta_->config->min_sum_hessian_in_leaf) && leaf_size_control) continue;
         data_size_t right_count = num_data - left_count;
         // if data not enough
-        if (right_count < meta_->config->min_data_in_leaf && meta_->config->tree_learner != "symmetric_share" && meta_->config->tree_learner != "symmetric_share_multi") break;
+        if (right_count < meta_->config->min_data_in_leaf && leaf_size_control) break;
 
         double sum_right_hessian = sum_hessian - sum_left_hessian;
         // if sum hessian too small
-        if (sum_right_hessian < meta_->config->min_sum_hessian_in_leaf && meta_->config->tree_learner != "symmetric_share" && meta_->config->tree_learner != "symmetric_share_multi") break;
+        if (sum_right_hessian < meta_->config->min_sum_hessian_in_leaf && leaf_size_control) break;
 
         double sum_right_gradient = sum_gradient - sum_left_gradient;
         // current split gain

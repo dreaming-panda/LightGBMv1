@@ -223,6 +223,7 @@ std::unordered_set<std::string> Config::parameter_set({
   "cegb_penalty_feature_lazy",
   "cegb_penalty_feature_coupled",
   "verbosity",
+  "record_time",
   "max_bin",
   "max_bin_by_feature",
   "min_data_in_bin",
@@ -434,6 +435,8 @@ void Config::GetMembersFromString(const std::unordered_map<std::string, std::str
   }
 
   GetInt(params, "verbosity", &verbosity);
+
+  GetBool(params, "record_time", &record_time);
 
   GetInt(params, "max_bin", &max_bin);
   CHECK(max_bin >1);

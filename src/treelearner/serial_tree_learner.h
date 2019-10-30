@@ -260,9 +260,7 @@ class SymmetricTreeShareThresholdMultiFeatureLearner : public SymmetricTreeShare
     std::vector<std::vector<std::vector<double>>> next_feature_threshold_gain_;
     std::vector<std::vector<std::vector<std::vector<SplitInfo>>>> next_feature_threshold_split_info_;
     
-    std::vector<int> all_used_features_;
     std::vector<int> used_features_;
-    std::vector<int8_t> is_feature_used_;
 
     void SetShareThreshold(const std::queue<int>& level_leaf_queue, int feature) override;
 
@@ -286,12 +284,15 @@ class SymmetricTreeShareThresholdRefreshLearner : public SymmetricTreeShareThres
     std::vector<std::vector<std::vector<std::vector<SplitInfo>>>> next_feature_threshold_split_info_;
 
     std::vector<int> used_features_;
+    std::vector<uint8_t> prev_features_used_;
 
-    void SetShareThreshold(const std::queue<int>& level_leaf_queue, int feature) override;
+    void SetShareThreshold(const std::queue<int>& level_leaf_queue, bool update_top_k_features);
 
     void FindBestSplitForFeature(int left_leaf, int right_leaf, int left_inner_feature_index, int right_inner_feature_index) override;
 
     void InitializeThresholdStats(const size_t level_size);
+
+    void RefreshTopFeatures();
 };
 
 }  // namespace LightGBM
