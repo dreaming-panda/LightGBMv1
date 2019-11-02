@@ -83,58 +83,123 @@ class OrderedSparseBin: public OrderedBin {
   }
 
   void ConstructHistogram(int leaf, const score_t* gradient, const score_t* hessian,
-                          HistogramBinEntry* out) const override {
-    // get current leaf boundary
-    const data_size_t start = leaf_start_[leaf];
-    const data_size_t end = start + leaf_cnt_[leaf];
-    const int rest = (end - start) % 4;
-    data_size_t i = start;
-    // use data on current leaf to construct histogram
-    for (; i < end - rest; i += 4) {
-      const VAL_T bin0 = ordered_pair_[i].bin;
-      const VAL_T bin1 = ordered_pair_[i + 1].bin;
-      const VAL_T bin2 = ordered_pair_[i + 2].bin;
-      const VAL_T bin3 = ordered_pair_[i + 3].bin;
+                          HistogramBinEntry* out, int num_threads, 
+                          std::vector<std::vector<double>>* histogram_grad, 
+                          std::vector<std::vector<double>>* histogram_hess, 
+                          std::vector<std::vector<data_size_t>>* histogram_cnt) const override {
+    //Log::Warning("in ordered sparse bin");
+    if(num_threads > 1) {
+      const data_size_t start = leaf_start_[leaf];
+      const data_size_t end = start + leaf_cnt_[leaf];     
+      int block_size = (end - start + num_threads - 1) / num_threads;
+      //Log::Warning("parallelize block_size = %d", block_size);
+      std::vector<uint32_t> thread_min_bin(num_threads, 0x7fffffff), thread_max_bin(num_threads, 0);
+      #pragma omp parallel for schedule(static) num_threads(num_threads)
+      for(int thread_id = 0; thread_id < num_threads; ++thread_id) {
+        const data_size_t thread_start = block_size * thread_id + start;
+        const data_size_t thread_end = std::min(thread_start + block_size, end);
+        std::vector<double>& thread_grad = (*histogram_grad)[thread_id];
+        std::vector<double>& thread_hess = (*histogram_hess)[thread_id];
+        std::vector<data_size_t>& thread_cnt = (*histogram_cnt)[thread_id];
+        for(int i = thread_start; i < thread_end; ++i) {
+          const VAL_T bin = ordered_pair_[i].bin;
+          if(bin > thread_max_bin[thread_id]) {
+            thread_max_bin[thread_id] = bin;
+          }
+          if(bin < thread_min_bin[thread_id]) {
+            thread_min_bin[thread_id] = bin;
+          }
+          const auto g = gradient[ordered_pair_[i].ridx];
+          const auto h = hessian[ordered_pair_[i].ridx];
 
-      const auto g0 = gradient[ordered_pair_[i].ridx];
-      const auto h0 = hessian[ordered_pair_[i].ridx];
-      const auto g1 = gradient[ordered_pair_[i + 1].ridx];
-      const auto h1 = hessian[ordered_pair_[i + 1].ridx];
-      const auto g2 = gradient[ordered_pair_[i + 2].ridx];
-      const auto h2 = hessian[ordered_pair_[i + 2].ridx];
-      const auto g3 = gradient[ordered_pair_[i + 3].ridx];
-      const auto h3 = hessian[ordered_pair_[i + 3].ridx];
+          thread_grad[bin] += g;
+          thread_hess[bin] += h;
+          ++thread_cnt[bin];
+        }
+      }
 
-      out[bin0].sum_gradients += g0;
-      out[bin1].sum_gradients += g1;
-      out[bin2].sum_gradients += g2;
-      out[bin3].sum_gradients += g3;
+      uint32_t min_bin = 0x7fffffff, max_bin = 0;
+      for(int thread_id = 0; thread_id < num_threads; ++thread_id) {
+        if(thread_min_bin[thread_id] < min_bin) {
+          min_bin = thread_min_bin[thread_id];
+        }
+        if(thread_max_bin[thread_id] > max_bin) {
+          max_bin = thread_max_bin[thread_id];
+        }
+      }
 
-      out[bin0].sum_hessians += h0;
-      out[bin1].sum_hessians += h1;
-      out[bin2].sum_hessians += h2;
-      out[bin3].sum_hessians += h3;
-
-      ++out[bin0].cnt;
-      ++out[bin1].cnt;
-      ++out[bin2].cnt;
-      ++out[bin3].cnt;
+      std::vector<std::vector<double>>& thread_grad = *histogram_grad;
+      std::vector<std::vector<double>>& thread_hess = *histogram_hess;
+      std::vector<std::vector<data_size_t>>& thread_cnt = *histogram_cnt;
+      #pragma omp parallel for schedule(static) num_threads(num_threads) 
+      for(uint32_t bin = min_bin; bin <= max_bin; ++bin) {
+        for(int thread_id = 0; thread_id < num_threads; ++thread_id) {
+          if(bin >= thread_grad[thread_id].size()) {
+            continue;
+          }
+          out[bin].sum_gradients += thread_grad[thread_id][bin];
+          out[bin].sum_hessians += thread_hess[thread_id][bin];
+          out[bin].cnt += thread_cnt[thread_id][bin];          
+        }
+      }
     }
+    else {
+      // get current leaf boundary
+      const data_size_t start = leaf_start_[leaf];
+      const data_size_t end = start + leaf_cnt_[leaf];
+      const int rest = (end - start) % 4;
+      data_size_t i = start;
+      // use data on current leaf to construct histogram
+      for (; i < end - rest; i += 4) {
+        const VAL_T bin0 = ordered_pair_[i].bin;
+        const VAL_T bin1 = ordered_pair_[i + 1].bin;
+        const VAL_T bin2 = ordered_pair_[i + 2].bin;
+        const VAL_T bin3 = ordered_pair_[i + 3].bin;
 
-    for (; i < end; ++i) {
-      const VAL_T bin0 = ordered_pair_[i].bin;
+        const auto g0 = gradient[ordered_pair_[i].ridx];
+        const auto h0 = hessian[ordered_pair_[i].ridx];
+        const auto g1 = gradient[ordered_pair_[i + 1].ridx];
+        const auto h1 = hessian[ordered_pair_[i + 1].ridx];
+        const auto g2 = gradient[ordered_pair_[i + 2].ridx];
+        const auto h2 = hessian[ordered_pair_[i + 2].ridx];
+        const auto g3 = gradient[ordered_pair_[i + 3].ridx];
+        const auto h3 = hessian[ordered_pair_[i + 3].ridx];
 
-      const auto g0 = gradient[ordered_pair_[i].ridx];
-      const auto h0 = hessian[ordered_pair_[i].ridx];
+        out[bin0].sum_gradients += g0;
+        out[bin1].sum_gradients += g1;
+        out[bin2].sum_gradients += g2;
+        out[bin3].sum_gradients += g3;
 
-      out[bin0].sum_gradients += g0;
-      out[bin0].sum_hessians += h0;
-      ++out[bin0].cnt;
+        out[bin0].sum_hessians += h0;
+        out[bin1].sum_hessians += h1;
+        out[bin2].sum_hessians += h2;
+        out[bin3].sum_hessians += h3;
+
+        ++out[bin0].cnt;
+        ++out[bin1].cnt;
+        ++out[bin2].cnt;
+        ++out[bin3].cnt;
+      }
+
+      for (; i < end; ++i) {
+        const VAL_T bin0 = ordered_pair_[i].bin;
+
+        const auto g0 = gradient[ordered_pair_[i].ridx];
+        const auto h0 = hessian[ordered_pair_[i].ridx];
+
+        out[bin0].sum_gradients += g0;
+        out[bin0].sum_hessians += h0;
+        ++out[bin0].cnt;
+      }
     }
   }
 
   void ConstructHistogram(int leaf, const score_t* gradient,
-                          HistogramBinEntry* out) const override {
+                          HistogramBinEntry* out, int /*num_threads*/, 
+                          std::vector<std::vector<double>>* /*histogram_grad*/, 
+                          std::vector<std::vector<double>>* /*histogram_hess*/, 
+                          std::vector<std::vector<data_size_t>>* /*histogram_cnt*/) const override {
+    //Log::Warning("in ordered sparse bin");
     // get current leaf boundary
     const data_size_t start = leaf_start_[leaf];
     const data_size_t end = start + leaf_cnt_[leaf];

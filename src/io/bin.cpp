@@ -429,15 +429,13 @@ namespace LightGBM {
         else {
           CHECK(missing_type_ == MissingType::None);
           if(ctr_bin <= ctr_threshold) {
-            if(bin < ctr_info_.ctr_values.size() - 1) {
-              out_threshold_inner.push_back(bin);
-            }
+            out_threshold_inner.push_back(bin);
           }
         }
       }
 
       if(missing_type_ == MissingType::None && ValueToBin(ctr_info_.ctr_values.back()) <= ctr_threshold) {
-        //missing_to_left = true;
+        missing_to_left = true;
       } 
     }
     return missing_to_left;

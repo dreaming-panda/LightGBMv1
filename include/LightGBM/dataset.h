@@ -413,7 +413,10 @@ class Dataset {
                            const score_t* gradients, const score_t* hessians,
                            score_t* ordered_gradients, score_t* ordered_hessians,
                            bool is_constant_hessian,
-                           HistogramBinEntry* histogram_data) const;
+                           HistogramBinEntry* histogram_data, int num_threads = 1, 
+                           std::vector<std::vector<double>>* histogram_grad = nullptr, 
+                           std::vector<std::vector<double>>* histogram_hess = nullptr, 
+                           std::vector<std::vector<data_size_t>>* histogram_cnt = nullptr) const;
 
   void FixHistogram(int feature_idx, double sum_gradient, double sum_hessian, data_size_t num_data,
                     HistogramBinEntry* data) const;

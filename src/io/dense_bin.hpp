@@ -70,75 +70,195 @@ class DenseBin: public Bin {
 
   void ConstructHistogram(const data_size_t* data_indices, data_size_t num_data,
                           const score_t* ordered_gradients, const score_t* ordered_hessians,
-                          HistogramBinEntry* out) const override {
-    const data_size_t rest = num_data & 0x3;
-    data_size_t i = 0;
-    for (; i < num_data - rest; i += 4) {
-      const VAL_T bin0 = data_[data_indices[i]];
-      const VAL_T bin1 = data_[data_indices[i + 1]];
-      const VAL_T bin2 = data_[data_indices[i + 2]];
-      const VAL_T bin3 = data_[data_indices[i + 3]];
+                          HistogramBinEntry* out, int num_threads, 
+                          std::vector<std::vector<double>>* histogram_grad, 
+                          std::vector<std::vector<double>>* histogram_hess, 
+                          std::vector<std::vector<data_size_t>>* histogram_cnt) const override {
+    //Log::Warning("in dense bin");
+    if(num_threads > 1) {
+      //Log::Warning("parallelizing");
+      //Log::Warning("parallel success");
+      std::vector<std::vector<double>>& thread_histogram_grad = *histogram_grad;
+      std::vector<std::vector<double>>& thread_histogram_hess = *histogram_hess;
+      std::vector<std::vector<data_size_t>>& thread_histogram_cnt = *histogram_cnt;
+      int block_size = (num_data + num_threads - 1) / num_threads;
+      std::vector<uint32_t> thread_min_bin(num_threads, 0x7fffffff), thread_max_bin(num_threads, 0);
+      #pragma omp parallel for schedule(static) num_threads(num_threads) if(num_data >= 10000)
+      for(int thread_id = 0; thread_id < num_threads; ++thread_id) {
+        data_size_t start = static_cast<data_size_t>(thread_id * block_size);
+        data_size_t end = std::min(start + block_size, num_data);
+        std::vector<double>& local_thread_histogram_grad = thread_histogram_grad[thread_id];
+        std::vector<double>& local_thread_histogram_hess = thread_histogram_hess[thread_id];
+        std::vector<data_size_t>& local_thread_histogram_cnt = thread_histogram_cnt[thread_id];
+        for(data_size_t i = start; i < end; ++i) {
+          const VAL_T bin = data_[data_indices[i]];
+          if(bin > thread_max_bin[thread_id]) {
+            thread_max_bin[thread_id] = bin;
+          }
+          if(bin < thread_min_bin[thread_id]) {
+            thread_min_bin[thread_id] = bin;
+          }
+          local_thread_histogram_grad[bin] += ordered_gradients[i];
+          local_thread_histogram_hess[bin] += ordered_hessians[i];
+          ++local_thread_histogram_cnt[bin];
+        }
+      }
 
-      out[bin0].sum_gradients += ordered_gradients[i];
-      out[bin1].sum_gradients += ordered_gradients[i + 1];
-      out[bin2].sum_gradients += ordered_gradients[i + 2];
-      out[bin3].sum_gradients += ordered_gradients[i + 3];
+      uint32_t min_bin = 0x7fffffff, max_bin = 0;
+      for(int thread_id = 0; thread_id < num_threads; ++thread_id) {
+        if(thread_min_bin[thread_id] < min_bin) {
+          min_bin = thread_min_bin[thread_id];
+        }
+        if(thread_max_bin[thread_id] > max_bin) {
+          max_bin = thread_max_bin[thread_id];
+        }
+      }
 
-      out[bin0].sum_hessians += ordered_hessians[i];
-      out[bin1].sum_hessians += ordered_hessians[i + 1];
-      out[bin2].sum_hessians += ordered_hessians[i + 2];
-      out[bin3].sum_hessians += ordered_hessians[i + 3];
-
-      ++out[bin0].cnt;
-      ++out[bin1].cnt;
-      ++out[bin2].cnt;
-      ++out[bin3].cnt;
+      #pragma omp parallel for schedule(static) num_threads(num_threads) 
+      for(uint32_t bin = min_bin; bin <= max_bin; ++bin) {
+        for(int thread_id = 0; thread_id < num_threads; ++thread_id) {
+          if(bin >= thread_histogram_grad[thread_id].size()) {
+            continue;
+          }
+          out[bin].sum_gradients += thread_histogram_grad[thread_id][bin];
+          out[bin].sum_hessians += thread_histogram_hess[thread_id][bin];
+          out[bin].cnt += thread_histogram_cnt[thread_id][bin];          
+        }
+      }
     }
-    for (; i < num_data; ++i) {
-      const VAL_T bin = data_[data_indices[i]];
-      out[bin].sum_gradients += ordered_gradients[i];
-      out[bin].sum_hessians += ordered_hessians[i];
-      ++out[bin].cnt;
+    else {
+      //Log::Warning("parallel failed");
+      const data_size_t rest = num_data & 0x3;
+      data_size_t i = 0;
+      for (; i < num_data - rest; i += 4) {
+        const VAL_T bin0 = data_[data_indices[i]];
+        const VAL_T bin1 = data_[data_indices[i + 1]];
+        const VAL_T bin2 = data_[data_indices[i + 2]];
+        const VAL_T bin3 = data_[data_indices[i + 3]];
+
+        out[bin0].sum_gradients += ordered_gradients[i];
+        out[bin1].sum_gradients += ordered_gradients[i + 1];
+        out[bin2].sum_gradients += ordered_gradients[i + 2];
+        out[bin3].sum_gradients += ordered_gradients[i + 3];
+
+        out[bin0].sum_hessians += ordered_hessians[i];
+        out[bin1].sum_hessians += ordered_hessians[i + 1];
+        out[bin2].sum_hessians += ordered_hessians[i + 2];
+        out[bin3].sum_hessians += ordered_hessians[i + 3];
+
+        ++out[bin0].cnt;
+        ++out[bin1].cnt;
+        ++out[bin2].cnt;
+        ++out[bin3].cnt;
+      }
+      for (; i < num_data; ++i) {
+        const VAL_T bin = data_[data_indices[i]];
+        out[bin].sum_gradients += ordered_gradients[i];
+        out[bin].sum_hessians += ordered_hessians[i];
+        ++out[bin].cnt;
+      }
     }
   }
 
   void ConstructHistogram(data_size_t num_data,
                           const score_t* ordered_gradients, const score_t* ordered_hessians,
-                          HistogramBinEntry* out) const override {
-    const data_size_t rest = num_data & 0x3;
-    data_size_t i = 0;
-    for (; i < num_data - rest; i += 4) {
-      const VAL_T bin0 = data_[i];
-      const VAL_T bin1 = data_[i + 1];
-      const VAL_T bin2 = data_[i + 2];
-      const VAL_T bin3 = data_[i + 3];
+                          HistogramBinEntry* out, int num_threads, 
+                          std::vector<std::vector<double>>* histogram_grad, 
+                          std::vector<std::vector<double>>* histogram_hess, 
+                          std::vector<std::vector<data_size_t>>* histogram_cnt) const override {
+    //Log::Warning("in dense bin");
+    if(num_threads > 1) {
+      //Log::Warning("parallelizing");
+      //Log::Warning("parallel sucess");
+      std::vector<std::vector<double>>& thread_histogram_grad = *histogram_grad;
+      std::vector<std::vector<double>>& thread_histogram_hess = *histogram_hess;
+      std::vector<std::vector<data_size_t>>& thread_histogram_cnt = *histogram_cnt;
+      int block_size = (num_data + num_threads - 1) / num_threads;
+      std::vector<uint32_t> thread_min_bin(num_threads, 0x7fffffff), thread_max_bin(num_threads, 0);
+      #pragma omp parallel for schedule(static) num_threads(num_threads) if(num_data >= 10000)
+      for(int thread_id = 0; thread_id < num_threads; ++thread_id) {
+        data_size_t start = static_cast<data_size_t>(thread_id * block_size);
+        data_size_t end = std::min(start + block_size, num_data);
+        std::vector<double>& local_thread_histogram_grad = thread_histogram_grad[thread_id];
+        std::vector<double>& local_thread_histogram_hess = thread_histogram_hess[thread_id];
+        std::vector<data_size_t>& local_thread_histogram_cnt = thread_histogram_cnt[thread_id];
+        for(data_size_t i = start; i < end; ++i) {
+          const VAL_T bin = data_[i];
+          if(bin > thread_max_bin[thread_id]) {
+            thread_max_bin[thread_id] = bin;
+          }
+          if(bin < thread_min_bin[thread_id]) {
+            thread_min_bin[thread_id] = bin;
+          }
+          local_thread_histogram_grad[bin] += ordered_gradients[i];
+          local_thread_histogram_hess[bin] += ordered_hessians[i];
+          ++local_thread_histogram_cnt[bin];
+        }
+      }
 
-      out[bin0].sum_gradients += ordered_gradients[i];
-      out[bin1].sum_gradients += ordered_gradients[i + 1];
-      out[bin2].sum_gradients += ordered_gradients[i + 2];
-      out[bin3].sum_gradients += ordered_gradients[i + 3];
+      uint32_t min_bin = 0x7fffffff, max_bin = 0;
+      for(int thread_id = 0; thread_id < num_threads; ++thread_id) {
+        if(thread_min_bin[thread_id] < min_bin) {
+          min_bin = thread_min_bin[thread_id];
+        }
+        if(thread_max_bin[thread_id] > max_bin) {
+          max_bin = thread_max_bin[thread_id];
+        }
+      }
 
-      out[bin0].sum_hessians += ordered_hessians[i];
-      out[bin1].sum_hessians += ordered_hessians[i + 1];
-      out[bin2].sum_hessians += ordered_hessians[i + 2];
-      out[bin3].sum_hessians += ordered_hessians[i + 3];
-
-      ++out[bin0].cnt;
-      ++out[bin1].cnt;
-      ++out[bin2].cnt;
-      ++out[bin3].cnt;
+      #pragma omp parallel for schedule(static) num_threads(num_threads) 
+      for(uint32_t bin = min_bin; bin <= max_bin; ++bin) {
+        for(int thread_id = 0; thread_id < num_threads; ++thread_id) {
+          if(bin >= thread_histogram_grad[thread_id].size()) {
+            continue;
+          }
+          out[bin].sum_gradients += thread_histogram_grad[thread_id][bin];
+          out[bin].sum_hessians += thread_histogram_hess[thread_id][bin];
+          out[bin].cnt += thread_histogram_cnt[thread_id][bin];          
+        }
+      }
     }
-    for (; i < num_data; ++i) {
-      const VAL_T bin = data_[i];
-      out[bin].sum_gradients += ordered_gradients[i];
-      out[bin].sum_hessians += ordered_hessians[i];
-      ++out[bin].cnt;
+    else {
+      //Log::Warning("parallel failed");
+      const data_size_t rest = num_data & 0x3;
+      data_size_t i = 0;
+      for (; i < num_data - rest; i += 4) {
+        const VAL_T bin0 = data_[i];
+        const VAL_T bin1 = data_[i + 1];
+        const VAL_T bin2 = data_[i + 2];
+        const VAL_T bin3 = data_[i + 3];
+
+        out[bin0].sum_gradients += ordered_gradients[i];
+        out[bin1].sum_gradients += ordered_gradients[i + 1];
+        out[bin2].sum_gradients += ordered_gradients[i + 2];
+        out[bin3].sum_gradients += ordered_gradients[i + 3];
+
+        out[bin0].sum_hessians += ordered_hessians[i];
+        out[bin1].sum_hessians += ordered_hessians[i + 1];
+        out[bin2].sum_hessians += ordered_hessians[i + 2];
+        out[bin3].sum_hessians += ordered_hessians[i + 3];
+
+        ++out[bin0].cnt;
+        ++out[bin1].cnt;
+        ++out[bin2].cnt;
+        ++out[bin3].cnt;
+      }
+      for (; i < num_data; ++i) {
+        const VAL_T bin = data_[i];
+        out[bin].sum_gradients += ordered_gradients[i];
+        out[bin].sum_hessians += ordered_hessians[i];
+        ++out[bin].cnt;
+      }
     }
   }
 
   void ConstructHistogram(const data_size_t* data_indices, data_size_t num_data,
                           const score_t* ordered_gradients,
-                          HistogramBinEntry* out) const override {
+                          HistogramBinEntry* out, int /*num_threads*/, 
+                          std::vector<std::vector<double>>* /*histogram_grad*/, 
+                          std::vector<std::vector<double>>* /*histogram_hess*/, 
+                          std::vector<std::vector<data_size_t>>* /*histogram_cnt*/) const override {
+    //Log::Warning("in dense bin");
     const data_size_t rest = num_data & 0x3;
     data_size_t i = 0;
     for (; i < num_data - rest; i += 4) {
@@ -166,7 +286,11 @@ class DenseBin: public Bin {
 
   void ConstructHistogram(data_size_t num_data,
                           const score_t* ordered_gradients,
-                          HistogramBinEntry* out) const override {
+                          HistogramBinEntry* out, int /*num_threads*/, 
+                          std::vector<std::vector<double>>* /*histogram_grad*/, 
+                          std::vector<std::vector<double>>* /*histogram_hess*/, 
+                          std::vector<std::vector<data_size_t>>* /*histogram_cnt*/) const override {
+    //Log::Warning("in dense bin");
     const data_size_t rest = num_data & 0x3;
     data_size_t i = 0;
     for (; i < num_data - rest; i += 4) {

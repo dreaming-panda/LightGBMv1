@@ -186,6 +186,7 @@ class SerialTreeLearner: public TreeLearner {
   std::vector<uint32_t> feature_used_in_data;
 
   std::chrono::duration<double> hist_time_;
+  std::chrono::duration<double> find_split_time_;
 };
 
 inline data_size_t SerialTreeLearner::GetGlobalDataCountInLeaf(int leaf_idx) const {
@@ -244,6 +245,19 @@ class SymmetricTreeShareThresholdLearner : public SymmetricTreeLearner {
     virtual void SetShareThreshold(const std::queue<int>& level_leaf_queue, int feature);
 
     void FindBestSplitForFeature(int left_leaf, int right_leaf, int left_inner_feature_index, int right_inner_feature_index) override;
+
+    void InitializeThresholdStats(const size_t level_size, const int num_bin);
+
+    void ClearGainVector();
+
+    std::vector<std::vector<double>> histogram_grad_;
+    std::vector<std::vector<double>> histogram_hess_;
+    std::vector<std::vector<data_size_t>> histogram_cnt_;
+
+    void PrepareThreadHistogramVectors();
+
+  private:
+    void SetOrderedBin(const std::vector<SplitInfo>& level_split);
 };
 
 class SymmetricTreeShareThresholdMultiFeatureLearner : public SymmetricTreeShareThresholdLearner {
@@ -293,6 +307,10 @@ class SymmetricTreeShareThresholdRefreshLearner : public SymmetricTreeShareThres
     void InitializeThresholdStats(const size_t level_size);
 
     void RefreshTopFeatures();
+
+    void ClearGainVector();
+
+    void SetOrderedBin(const std::vector<SplitInfo>& level_split);
 };
 
 }  // namespace LightGBM

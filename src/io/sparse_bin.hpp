@@ -103,25 +103,37 @@ class SparseBin: public Bin {
   BinIterator* GetIterator(uint32_t min_bin, uint32_t max_bin, uint32_t default_bin) const override;
 
   void ConstructHistogram(const data_size_t*, data_size_t, const score_t*,
-    const score_t*, HistogramBinEntry*) const override {
+    const score_t*, HistogramBinEntry*, int, 
+                          std::vector<std::vector<double>>* /*histogram_grad*/, 
+                          std::vector<std::vector<double>>* /*histogram_hess*/, 
+                          std::vector<std::vector<data_size_t>>* /*histogram_cnt*/) const override {
     // Will use OrderedSparseBin->ConstructHistogram() instead
     Log::Fatal("Using OrderedSparseBin->ConstructHistogram() instead");
   }
 
   void ConstructHistogram(data_size_t, const score_t*,
-                          const score_t*, HistogramBinEntry*) const override {
+                          const score_t*, HistogramBinEntry*, int, 
+                          std::vector<std::vector<double>>* /*histogram_grad*/, 
+                          std::vector<std::vector<double>>* /*histogram_hess*/, 
+                          std::vector<std::vector<data_size_t>>* /*histogram_cnt*/) const override {
     // Will use OrderedSparseBin->ConstructHistogram() instead
     Log::Fatal("Using OrderedSparseBin->ConstructHistogram() instead");
   }
 
   void ConstructHistogram(const data_size_t*, data_size_t, const score_t*,
-                          HistogramBinEntry*) const override {
+                          HistogramBinEntry*, int, 
+                          std::vector<std::vector<double>>* /*histogram_grad*/, 
+                          std::vector<std::vector<double>>* /*histogram_hess*/, 
+                          std::vector<std::vector<data_size_t>>* /*histogram_cnt*/) const override {
     // Will use OrderedSparseBin->ConstructHistogram() instead
     Log::Fatal("Using OrderedSparseBin->ConstructHistogram() instead");
   }
 
   void ConstructHistogram(data_size_t, const score_t*,
-                          HistogramBinEntry*) const override {
+                          HistogramBinEntry*, int, 
+                          std::vector<std::vector<double>>* /*histogram_grad*/, 
+                          std::vector<std::vector<double>>* /*histogram_hess*/, 
+                          std::vector<std::vector<data_size_t>>* /*histogram_cnt*/) const override {
     // Will use OrderedSparseBin->ConstructHistogram() instead
     Log::Fatal("Using OrderedSparseBin->ConstructHistogram() instead");
   }

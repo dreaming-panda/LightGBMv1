@@ -86,8 +86,8 @@ inline void CTRProvider::PushCTRData(const int cat_fid, const int tid, const int
         if(!is_valid) {
             const BinMapper* cat_bin_mapper = data->FeatureBinMapper(data->InnerFeatureIndex(cat_fid));
             CHECK(cat_bin_mapper->bin_type() == BinType::CategoricalBin);
-            const bool value_seen_in_train = cat_bin_mapper->HasValueInCat(value);
-            CHECK(value_seen_in_train == true);
+            //const bool value_seen_in_train = cat_bin_mapper->HasValueInCat(value);
+            //CHECK(value_seen_in_train == true);
             const int cat_value = static_cast<int>(cat_bin_mapper->ValueToBin(value));
             const int fold_id = fold_ids_[real_index];
             const int inner_cat_fid = cat_fid_2_inner_cat_fid_.at(cat_fid);

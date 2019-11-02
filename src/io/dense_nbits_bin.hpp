@@ -75,7 +75,12 @@ class Dense4bitsBin : public Bin {
 
   void ConstructHistogram(const data_size_t* data_indices, data_size_t num_data,
                           const score_t* ordered_gradients, const score_t* ordered_hessians,
-                          HistogramBinEntry* out) const override {
+                          HistogramBinEntry* out, int /*num_threads*/, 
+                          std::vector<std::vector<double>>* /*histogram_grad*/, 
+                          std::vector<std::vector<double>>* /*histogram_hess*/, 
+                          std::vector<std::vector<data_size_t>>* /*histogram_cnt*/) const override {
+    //Log::Warning("in dense nbits bin");
+    //Log::Warning("error!!! non-parallelizing");
     const data_size_t rest = num_data & 0x3;
     data_size_t i = 0;
     for (; i < num_data - rest; i += 4) {
@@ -118,7 +123,12 @@ class Dense4bitsBin : public Bin {
 
   void ConstructHistogram(data_size_t num_data,
                           const score_t* ordered_gradients, const score_t* ordered_hessians,
-                          HistogramBinEntry* out) const override {
+                          HistogramBinEntry* out, int /*num_threads*/, 
+                          std::vector<std::vector<double>>* /*histogram_grad*/, 
+                          std::vector<std::vector<double>>* /*histogram_hess*/, 
+                          std::vector<std::vector<data_size_t>>* /*histogram_cnt*/) const override {
+    //Log::Warning("in dense nbits bin");
+    //Log::Warning("error!!! non-parallelizing");
     const data_size_t rest = num_data & 0x3;
     data_size_t i = 0;
     for (; i < num_data - rest; i += 4) {
@@ -152,7 +162,12 @@ class Dense4bitsBin : public Bin {
 
   void ConstructHistogram(const data_size_t* data_indices, data_size_t num_data,
                           const score_t* ordered_gradients,
-                          HistogramBinEntry* out) const override {
+                          HistogramBinEntry* out, int /*num_threads*/, 
+                          std::vector<std::vector<double>>* /*histogram_grad*/, 
+                          std::vector<std::vector<double>>* /*histogram_hess*/, 
+                          std::vector<std::vector<data_size_t>>* /*histogram_cnt*/) const override {
+    //Log::Warning("in dense nbits bin");
+    //Log::Warning("error!!! non-parallelizing");
     const data_size_t rest = num_data & 0x3;
     data_size_t i = 0;
     for (; i < num_data - rest; i += 4) {
@@ -189,7 +204,12 @@ class Dense4bitsBin : public Bin {
 
   void ConstructHistogram(data_size_t num_data,
                           const score_t* ordered_gradients,
-                          HistogramBinEntry* out) const override {
+                          HistogramBinEntry* out, int /*num_threads*/, 
+                          std::vector<std::vector<double>>* /*histogram_grad*/, 
+                          std::vector<std::vector<double>>* /*histogram_hess*/, 
+                          std::vector<std::vector<data_size_t>>* /*histogram_cnt*/) const override {
+    //Log::Warning("in dense nbits bin");
+    //Log::Warning("error!!! non-parallelizing");
     const data_size_t rest = num_data & 0x3;
     data_size_t i = 0;
     for (; i < num_data - rest; i += 4) {

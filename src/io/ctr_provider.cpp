@@ -37,7 +37,7 @@ void CTRProvider::ConstructCTRBinMappers(const std::vector<std::vector<double>>&
 
     GetCTRMetaInfo(bin_mappers, num_original_total_features_, sample_labels, all_sample_indices, train_data, feature_names_from_data_loader);
 
-    if(num_cat_features_ >= num_threads_) {
+    if(num_cat_features_ >= num_threads_ && all_sample_indices.size() <= 100000) {
         //parallel by features
         CHECK(static_cast<int>(cat_fids_.size()) == num_cat_features_);
         const size_t old_bin_mappers_size = bin_mappers.size();

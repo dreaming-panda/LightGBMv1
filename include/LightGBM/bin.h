@@ -291,7 +291,10 @@ class OrderedBin {
   * \param out Output Result
   */
   virtual void ConstructHistogram(int leaf, const score_t* gradients,
-    const score_t* hessians, HistogramBinEntry* out) const = 0;
+    const score_t* hessians, HistogramBinEntry* out, int num_threads = 1, 
+    std::vector<std::vector<double>>* histogram_grad = nullptr, 
+    std::vector<std::vector<double>>* histogram_hess = nullptr, 
+    std::vector<std::vector<data_size_t>>* histogram_cnt = nullptr) const = 0;
 
   /*!
   * \brief Construct histogram by using this bin
@@ -301,7 +304,10 @@ class OrderedBin {
   * \param gradients Gradients, Note:non-oredered by leaf
   * \param out Output Result
   */
-  virtual void ConstructHistogram(int leaf, const score_t* gradients, HistogramBinEntry* out) const = 0;
+  virtual void ConstructHistogram(int leaf, const score_t* gradients, HistogramBinEntry* out, int num_threads = 1, 
+    std::vector<std::vector<double>>* histogram_grad = nullptr, 
+    std::vector<std::vector<double>>* histogram_hess = nullptr, 
+    std::vector<std::vector<data_size_t>>* histogram_cnt = nullptr) const = 0;
 
   /*!
   * \brief Split current bin, and perform re-order by leaf
@@ -398,11 +404,17 @@ class Bin {
   virtual void ConstructHistogram(
     const data_size_t* data_indices, data_size_t num_data,
     const score_t* ordered_gradients, const score_t* ordered_hessians,
-    HistogramBinEntry* out) const = 0;
+    HistogramBinEntry* out, int num_threads = 1, 
+    std::vector<std::vector<double>>* histogram_grad = nullptr, 
+    std::vector<std::vector<double>>* histogram_hess = nullptr, 
+    std::vector<std::vector<data_size_t>>* histogram_cnt = nullptr) const = 0;
 
   virtual void ConstructHistogram(data_size_t num_data,
     const score_t* ordered_gradients, const score_t* ordered_hessians,
-    HistogramBinEntry* out) const = 0;
+    HistogramBinEntry* out, int num_threads = 1, 
+    std::vector<std::vector<double>>* histogram_grad = nullptr, 
+    std::vector<std::vector<double>>* histogram_hess = nullptr, 
+    std::vector<std::vector<data_size_t>>* histogram_cnt = nullptr) const = 0;
 
   /*!
   * \brief Construct histogram of this feature,
@@ -417,10 +429,16 @@ class Bin {
   * \param out Output Result
   */
   virtual void ConstructHistogram(const data_size_t* data_indices, data_size_t num_data,
-                                  const score_t* ordered_gradients, HistogramBinEntry* out) const = 0;
+                                  const score_t* ordered_gradients, HistogramBinEntry* out, int num_threads = 1, 
+                                  std::vector<std::vector<double>>* histogram_grad = nullptr, 
+                                  std::vector<std::vector<double>>* histogram_hess = nullptr, 
+                                  std::vector<std::vector<data_size_t>>* histogram_cnt = nullptr) const = 0;
 
   virtual void ConstructHistogram(data_size_t num_data,
-                                  const score_t* ordered_gradients, HistogramBinEntry* out) const = 0;
+                                  const score_t* ordered_gradients, HistogramBinEntry* out, int num_threads = 1, 
+                                  std::vector<std::vector<double>>* histogram_grad = nullptr, 
+                                  std::vector<std::vector<double>>* histogram_hess = nullptr, 
+                                  std::vector<std::vector<data_size_t>>* histogram_cnt = nullptr) const = 0;
 
   /*!
   * \brief Split data according to threshold, if bin <= threshold, will put into left(lte_indices), else put into right(gt_indices)

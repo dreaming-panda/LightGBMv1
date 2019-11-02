@@ -438,6 +438,8 @@ bool SerialTreeLearner::BeforeFindBestSplit(const Tree* tree, int left_leaf, int
   }
   // split for the ordered bin
   if (has_ordered_bin_ && right_leaf >= 0) {
+    //Log::Warning("has ordered bin");
+    //auto ordered_bin_start_time = std::chrono::steady_clock::now();
     #ifdef TIMETAG
     auto start_time = std::chrono::steady_clock::now();
     #endif
@@ -473,6 +475,7 @@ bool SerialTreeLearner::BeforeFindBestSplit(const Tree* tree, int left_leaf, int
     #ifdef TIMETAG
     ordered_bin_time += std::chrono::steady_clock::now() - start_time;
     #endif
+    //Log::Warning("ordered bin time %f s", static_cast<std::chrono::duration<double>>((std::chrono::steady_clock::now() - ordered_bin_start_time)).count());
   }
   return true;
 }
@@ -490,9 +493,9 @@ void SerialTreeLearner::FindBestSplits() {
     is_feature_used[feature_index] = 1;
   }
   bool use_subtract = parent_leaf_histogram_array_ != nullptr;
-  auto start = std::chrono::steady_clock::now();
+  //auto start = std::chrono::steady_clock::now();
   ConstructHistograms(is_feature_used, use_subtract);
-  hist_time_ += std::chrono::steady_clock::now() - start;
+  //hist_time_ += std::chrono::steady_clock::now() - start;
   FindBestSplitsFromHistograms(is_feature_used, use_subtract);
 }
 
@@ -858,13 +861,16 @@ void SerialTreeLearner::Split(Tree* tree, int best_leaf, int* left_leaf, int* ri
     std::vector<uint32_t> cat_bitset_inner = Common::ConstructBitset(cat_threshold.data(), num_cat_threshold);
     const int real_cat_fid = ctr_bin_mapper->real_cat_fid();
     int inner_cat_fid = train_data_->InnerFeatureIndex(real_cat_fid);
-    std::vector<int> threshold_int(num_cat_threshold);
+    std::vector<int> threshold_int;
 
     for (int i = 0; i < num_cat_threshold; ++i) {
       double real_value = train_data_->RealThreshold(inner_cat_fid, cat_threshold[i]);
-      threshold_int[i] = static_cast<int>(real_value);
+      int int_value = static_cast<int>(real_value);
+      if(int_value >= 0) {
+        threshold_int.push_back(int_value);
+      }
     }
-    std::vector<uint32_t> cat_bitset = Common::ConstructBitset(threshold_int.data(), num_cat_threshold);
+    std::vector<uint32_t> cat_bitset = Common::ConstructBitset(threshold_int.data(), static_cast<int>(threshold_int.size()));
     *right_leaf = tree->SplitCTR(best_leaf,
                                 inner_cat_fid,
                                 real_cat_fid,
