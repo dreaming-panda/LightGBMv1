@@ -287,7 +287,7 @@ void SymmetricTreeShareThresholdMultiFeatureLearner::SetShareThreshold(const std
 }
 
 void SymmetricTreeShareThresholdMultiFeatureLearner::InitializeThresholdStats(const size_t level_size) {
-  next_feature_threshold_gain_.clear();
+  //next_feature_threshold_gain_.clear();
   next_feature_threshold_gain_.resize(used_features_.size());
   #pragma omp parallel for schedule(static) num_threads(config_->num_threads)
   for(size_t i = 0; i < next_feature_threshold_gain_.size(); ++i) {
@@ -298,7 +298,7 @@ void SymmetricTreeShareThresholdMultiFeatureLearner::InitializeThresholdStats(co
     }
   }
 
-  next_feature_threshold_split_info_.clear();
+  //next_feature_threshold_split_info_.clear();
   next_feature_threshold_split_info_.resize(used_features_.size());
   #pragma omp parallel for schedule(static) num_threads(config_->num_threads)
   for(size_t i = 0; i < next_feature_threshold_split_info_.size(); ++i) {

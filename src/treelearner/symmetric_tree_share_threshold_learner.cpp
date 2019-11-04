@@ -323,7 +323,7 @@ void SymmetricTreeShareThresholdLearner::SetShareThreshold(const std::queue<int>
 }
 
 void SymmetricTreeShareThresholdLearner::InitializeThresholdStats(const size_t level_size, const int num_bin) {
-  next_feature_threshold_gain_.clear();
+  //next_feature_threshold_gain_.clear();
   next_feature_threshold_gain_.resize(num_bin);
   for(size_t i = 0; i < next_feature_threshold_gain_.size(); ++i) {
     next_feature_threshold_gain_[i].resize(2, 0.0);
