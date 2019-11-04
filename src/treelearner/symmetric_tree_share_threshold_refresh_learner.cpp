@@ -115,7 +115,9 @@ Tree* SymmetricTreeShareThresholdRefreshLearner::Train(const score_t* gradients,
                 if(need_refresh || level % config_->symmetric_cycle == 0) {
                   InitializeThresholdStats(1 << (config_->max_depth - 1));
                 }
-                //ClearGainVector();
+                else {
+                  ClearGainVector();
+                }
               }
               intialize_time += static_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - init_start_time);
               CHECK(cur_leaf_id_in_level_ == level_size || level == config_->max_depth - 1);

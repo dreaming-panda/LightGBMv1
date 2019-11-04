@@ -16,6 +16,14 @@ Tree* SymmetricTreeShareThresholdMultiFeatureLearner::Train(const score_t* gradi
   hessians_ = hessians;
   is_constant_hessian_ = is_constant_hessian;
   hist_time_ = std::chrono::duration<double>(0.0);
+  find_split_time_ = std::chrono::duration<double>(0.0);
+  auto set_share_time = std::chrono::duration<double>(0.0);
+  auto intialize_time = std::chrono::duration<double>(0.0);
+  auto split_time = std::chrono::duration<double>(0.0);
+  auto sort_time = std::chrono::duration<double>(0.0);
+  auto before_time = std::chrono::duration<double>(0.0);
+  auto train_tree_start_time = std::chrono::steady_clock::now();
+  auto clear_vector_time = std::chrono::duration<double>(0.0);
   #ifdef TIMETAG
   auto start_time = std::chrono::steady_clock::now();
   #endif
@@ -41,22 +49,31 @@ Tree* SymmetricTreeShareThresholdMultiFeatureLearner::Train(const score_t* gradi
   for(int level = 0; level < config_->max_depth; ++level) {
       std::queue<int> next_level_leaf_queue;
       if(level == 0) {
+          auto root_time_start = std::chrono::steady_clock::now();
           BeforeFindBestSplit(tree.get(), left_leaf, right_leaf);
+          before_time += std::chrono::steady_clock::now() - root_time_start;
           FindBestSplits();
+          Log::Warning("root time for histogram %f s", (static_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - root_time_start)).count());
           is_feature_used_.clear();
           is_feature_used_.resize(num_features_, 0);
           for(int feature_index = 0; feature_index < num_features_; ++feature_index) {
               level_splits.push_back(splits_per_leaf_[feature_index]);
           }
+          auto sort_time_start = std::chrono::steady_clock::now();
           std::sort(level_splits.begin(), level_splits.end(), [] (SplitInfo a, SplitInfo b) { return a.gain > b.gain; });
+          Log::Warning("sort time for histogram %f s", (static_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - sort_time_start)).count());
           int best_leaf = 0;
+          auto split_start_time = std::chrono::steady_clock::now();
           Split(tree.get(), best_leaf, &left_leaf, &right_leaf);
-          for(int i = 0; i < num_features_; ++i) {
+          split_time += std::chrono::steady_clock::now() - split_start_time;
+          for(int i = 0; i < num_features_ && i < config_->symmetric_cycle; ++i) {
             int inner_feature_idx = train_data_->InnerFeatureIndex(level_splits[i].feature);
             used_features_.push_back(inner_feature_idx);
             is_feature_used_[inner_feature_idx] = 1;
           }
+          auto init_start_time = std::chrono::steady_clock::now();
           InitializeThresholdStats(1 << (config_->max_depth - 1));
+          intialize_time += std::chrono::steady_clock::now() - init_start_time;
           is_left_right_update = true;
           next_level_leaf_queue.push(left_leaf);
           next_level_leaf_queue.push(right_leaf);
@@ -68,24 +85,31 @@ Tree* SymmetricTreeShareThresholdMultiFeatureLearner::Train(const score_t* gradi
             int best_leaf = level_leaf_queue.front();
             const int node_in_level = level_size - static_cast<int>(level_leaf_queue.size());
             if(is_left_right_update) {
+              auto before_time_start = std::chrono::steady_clock::now();
               BeforeFindBestSplit(tree.get(), left_leaf, right_leaf);
+              before_time += std::chrono::steady_clock::now() - before_time_start;
               FindBestSplitForFeature(left_leaf, right_leaf, -1, -1);
               cur_leaf_id_in_level_ += 2;
             }
             if(node_in_level == 0) {
               feature_threshold_gain_ = next_feature_threshold_gain_;
               feature_threshold_split_info_ = next_feature_threshold_split_info_;
-
+              auto clear_start = std::chrono::steady_clock::now();
               ClearGainVector();
+              clear_vector_time += std::chrono::steady_clock::now() - clear_start;
+              auto set_share_threshold_start = std::chrono::steady_clock::now();
               SetShareThreshold(level_leaf_queue, -1);
+              set_share_time += std::chrono::steady_clock::now() - set_share_threshold_start;
               CHECK(cur_leaf_id_in_level_ == level_size);
               cur_leaf_id_in_level_ = 0;
             }
 
             level_leaf_queue.pop();
             
+            auto split_start_time = std::chrono::steady_clock::now();
             Split(tree.get(), best_leaf, &left_leaf, &right_leaf);
-            is_left_right_update = true;
+            split_time += std::chrono::steady_clock::now() - split_start_time;
+            is_left_right_update = level < config_->max_depth - 1;
 
             next_level_leaf_queue.push(left_leaf);
             next_level_leaf_queue.push(right_leaf);
@@ -98,6 +122,13 @@ Tree* SymmetricTreeShareThresholdMultiFeatureLearner::Train(const score_t* gradi
       }
   }
   Log::Warning("histogram time %f s", hist_time_.count());
+  Log::Warning("find best split from histogram time %f s", find_split_time_.count());
+  Log::Warning("train tree with histogram time %f s", (static_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - train_tree_start_time)).count());
+  Log::Warning("set share threshold for histogram time %f s", set_share_time.count());
+  Log::Warning("split for histogram time %f s", split_time.count());
+  Log::Warning("before time for histogram %f s", before_time.count());
+  Log::Warning("init_mem_time for histogram %f s", intialize_time.count());
+  Log::Warning("clear vector time %f s", clear_vector_time.count());
   return tree.release();
 }
 
@@ -258,6 +289,7 @@ void SymmetricTreeShareThresholdMultiFeatureLearner::SetShareThreshold(const std
 void SymmetricTreeShareThresholdMultiFeatureLearner::InitializeThresholdStats(const size_t level_size) {
   next_feature_threshold_gain_.clear();
   next_feature_threshold_gain_.resize(used_features_.size());
+  #pragma omp parallel for schedule(static) num_threads(config_->num_threads)
   for(size_t i = 0; i < next_feature_threshold_gain_.size(); ++i) {
     int num_bin = train_data_->FeatureBinMapper(used_features_[i])->num_bin();
     next_feature_threshold_gain_[i].resize(num_bin);
@@ -268,6 +300,7 @@ void SymmetricTreeShareThresholdMultiFeatureLearner::InitializeThresholdStats(co
 
   next_feature_threshold_split_info_.clear();
   next_feature_threshold_split_info_.resize(used_features_.size());
+  #pragma omp parallel for schedule(static) num_threads(config_->num_threads)
   for(size_t i = 0; i < next_feature_threshold_split_info_.size(); ++i) {
     next_feature_threshold_split_info_[i].clear();
     next_feature_threshold_split_info_[i].resize(level_size);
