@@ -281,6 +281,8 @@ class SymmetricTreeShareThresholdMultiFeatureLearner : public SymmetricTreeShare
     void FindBestSplitForFeature(int left_leaf, int right_leaf, int left_inner_feature_index, int right_inner_feature_index) override;
 
     void InitializeThresholdStats(const size_t level_size);
+
+    void ClearGainVector();
 };
 
 class SymmetricTreeShareThresholdRefreshLearner : public SymmetricTreeShareThresholdLearner {
