@@ -51,7 +51,7 @@ Tree* SymmetricTreeShareThresholdMultiFeatureLearner::Train(const score_t* gradi
           std::sort(level_splits.begin(), level_splits.end(), [] (SplitInfo a, SplitInfo b) { return a.gain > b.gain; });
           int best_leaf = 0;
           Split(tree.get(), best_leaf, &left_leaf, &right_leaf);
-          for(int i = 0; i < config_->symmetric_cycle && i < num_features_; ++i) {
+          for(int i = 0; i < num_features_; ++i) {
             int inner_feature_idx = train_data_->InnerFeatureIndex(level_splits[i].feature);
             used_features_.push_back(inner_feature_idx);
             is_feature_used_[inner_feature_idx] = 1;
@@ -111,7 +111,7 @@ void SymmetricTreeShareThresholdMultiFeatureLearner::FindBestSplitForFeature(int
   int larger_in_level = cur_leaf_id_in_level_ + 1;
   int left_leaf_data_count = GetGlobalDataCountInLeaf(left_leaf);
   int right_leaf_data_count = GetGlobalDataCountInLeaf(right_leaf);
-  bool use_subtract = false;//parent_leaf_histogram_array_ != nullptr;
+  bool use_subtract = parent_leaf_histogram_array_ != nullptr;
   if(right_leaf != -1 && left_leaf_data_count >= right_leaf_data_count) {
     smaller_in_level = cur_leaf_id_in_level_ + 1;
     larger_in_level = cur_leaf_id_in_level_;
