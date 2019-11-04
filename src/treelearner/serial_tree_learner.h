@@ -313,6 +313,8 @@ class SymmetricTreeShareThresholdRefreshLearner : public SymmetricTreeShareThres
     void ClearGainVector();
 
     void SetOrderedBin(const std::vector<SplitInfo>& level_split);
+
+    void BeforeTrain() override;
 };
 
 }  // namespace LightGBM
