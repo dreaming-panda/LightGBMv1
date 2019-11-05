@@ -43,7 +43,7 @@ class SerialTreeLearner: public TreeLearner {
 
   ~SerialTreeLearner();
 
-  void Init(const Dataset* train_data, bool is_constant_hessian) override;
+  virtual void Init(const Dataset* train_data, bool is_constant_hessian) override;
 
   void ResetTrainingData(const Dataset* train_data) override;
 
@@ -231,9 +231,6 @@ class SymmetricTreeShareThresholdLearner : public SymmetricTreeLearner {
               Json& forced_split_json) override;
   
   protected:
-    std::vector<std::vector<double>> feature_threshold_gain_;
-    std::vector<std::vector<std::vector<SplitInfo>>> feature_threshold_split_info_;
-
     std::vector<std::vector<double>> next_feature_threshold_gain_;
     std::vector<std::vector<std::vector<SplitInfo>>> next_feature_threshold_split_info_;
 
@@ -268,9 +265,6 @@ class SymmetricTreeShareThresholdMultiFeatureLearner : public SymmetricTreeShare
               Json& forced_split_json) override;
   
   private:
-    std::vector<std::vector<std::vector<double>>> feature_threshold_gain_;
-    std::vector<std::vector<std::vector<std::vector<SplitInfo>>>> feature_threshold_split_info_;
-
     std::vector<std::vector<std::vector<double>>> next_feature_threshold_gain_;
     std::vector<std::vector<std::vector<std::vector<SplitInfo>>>> next_feature_threshold_split_info_;
     
@@ -283,6 +277,8 @@ class SymmetricTreeShareThresholdMultiFeatureLearner : public SymmetricTreeShare
     void InitializeThresholdStats(const size_t level_size);
 
     void ClearGainVector();
+
+    void BeforeTrain() override;
 };
 
 class SymmetricTreeShareThresholdRefreshLearner : public SymmetricTreeShareThresholdLearner {
@@ -293,9 +289,6 @@ class SymmetricTreeShareThresholdRefreshLearner : public SymmetricTreeShareThres
               Json& forced_split_json) override;
   
   private:
-    std::vector<std::vector<std::vector<double>>> feature_threshold_gain_;
-    std::vector<std::vector<std::vector<std::vector<SplitInfo>>>> feature_threshold_split_info_;
-
     std::vector<std::vector<std::vector<double>>> next_feature_threshold_gain_;
     std::vector<std::vector<std::vector<std::vector<SplitInfo>>>> next_feature_threshold_split_info_;
 

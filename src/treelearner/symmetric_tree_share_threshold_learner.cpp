@@ -89,14 +89,11 @@ Tree* SymmetricTreeShareThresholdLearner::Train(const score_t* gradients, const 
             }
 
             if(node_in_level == 0) {
-              feature_threshold_gain_ = next_feature_threshold_gain_;
-              feature_threshold_split_info_ = next_feature_threshold_split_info_;
-
               feature = level >= num_features_ ? level_splits.back().feature : level_splits[level].feature;
               level_inner_feature_index = train_data_->InnerFeatureIndex(feature);
 
-              ClearGainVector();
               SetShareThreshold(level_leaf_queue, level_splits[level - 1].feature);
+              ClearGainVector();
               CHECK(cur_leaf_id_in_level_ == level_size);
               cur_leaf_id_in_level_ = 0;
             }
@@ -265,17 +262,17 @@ void SymmetricTreeShareThresholdLearner::FindBestSplitForFeature(int left_leaf, 
 void SymmetricTreeShareThresholdLearner::SetShareThreshold(const std::queue<int>& level_leaf_queue, int feature) {
   std::queue<int> copy_level_leaf_queue = level_leaf_queue;
   uint32_t best_threshold = 0;
-  double best_gain = feature_threshold_gain_[0][0];
+  double best_gain = next_feature_threshold_gain_[0][0];
   int best_dir = 0;
-  for(uint32_t i = 1; i < feature_threshold_gain_.size(); ++i) {
-    if(feature_threshold_gain_[i][0] > best_gain) {
-      best_gain = feature_threshold_gain_[i][0];
+  for(uint32_t i = 1; i < next_feature_threshold_gain_.size(); ++i) {
+    if(next_feature_threshold_gain_[i][0] > best_gain) {
+      best_gain = next_feature_threshold_gain_[i][0];
       best_threshold = i;
     }
   }
-  for(uint32_t i = 0; i < feature_threshold_gain_.size(); ++i) {
-    if(feature_threshold_gain_[i][1] > best_gain) {
-      best_gain = feature_threshold_gain_[i][1];
+  for(uint32_t i = 0; i < next_feature_threshold_gain_.size(); ++i) {
+    if(next_feature_threshold_gain_[i][1] > best_gain) {
+      best_gain = next_feature_threshold_gain_[i][1];
       best_threshold = i;
       best_dir = 1;
     }
@@ -289,7 +286,7 @@ void SymmetricTreeShareThresholdLearner::SetShareThreshold(const std::queue<int>
   while(!copy_level_leaf_queue.empty()) {
     int leaf = copy_level_leaf_queue.front();
     copy_level_leaf_queue.pop();
-    best_split_per_leaf_[leaf] = feature_threshold_split_info_[cur_leaf_id_in_level][best_threshold][best_dir];
+    best_split_per_leaf_[leaf] = next_feature_threshold_split_info_[cur_leaf_id_in_level][best_threshold][best_dir];
     best_split_per_leaf_[leaf].feature = feature;
     SplitInfo& split_info = best_split_per_leaf_[leaf];
     split_info.left_output = FeatureHistogram::CalculateSplittedLeafOutput(split_info.left_sum_gradient, split_info.left_sum_hessian, config_->lambda_l1, config_->lambda_l2, config_->max_delta_step);
