@@ -88,24 +88,24 @@ class MultiValDenseBin : public MultiValBin {
         for (; j < vec_end; j += 4) {
           const uint32_t bin0 = static_cast<uint32_t>(data_ptr[j]);
           const auto ti0 = (bin0 + offsets_ptr[j]) << 1;
-          __m64* hist0_pos = reinterpret_cast<__m64*>(grad + ti0);
+          __m64* hist0_pos = (__m64*)(grad + ti0);
           
           __m128 hist0;
           hist0 = _mm_loadl_pi(hist0, hist0_pos);
           const uint32_t bin1 = static_cast<uint32_t>(data_ptr[j + 1]);
           const auto ti1 = (bin1 + offsets_ptr[j + 1]) << 1;
-          __m64* hist1_pos = reinterpret_cast<__m64*>(grad + ti1);
+          __m64* hist1_pos = (__m64*)(grad + ti1);
           hist0 = _mm_loadh_pi(hist0, hist1_pos);
 
           const uint32_t bin2 = static_cast<uint32_t>(data_ptr[j + 2]);
           const auto ti2 = (bin2 + offsets_ptr[j + 2]) << 1;
-          __m64* hist2_pos = reinterpret_cast<__m64*>(grad + ti2);
+          __m64* hist2_pos = (__m64*)(grad + ti2);
 
           __m128 hist2;
           hist2 = _mm_loadl_pi(hist2, hist2_pos);
           const uint32_t bin3 = static_cast<uint32_t>(data_ptr[j + 3]);
           const auto ti3 = (bin3 + offsets_ptr[j + 3]) << 1;
-          __m64* hist3_pos = reinterpret_cast<__m64*>(grad + ti3);
+          __m64* hist3_pos = (__m64*)(grad + ti3);
           hist2 = _mm_loadh_pi(hist2, hist3_pos);
 
           __m256 hist = _mm256_castps128_ps256(hist0);
@@ -143,24 +143,24 @@ class MultiValDenseBin : public MultiValBin {
       for (; j < vec_end; j += 4) {
         const uint32_t bin0 = static_cast<uint32_t>(data_ptr[j]);
         const auto ti0 = (bin0 + offsets_ptr[j]) << 1;
-        __m64* hist0_pos = reinterpret_cast<__m64*>(grad + ti0);
+        __m64* hist0_pos = (__m64*)(grad + ti0);
         
         __m128 hist0;
         hist0 = _mm_loadl_pi(hist0, hist0_pos);
         const uint32_t bin1 = static_cast<uint32_t>(data_ptr[j + 1]);
         const auto ti1 = (bin1 + offsets_ptr[j + 1]) << 1;
-        __m64* hist1_pos = reinterpret_cast<__m64*>(grad + ti1);
+        __m64* hist1_pos = (__m64*)(grad + ti1);
         hist0 = _mm_loadh_pi(hist0, hist1_pos);
 
         const uint32_t bin2 = static_cast<uint32_t>(data_ptr[j + 2]);
         const auto ti2 = (bin2 + offsets_ptr[j + 2]) << 1;
-        __m64* hist2_pos = reinterpret_cast<__m64*>(grad + ti2);
+        __m64* hist2_pos = (__m64*)(grad + ti2);
 
         __m128 hist2;
         hist2 = _mm_loadl_pi(hist2, hist2_pos);
         const uint32_t bin3 = static_cast<uint32_t>(data_ptr[j + 3]);
         const auto ti3 = (bin3 + offsets_ptr[j + 3]) << 1;
-        __m64* hist3_pos = reinterpret_cast<__m64*>(grad + ti3);
+        __m64* hist3_pos = (__m64*)(grad + ti3);
         hist2 = _mm_loadh_pi(hist2, hist3_pos);
 
         __m256 hist = _mm256_castps128_ps256(hist0);
