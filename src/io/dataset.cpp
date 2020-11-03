@@ -1233,7 +1233,7 @@ void Dataset::ConstructHistogramsMultiVal(const data_size_t* data_indices,
     hist_data = share_state->TempBuf();
   }
   OMP_INIT_EX();
-#pragma omp parallel for schedule(static) num_threads(share_state->num_threads)
+#pragma omp parallel for schedule(static, 1) num_threads(share_state->num_threads)
   for (int tid = 0; tid < n_data_block; ++tid) {
     OMP_LOOP_EX_BEGIN();
     data_size_t start = tid * data_block_size;
