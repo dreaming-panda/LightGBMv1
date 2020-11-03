@@ -116,12 +116,12 @@ class MultiValSparseBin : public MultiValBin {
   void ConstructHistogramInner(const data_size_t* data_indices,
                                data_size_t start, data_size_t end,
                                const score_t* gradients,
-                               const score_t* hessians, float* out) const {
+                               const score_t* hessians, hist_t* out) const {
     data_size_t i = start;
-    float* grad = out;
-    float* hess = out + 1;
-    __m64* hist_ptr = reinterpret_cast<__m64*>(grad);
-    const int blend_bits = 0xaa;
+    hist_t* grad = out;
+    hist_t* hess = out + 1;
+    double* hist_ptr = reinterpret_cast<double*>(grad);
+    const int blend_bits = 0xa;
     const VAL_T* data_ptr = data_.data();
     if (USE_PREFETCH) {
       const data_size_t pf_offset = 32 / sizeof(VAL_T);
@@ -139,44 +139,32 @@ class MultiValSparseBin : public MultiValBin {
         PREFETCH_T0(data_ptr + row_ptr_[pf_idx]);
         const auto j_start = RowPtr(idx);
         const auto j_end = RowPtr(idx + 1);
-        const score_t gradient = ORDERED ? gradients[i] : gradients[idx];
-        const score_t hessian = ORDERED ? hessians[i] : hessians[idx];
-        __m256 g_vec = _mm256_broadcast_ss(&gradient);
-        __m256 h_vec = _mm256_broadcast_ss(&hessian);
-        __m256 gh_vec = _mm256_blend_ps(g_vec, h_vec, blend_bits);
-        const auto j_vec_end = j_end - ((j_end - j_start) % 4);
+        const double gradient = ORDERED ? static_cast<double>(gradients[i]) : static_cast<double>(gradients[idx]);
+        const double hessian = ORDERED ? static_cast<double>(hessians[i]) : static_cast<double>(hessians[idx]);
+        __m256d g_vec = _mm256_broadcast_sd(&gradient);
+        __m256d h_vec = _mm256_broadcast_sd(&hessian);
+        __m256d gh_vec = _mm256_blend_pd(g_vec, h_vec, blend_bits);
+        const auto j_vec_end = j_end - ((j_end - j_start) % 2);
         auto j = j_start;
-        for (; j < j_vec_end; j += 4) {
+        for (; j < j_vec_end; j += 2) {
           const uint32_t bin0 = static_cast<uint32_t>(data_ptr[j]);
-          __m64* hist0_pos = hist_ptr + bin0;
+          double* hist0_pos = hist_ptr + (bin0 << 1);
+          __m128d hist0 = _mm_load_pd(hist0_pos);
           
-          __m128 hist0;
-          hist0 = _mm_loadl_pi(hist0, hist0_pos);
           const uint32_t bin1 = static_cast<uint32_t>(data_ptr[j + 1]);
-          __m64* hist1_pos = hist_ptr + bin1;
-          hist0 = _mm_loadh_pi(hist0, hist1_pos);
+          double* hist1_pos = hist_ptr + (bin1 << 1);
+          __m128d hist1 = _mm_load_pd(hist1_pos);
 
-          const uint32_t bin2 = static_cast<uint32_t>(data_ptr[j + 2]);
-          __m64* hist2_pos = hist_ptr + bin2;
+          __m256d hist = _mm256_castpd128_pd256(hist0);
+          hist = _mm256_insertf128_pd(hist, hist1, 1);
 
-          __m128 hist2;
-          hist2 = _mm_loadl_pi(hist2, hist2_pos);
-          const uint32_t bin3 = static_cast<uint32_t>(data_ptr[j + 3]);
-          __m64* hist3_pos = hist_ptr + bin3;
-          hist2 = _mm_loadh_pi(hist2, hist3_pos);
+          hist = _mm256_add_pd(hist, gh_vec);
 
-          __m256 hist = _mm256_castps128_ps256(hist0);
-          hist = _mm256_insertf128_ps(hist, hist2, 1);
+          __m128d res1 = _mm256_extractf128_pd(hist, 1);
+          __m128d res0 = _mm256_castpd256_pd128(hist);
 
-          hist = _mm256_add_ps(hist, gh_vec);
-
-          __m128 res1 = _mm256_extractf128_ps(hist, 1);
-          __m128 res0 = _mm256_castps256_ps128(hist);
-
-          _mm_storel_pi(hist0_pos, res0);
-          _mm_storeh_pi(hist1_pos, res0);
-          _mm_storel_pi(hist2_pos, res1);
-          _mm_storeh_pi(hist3_pos, res1);
+          _mm_store_pd(hist0_pos, res0);
+          _mm_store_pd(hist1_pos, res1);
         }
         for (; j < j_end; ++j) {
           const auto ti = static_cast<uint32_t>(data_[j]) << 1;
@@ -189,44 +177,32 @@ class MultiValSparseBin : public MultiValBin {
       const auto idx = USE_INDICES ? data_indices[i] : i;
       const auto j_start = RowPtr(idx);
       const auto j_end = RowPtr(idx + 1);
-      const score_t gradient = ORDERED ? gradients[i] : gradients[idx];
-      const score_t hessian = ORDERED ? hessians[i] : hessians[idx];
-      __m256 g_vec = _mm256_broadcast_ss(&gradient);
-      __m256 h_vec = _mm256_broadcast_ss(&hessian);
-      __m256 gh_vec = _mm256_blend_ps(g_vec, h_vec, blend_bits);
+      const double gradient = ORDERED ? static_cast<double>(gradients[i]) : static_cast<double>(gradients[idx]);
+      const double hessian = ORDERED ? static_cast<double>(hessians[i]) : static_cast<double>(hessians[idx]);
+      __m256d g_vec = _mm256_broadcast_sd(&gradient);
+      __m256d h_vec = _mm256_broadcast_sd(&hessian);
+      __m256d gh_vec = _mm256_blend_pd(g_vec, h_vec, blend_bits);
       const auto j_vec_end = j_end - ((j_end - j_start) % 4);
       auto j = j_start;
-      for (; j < j_vec_end; j += 4) {
+      for (; j < j_vec_end; j += 2) {
         const uint32_t bin0 = static_cast<uint32_t>(data_ptr[j]);
-        __m64* hist0_pos = hist_ptr + bin0;
+        double* hist0_pos = hist_ptr + (bin0 << 1);
+        __m128d hist0 = _mm_load_pd(hist0_pos);
         
-        __m128 hist0;
-        hist0 = _mm_loadl_pi(hist0, hist0_pos);
         const uint32_t bin1 = static_cast<uint32_t>(data_ptr[j + 1]);
-        __m64* hist1_pos = hist_ptr + bin1;
-        hist0 = _mm_loadh_pi(hist0, hist1_pos);
+        double* hist1_pos = hist_ptr + (bin1 << 1);
+        __m128d hist1 = _mm_load_pd(hist1_pos);
 
-        const uint32_t bin2 = static_cast<uint32_t>(data_ptr[j + 2]);
-        __m64* hist2_pos = hist_ptr + bin2;
+        __m256d hist = _mm256_castpd128_pd256(hist0);
+        hist = _mm256_insertf128_pd(hist, hist1, 1);
 
-        __m128 hist2;
-        hist2 = _mm_loadl_pi(hist2, hist2_pos);
-        const uint32_t bin3 = static_cast<uint32_t>(data_ptr[j + 3]);
-        __m64* hist3_pos = hist_ptr + bin3;
-        hist2 = _mm_loadh_pi(hist2, hist3_pos);
+        hist = _mm256_add_pd(hist, gh_vec);
 
-        __m256 hist = _mm256_castps128_ps256(hist0);
-        hist = _mm256_insertf128_ps(hist, hist2, 1);
+        __m128d res1 = _mm256_extractf128_pd(hist, 1);
+        __m128d res0 = _mm256_castpd256_pd128(hist);
 
-        hist = _mm256_add_ps(hist, gh_vec);
-
-        __m128 res1 = _mm256_extractf128_ps(hist, 1);
-        __m128 res0 = _mm256_castps256_ps128(hist);
-
-        _mm_storel_pi(hist0_pos, res0);
-        _mm_storeh_pi(hist1_pos, res0);
-        _mm_storel_pi(hist2_pos, res1);
-        _mm_storeh_pi(hist3_pos, res1);
+        _mm_store_pd(hist0_pos, res0);
+        _mm_store_pd(hist1_pos, res1);
       }
       for (; j < j_end; ++j) {
         const auto ti = static_cast<uint32_t>(data_[j]) << 1;
@@ -238,14 +214,14 @@ class MultiValSparseBin : public MultiValBin {
 
   void ConstructHistogram(const data_size_t* data_indices, data_size_t start,
                           data_size_t end, const score_t* gradients,
-                          const score_t* hessians, float* out) const override {
+                          const score_t* hessians, hist_t* out) const override {
     ConstructHistogramInner<true, true, false>(data_indices, start, end,
                                                gradients, hessians, out);
   }
 
   void ConstructHistogram(data_size_t start, data_size_t end,
                           const score_t* gradients, const score_t* hessians,
-                          float* out) const override {
+                          hist_t* out) const override {
     ConstructHistogramInner<false, false, false>(
         nullptr, start, end, gradients, hessians, out);
   }
@@ -254,7 +230,7 @@ class MultiValSparseBin : public MultiValBin {
                                  data_size_t start, data_size_t end,
                                  const score_t* gradients,
                                  const score_t* hessians,
-                                 float* out) const override {
+                                 hist_t* out) const override {
     ConstructHistogramInner<true, true, true>(data_indices, start, end,
                                               gradients, hessians, out);
   }
