@@ -40,7 +40,7 @@ typedef double score_t;
 typedef float score_t;
 #endif
 
-typedef int32_t int_score_t;
+typedef int16_t int_score_t;
 typedef int64_t int_hist_t;
 #define kIntGradBins 10000
 
