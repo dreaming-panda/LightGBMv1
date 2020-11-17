@@ -77,13 +77,16 @@ void SerialTreeLearner::GetShareStates(const Dataset* dataset,
   if (is_first_time) {
     share_state_.reset(dataset->GetShareStates(
         ordered_gradients_.data(), ordered_hessians_.data(),
+        int_ordered_gradients_.data(), int_ordered_hessians_.data(),
         col_sampler_.is_feature_used_bytree(), is_constant_hessian,
         config_->force_col_wise, config_->force_row_wise));
   } else {
     CHECK_NOTNULL(share_state_);
     // cannot change is_hist_col_wise during training
     share_state_.reset(dataset->GetShareStates(
-        ordered_gradients_.data(), ordered_hessians_.data(), col_sampler_.is_feature_used_bytree(),
+        ordered_gradients_.data(), ordered_hessians_.data(),
+        int_ordered_gradients_.data(), int_ordered_hessians_.data(),
+        col_sampler_.is_feature_used_bytree(),
         is_constant_hessian, share_state_->is_col_wise,
         !share_state_->is_col_wise));
   }
@@ -155,10 +158,14 @@ void SerialTreeLearner::ResetConfig(const Config* config) {
   constraints_.reset(LeafConstraintsBase::Create(config_, config_->num_leaves, train_data_->num_features()));
 }
 
-Tree* SerialTreeLearner::Train(const score_t* gradients, const score_t *hessians) {
+Tree* SerialTreeLearner::Train(const score_t* gradients, const score_t *hessians,
+  const int_score_t* int_gradients, const int_score_t* int_hessians,
+  const double grad_scale, const double hess_scale) {
   Common::FunctionTimer fun_timer("SerialTreeLearner::Train", global_timer);
   gradients_ = gradients;
   hessians_ = hessians;
+  int_gradients_ = int_gradients;
+  int_hessians_ = int_hessians;
   int num_threads = OMP_NUM_THREADS();
   if (share_state_->num_threads != num_threads && share_state_->num_threads > 0) {
     Log::Warning(
@@ -167,6 +174,7 @@ Tree* SerialTreeLearner::Train(const score_t* gradients, const score_t *hessians
         share_state_->num_threads, num_threads);
   }
   share_state_->num_threads = num_threads;
+  share_state_->SetGradScale(grad_scale, hess_scale);
 
   // some initial works before training
   BeforeTrain();
@@ -352,19 +360,25 @@ void SerialTreeLearner::ConstructHistograms(
   // construct smaller leaf
   hist_t* ptr_smaller_leaf_hist_data =
       smaller_leaf_histogram_array_[0].RawData() - kHistOffset;
-  train_data_->ConstructHistograms(
+  train_data_->ConstructHistograms<true>(
       is_feature_used, smaller_leaf_splits_->data_indices(),
-      smaller_leaf_splits_->num_data_in_leaf(), gradients_, hessians_,
-      ordered_gradients_.data(), ordered_hessians_.data(), share_state_.get(),
+      smaller_leaf_splits_->num_data_in_leaf(),
+      gradients_, hessians_,
+      ordered_gradients_.data(), ordered_hessians_.data(),
+      int_gradients_, int_hessians_,
+      int_ordered_gradients_.data(), int_ordered_hessians_.data(), share_state_.get(),
       ptr_smaller_leaf_hist_data);
   if (larger_leaf_histogram_array_ != nullptr && !use_subtract) {
     // construct larger leaf
     hist_t* ptr_larger_leaf_hist_data =
         larger_leaf_histogram_array_[0].RawData() - kHistOffset;
-    train_data_->ConstructHistograms(
+    train_data_->ConstructHistograms<true>(
         is_feature_used, larger_leaf_splits_->data_indices(),
-        larger_leaf_splits_->num_data_in_leaf(), gradients_, hessians_,
-        ordered_gradients_.data(), ordered_hessians_.data(), share_state_.get(),
+        larger_leaf_splits_->num_data_in_leaf(), 
+        gradients_, hessians_,
+        ordered_gradients_.data(), ordered_hessians_.data(),
+        int_gradients_, int_hessians_,
+        int_ordered_gradients_.data(), int_ordered_hessians_.data(), share_state_.get(),
         ptr_larger_leaf_hist_data);
   }
 }

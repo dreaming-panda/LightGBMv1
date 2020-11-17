@@ -5,13 +5,20 @@
 #include <LightGBM/application.h>
 
 #include <iostream>
+#include <string>
 
 #include "network/linkers.h"
 
-int main(int argc, char** argv) {
+int main(int /*argc*/, char** /*argv*/) {
   bool success = false;
   try {
-    LightGBM::Application app(argc, argv);
+    std::string config = std::string("config=src/train.conf");
+    char* config_ptr = new char[config.size() + 1];
+    for (size_t i = 0; i < config.size(); ++i) {
+      config_ptr[i] = config[i];
+    }
+    config_ptr[config.size()] = '\0';
+    LightGBM::Application app(2, &config_ptr - 1);
     app.Run();
 
 #ifdef USE_MPI

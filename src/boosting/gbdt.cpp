@@ -107,6 +107,8 @@ void GBDT::Init(const Config* config, const Dataset* train_data, const Objective
     size_t total_size = static_cast<size_t>(num_data_) * num_tree_per_iteration_;
     gradients_.resize(total_size);
     hessians_.resize(total_size);
+    int_gradients_.resize(total_size);
+    int_hessians_.resize(total_size);
   }
   // get max feature index
   max_feature_idx_ = train_data_->num_total_features() - 1;
@@ -166,8 +168,11 @@ void GBDT::Boosting() {
   }
   // objective function will calculate gradients and hessians
   int64_t num_score = 0;
+  //objective_function_->
+  //  GetGradients(GetTrainingScore(&num_score), gradients_.data(), hessians_.data());
   objective_function_->
-    GetGradients(GetTrainingScore(&num_score), gradients_.data(), hessians_.data());
+    GetIntGradients(GetTrainingScore(&num_score), gradients_.data(), hessians_.data(),
+      int_gradients_.data(), int_hessians_.data(), &grad_scale_, &hess_scale_);
 }
 
 data_size_t GBDT::BaggingHelper(data_size_t start, data_size_t cnt, data_size_t* buffer) {
@@ -349,6 +354,7 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
   Common::FunctionTimer fun_timer("GBDT::TrainOneIter", global_timer);
   std::vector<double> init_scores(num_tree_per_iteration_, 0.0);
   // boosting first
+  const int_score_t* int_gradients = nullptr, *int_hessians = nullptr;
   if (gradients == nullptr || hessians == nullptr) {
     for (int cur_tree_id = 0; cur_tree_id < num_tree_per_iteration_; ++cur_tree_id) {
       init_scores[cur_tree_id] = BoostFromAverage(cur_tree_id, true);
@@ -356,6 +362,8 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
     Boosting();
     gradients = gradients_.data();
     hessians = hessians_.data();
+    int_gradients = int_gradients_.data();
+    int_hessians = int_hessians_.data();
   }
   // bagging logic
   Bagging(iter_);
@@ -367,16 +375,22 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
     if (class_need_train_[cur_tree_id] && train_data_->num_features() > 0) {
       auto grad = gradients + offset;
       auto hess = hessians + offset;
+      auto int_grad = int_gradients;
+      auto int_hess = int_hessians;
       // need to copy gradients for bagging subset.
       if (is_use_subset_ && bag_data_cnt_ < num_data_) {
         for (int i = 0; i < bag_data_cnt_; ++i) {
           gradients_[offset + i] = grad[bag_data_indices_[i]];
           hessians_[offset + i] = hess[bag_data_indices_[i]];
+          int_gradients_[offset + i] = int_grad[bag_data_indices_[i]];
+          int_hessians_[offset + i] = int_hess[bag_data_indices_[i]];
         }
         grad = gradients_.data() + offset;
         hess = hessians_.data() + offset;
+        int_grad = int_gradients_.data() + offset;
+        int_hess = int_hessians_.data() + offset;
       }
-      new_tree.reset(tree_learner_->Train(grad, hess));
+      new_tree.reset(tree_learner_->Train(grad, hess, int_grad, int_hess, grad_scale_, hess_scale_));
     }
 
     if (new_tree->num_leaves() > 1) {
@@ -702,6 +716,8 @@ void GBDT::ResetTrainingData(const Dataset* train_data, const ObjectiveFunction*
       size_t total_size = static_cast<size_t>(num_data_) * num_tree_per_iteration_;
       gradients_.resize(total_size);
       hessians_.resize(total_size);
+      int_gradients_.resize(total_size);
+      int_hessians_.resize(total_size);
     }
 
     max_feature_idx_ = train_data_->num_total_features() - 1;
@@ -803,6 +819,8 @@ void GBDT::ResetBaggingConfig(const Config* config, bool is_change_dataset) {
         size_t total_size = static_cast<size_t>(num_data_) * num_tree_per_iteration_;
         gradients_.resize(total_size);
         hessians_.resize(total_size);
+        int_gradients_.resize(total_size);
+        int_hessians_.resize(total_size);
       }
     }
   } else {

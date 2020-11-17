@@ -31,11 +31,32 @@ class ObjectiveFunction {
   /*!
   * \brief calculating first order derivative of loss function
   * \param score prediction score in this round
-  * \gradients Output gradients
-  * \hessians Output hessians
+  * \param gradients Output gradients
+  * \param hessians Output hessians
   */
   virtual void GetGradients(const double* score,
     score_t* gradients, score_t* hessians) const = 0;
+
+  /*!
+  * \brief calculating first order derivative of loss function
+  * \param score prediction score in this round
+  * \param gradients Output gradients
+  * \param hessians Output hessians
+  * \param int_gradients Output gradients
+  * \param int_hessians Output hessians
+  * \param grad_scale Output scaling factor of gradient
+  * \param grad_bias Output bias of gradient
+  * \param hess_scale Output scaling factor of hessian
+  * \param hess_bias Output bias of hessian
+  */
+  virtual void GetIntGradients(const double* /*score*/,
+    score_t* /*gradients*/, score_t* /*hessians*/,
+    int_score_t* /*int_gradients*/, int_score_t* /*int_hessians*/,
+    double* /*grad_scale*/, double* /*hess_scale*/) const {}
+
+  virtual void DiscretizeGradients(score_t* /*gradients*/, score_t* /*hessians*/,
+    int_score_t* /*int_gradients*/, int_score_t* /*int_hessians*/,
+    double* /*grad_scale*/, double* /*hess_scale*/) const {}
 
   virtual const char* GetName() const = 0;
 

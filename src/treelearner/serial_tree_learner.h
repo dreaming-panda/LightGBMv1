@@ -74,7 +74,9 @@ class SerialTreeLearner: public TreeLearner {
     }
   }
 
-  Tree* Train(const score_t* gradients, const score_t *hessians) override;
+  Tree* Train(const score_t* gradients, const score_t *hessians,
+    const int_score_t* int_gradients, const int_score_t* int_hessians,
+    const double grad_scale, const double hess_scale) override;
 
   Tree* FitByExistingTree(const Tree* old_tree, const score_t* gradients, const score_t* hessians) const override;
 
@@ -181,6 +183,10 @@ class SerialTreeLearner: public TreeLearner {
   const score_t* gradients_;
   /*! \brief hessians of current iteration */
   const score_t* hessians_;
+  /*! \brief gradients of current iteration */
+  const int_score_t* int_gradients_;
+  /*! \brief hessians of current iteration */
+  const int_score_t* int_hessians_;
   /*! \brief training data partition on leaves */
   std::unique_ptr<DataPartition> data_partition_;
   /*! \brief pointer to histograms array of parent of current leaves */
@@ -216,6 +222,10 @@ class SerialTreeLearner: public TreeLearner {
   std::vector<score_t, Common::AlignmentAllocator<score_t, kAlignedSize>> ordered_gradients_;
   /*! \brief hessians of current iteration, ordered for cache optimized */
   std::vector<score_t, Common::AlignmentAllocator<score_t, kAlignedSize>> ordered_hessians_;
+  /*! \brief gradients of current iteration, ordered for cache optimized */
+  std::vector<int_score_t, Common::AlignmentAllocator<int_score_t, kAlignedSize>> int_ordered_gradients_;
+  /*! \brief hessians of current iteration, ordered for cache optimized */
+  std::vector<int_score_t, Common::AlignmentAllocator<int_score_t, kAlignedSize>> int_ordered_hessians_;
 #endif
   /*! \brief used to cache historical histogram to speed up*/
   HistogramPool histogram_pool_;

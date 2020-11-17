@@ -55,7 +55,9 @@ class TreeLearner {
   * \param hessians The second order gradients
   * \return A trained tree
   */
-  virtual Tree* Train(const score_t* gradients, const score_t* hessians) = 0;
+  virtual Tree* Train(const score_t* gradients, const score_t *hessians,
+    const int_score_t* int_gradients, const int_score_t* int_hessians,
+    const double grad_scale, const double hess_scale) = 0;
 
   /*!
   * \brief use an existing tree to fit the new gradients and hessians.

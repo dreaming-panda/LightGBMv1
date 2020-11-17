@@ -195,6 +195,104 @@ class SparseBin : public Bin {
       cur_pos += deltas_[++i_delta];
     }
   }
+
+  void ConstructIntHistogram(const data_size_t* data_indices, data_size_t start,
+                          data_size_t end, const int_score_t* ordered_gradients,
+                          const int_score_t* ordered_hessians,
+                          int_hist_t* out) const override {
+    data_size_t i_delta, cur_pos;
+    InitIndex(data_indices[start], &i_delta, &cur_pos);
+    data_size_t i = start;
+    for (;;) {
+      if (cur_pos < data_indices[i]) {
+        cur_pos += deltas_[++i_delta];
+        if (i_delta >= num_vals_) {
+          break;
+        }
+      } else if (cur_pos > data_indices[i]) {
+        if (++i >= end) {
+          break;
+        }
+      } else {
+        const VAL_T bin = vals_[i_delta];
+        ACC_GH(out, bin, ordered_gradients[i], ordered_hessians[i]);
+        if (++i >= end) {
+          break;
+        }
+        cur_pos += deltas_[++i_delta];
+        if (i_delta >= num_vals_) {
+          break;
+        }
+      }
+    }
+  }
+
+  void ConstructIntHistogram(data_size_t start, data_size_t end,
+                          const int_score_t* ordered_gradients,
+                          const int_score_t* ordered_hessians,
+                          int_hist_t* out) const override {
+    data_size_t i_delta, cur_pos;
+    InitIndex(start, &i_delta, &cur_pos);
+    while (cur_pos < start && i_delta < num_vals_) {
+      cur_pos += deltas_[++i_delta];
+    }
+    while (cur_pos < end && i_delta < num_vals_) {
+      const VAL_T bin = vals_[i_delta];
+      ACC_GH(out, bin, ordered_gradients[cur_pos], ordered_hessians[cur_pos]);
+      cur_pos += deltas_[++i_delta];
+    }
+  }
+
+  void ConstructIntHistogram(const data_size_t* data_indices, data_size_t start,
+                          data_size_t end, const int_score_t* ordered_gradients,
+                          int_hist_t* out) const override {
+    data_size_t i_delta, cur_pos;
+    InitIndex(data_indices[start], &i_delta, &cur_pos);
+    data_size_t i = start;
+    int_hist_t* grad = out;
+    hist_cnt_t* cnt = reinterpret_cast<hist_cnt_t*>(out + 1);
+    for (;;) {
+      if (cur_pos < data_indices[i]) {
+        cur_pos += deltas_[++i_delta];
+        if (i_delta >= num_vals_) {
+          break;
+        }
+      } else if (cur_pos > data_indices[i]) {
+        if (++i >= end) {
+          break;
+        }
+      } else {
+        const uint32_t ti = static_cast<uint32_t>(vals_[i_delta]) << 1;
+        grad[ti] += ordered_gradients[i];
+        ++cnt[ti];
+        if (++i >= end) {
+          break;
+        }
+        cur_pos += deltas_[++i_delta];
+        if (i_delta >= num_vals_) {
+          break;
+        }
+      }
+    }
+  }
+
+  void ConstructIntHistogram(data_size_t start, data_size_t end,
+                          const int_score_t* ordered_gradients,
+                          int_hist_t* out) const override {
+    data_size_t i_delta, cur_pos;
+    InitIndex(start, &i_delta, &cur_pos);
+    int_hist_t* grad = out;
+    hist_cnt_t* cnt = reinterpret_cast<hist_cnt_t*>(out + 1);
+    while (cur_pos < start && i_delta < num_vals_) {
+      cur_pos += deltas_[++i_delta];
+    }
+    while (cur_pos < end && i_delta < num_vals_) {
+      const uint32_t ti = static_cast<uint32_t>(vals_[i_delta]) << 1;
+      grad[ti] += ordered_gradients[cur_pos];
+      ++cnt[ti];
+      cur_pos += deltas_[++i_delta];
+    }
+  }
 #undef ACC_GH
 
   inline void NextNonzeroFast(data_size_t* i_delta,

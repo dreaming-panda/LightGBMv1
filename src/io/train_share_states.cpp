@@ -58,6 +58,29 @@ void MultiValBinWrapper::HistMove(const std::vector<hist_t,
   }
 }
 
+void MultiValBinWrapper::IntHistMove(const std::vector<int_hist_t,
+  Common::AlignmentAllocator<int_hist_t, kAlignedSize>>& hist_buf) {
+  if (!is_use_subcol_) {
+    const int_hist_t* src = hist_buf.data();
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < num_bin_; ++i) {
+      origin_hist_data_[2 * i] = src[2 * i] * grad_scale;
+      origin_hist_data_[2 * i + 1] = src[2 * i + 1] * hess_scale;
+    }
+  } else {
+    const int_hist_t* src = hist_buf.data();
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < static_cast<int>(hist_move_src_.size()); ++i) {
+      const int_hist_t* src_ptr = src + hist_move_src_[i];
+      hist_t* dst_ptr = origin_hist_data_ + hist_move_dest_[i];
+      for (int j = 0; j < static_cast<int>(hist_move_size_[i]) / 2; ++j) {
+        dst_ptr[2 * j] = grad_scale * src_ptr[2 * j];
+        dst_ptr[2 * j + 1] = hess_scale * src_ptr[2 * j + 1];
+      }
+    }
+  }
+}
+
 void MultiValBinWrapper::HistMerge(std::vector<hist_t,
   Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf) {
   int n_bin_block = 1;
@@ -81,8 +104,41 @@ void MultiValBinWrapper::HistMerge(std::vector<hist_t,
   }
 }
 
+void MultiValBinWrapper::IntHistMerge(std::vector<int_hist_t,
+  Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* hist_buf) {
+  int n_bin_block = 1;
+  int bin_block_size = num_bin_;
+  Threading::BlockInfo<data_size_t>(num_threads_, num_bin_, 512, &n_bin_block,
+                                  &bin_block_size);
+  int_hist_t* dst = hist_buf->data();
+  #pragma omp parallel for schedule(static, 1) num_threads(num_threads_)
+  for (int t = 0; t < n_bin_block; ++t) {
+    const int start = t * bin_block_size;
+    const int end = std::min(start + bin_block_size, num_bin_);
+    for (int tid = 1; tid < n_data_block_; ++tid) {
+      auto src_ptr = hist_buf->data() + static_cast<size_t>(num_bin_aligned_) * 2 * tid;
+      for (int i = start * 2; i < end * 2; ++i) {
+        dst[i] += src_ptr[i];
+      }
+    }
+  }
+}
+
 void MultiValBinWrapper::ResizeHistBuf(std::vector<hist_t,
   Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf,
+  MultiValBin* sub_multi_val_bin,
+  hist_t* origin_hist_data) {
+  num_bin_ = sub_multi_val_bin->num_bin();
+  num_bin_aligned_ = (num_bin_ + kAlignedSize - 1) / kAlignedSize * kAlignedSize;
+  origin_hist_data_ = origin_hist_data;
+  size_t new_buf_size = static_cast<size_t>(n_data_block_) * static_cast<size_t>(num_bin_aligned_) * 2;
+  if (hist_buf->size() < new_buf_size) {
+    hist_buf->resize(new_buf_size);
+  }
+}
+
+void MultiValBinWrapper::ResizeIntHistBuf(std::vector<int_hist_t,
+  Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* hist_buf,
   MultiValBin* sub_multi_val_bin,
   hist_t* origin_hist_data) {
   num_bin_ = sub_multi_val_bin->num_bin();
@@ -402,6 +458,14 @@ void TrainingShareStates::SetMultiValBin(MultiValBin* bin, data_size_t num_data,
   num_elements_per_row_ += bin->num_element_per_row();
   multi_val_bin_wrapper_.reset(new MultiValBinWrapper(
     bin, num_data, feature_groups_contained));
+}
+
+void TrainingShareStates::RecoverHistogramsFromInteger(hist_t* /*hist*/) {
+
+}
+
+int_hist_t* TrainingShareStates::GetIntegerHistogram(int /*group_id*/) {
+  return nullptr;
 }
 
 }  // namespace LightGBM
