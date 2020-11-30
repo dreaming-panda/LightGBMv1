@@ -1126,7 +1126,7 @@ void Dataset::ConstructHistogramsInner(
   auto int_ptr_ordered_hess = int_hessians;
   if (num_used_dense_group > 0) {
     if (USE_INDICES) {
-      if (IS_INT_GRAD) {
+      if (!IS_INT_GRAD) {
         if (USE_HESSIAN) {
 #pragma omp parallel for schedule(static, 512) if (num_data >= 1024)
           for (data_size_t i = 0; i < num_data; ++i) {
@@ -1138,9 +1138,9 @@ void Dataset::ConstructHistogramsInner(
         } else {
 #pragma omp parallel for schedule(static, 512) if (num_data >= 1024)
           for (data_size_t i = 0; i < num_data; ++i) {
-            int_ordered_gradients[i] = int_gradients[data_indices[i]];
+            ordered_gradients[i] = gradients[data_indices[i]];
           }
-          int_ptr_ordered_grad = int_ordered_gradients;
+          ptr_ordered_grad = ordered_gradients;
         }
       } else {
         if (USE_HESSIAN) {
@@ -1169,7 +1169,7 @@ void Dataset::ConstructHistogramsInner(
       if (USE_HESSIAN) {
         if (USE_INDICES) {
           if (IS_INT_GRAD) {
-            auto data_ptr = share_state->GetIntegerHistogram(gi);
+            auto data_ptr = share_state->GetIntegerHistogram(group);
             std::memset(reinterpret_cast<void*>(data_ptr), 0,
                   num_bin * kIntHistEntrySize);
             feature_groups_[group]->bin_data_->ConstructIntHistogram(
@@ -1187,7 +1187,7 @@ void Dataset::ConstructHistogramsInner(
           }
         } else {
           if (IS_INT_GRAD) {
-            auto data_ptr = share_state->GetIntegerHistogram(gi);
+            auto data_ptr = share_state->GetIntegerHistogram(group);
             std::memset(reinterpret_cast<void*>(data_ptr), 0,
                   num_bin * kIntHistEntrySize);
             feature_groups_[group]->bin_data_->ConstructIntHistogram(
@@ -1203,7 +1203,7 @@ void Dataset::ConstructHistogramsInner(
       } else {
         if (USE_INDICES) {
           if (IS_INT_GRAD) {
-            auto data_ptr = share_state->GetIntegerHistogram(gi);
+            auto data_ptr = share_state->GetIntegerHistogram(group);
             std::memset(reinterpret_cast<void*>(data_ptr), 0,
                   num_bin * kIntHistEntrySize);
             feature_groups_[group]->bin_data_->ConstructIntHistogram(
@@ -1217,7 +1217,7 @@ void Dataset::ConstructHistogramsInner(
           }
         } else {
           if (IS_INT_GRAD) {
-            auto data_ptr = share_state->GetIntegerHistogram(gi);
+            auto data_ptr = share_state->GetIntegerHistogram(group);
             std::memset(reinterpret_cast<void*>(data_ptr), 0,
                   num_bin * kIntHistEntrySize);
             feature_groups_[group]->bin_data_->ConstructIntHistogram(
@@ -1251,7 +1251,7 @@ void Dataset::ConstructHistogramsInner(
             share_state,
             hist_data + group_bin_boundaries_[multi_val_groud_id] * 2);
       } else {
-          ConstructHistogramsMultiVal<USE_INDICES, true, score_t, IS_INT_GRAD>(
+        ConstructHistogramsMultiVal<USE_INDICES, true, score_t, IS_INT_GRAD>(
             data_indices, num_data, ptr_ordered_grad, ptr_ordered_hess,
             share_state,
             hist_data + group_bin_boundaries_[multi_val_groud_id] * 2);

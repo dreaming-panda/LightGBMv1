@@ -112,6 +112,10 @@ class MultiValBinWrapper {
       global_timer.Stop("Dataset::sparse_bin_histogram_merge");
       global_timer.Start("Dataset::sparse_bin_histogram_move");
       if (IS_INT_GRAD) {
+        //auto& hist = *reinterpret_cast<std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>*>(hist_buf);
+        /*for (int i = 0; i < 100; ++i) {
+          Log::Warning("bin %d grad %d hess %d", i, hist[2 * i], hist[2 * i + 1]);
+        }*/
         IntHistMove(
           *reinterpret_cast<std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>*>(hist_buf));
       } else {
@@ -256,6 +260,17 @@ struct TrainingShareStates {
         bagging_use_indices,
         bagging_indices_cnt);
     }
+    if (is_col_wise) {
+      int offset = 0;
+      group_bin_boundaries_.clear();
+      for (int group = 0; group < static_cast<int>(feature_groups.size()); ++group) {
+        const auto& fg = feature_groups[group];
+        group_bin_boundaries_.push_back(offset);
+        offset += fg->num_total_bin_;
+      }
+      group_bin_boundaries_.push_back(offset);
+      int_hist_buf_.resize(2 * group_bin_boundaries_.back());
+    }
   }
 
   template <bool USE_INDICES, bool ORDERED, typename SCORE_T, bool IS_INT_GRAD>
@@ -294,7 +309,11 @@ struct TrainingShareStates {
   int_hist_t* GetIntegerHistogram(int group_id);
 
   void SetGradScale(double grad_scale, double hess_scale) {
-    multi_val_bin_wrapper_->SetGradScale(grad_scale, hess_scale);
+    if (multi_val_bin_wrapper_ != nullptr) {
+      multi_val_bin_wrapper_->SetGradScale(grad_scale, hess_scale);
+    }
+    grad_scale_ = grad_scale;
+    hess_scale_ = hess_scale;
   }
 
  private:
@@ -305,6 +324,9 @@ struct TrainingShareStates {
   std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>> int_hist_buf_;
   int num_total_bin_ = 0;
   double num_elements_per_row_ = 0.0f;
+  std::vector<int> group_bin_boundaries_;
+  double grad_scale_;
+  double hess_scale_;
 };
 
 }  // namespace LightGBM
