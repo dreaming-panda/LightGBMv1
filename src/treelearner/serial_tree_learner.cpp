@@ -700,6 +700,26 @@ void SerialTreeLearner::SplitInner(Tree* tree, int best_leaf, int* left_leaf,
   }
 }
 
+void SerialTreeLearner::RenewIntGradTreeOutput(Tree* tree) const {
+  for (int leaf_id = 0; leaf_id < tree->num_leaves(); ++leaf_id) {
+    data_size_t leaf_cnt = 0;
+    const data_size_t* data_indices = data_partition_->GetIndexOnLeaf(leaf_id, &leaf_cnt);
+    double sum_gradient = 0.0f, sum_hessian = 0.0f;
+    #pragma omp parallel for schedule(static)
+    for (data_size_t i = 0; i < leaf_cnt; ++i) {
+      const data_size_t index = data_indices[i];
+      const score_t grad = gradients_[index];
+      const score_t hess = hessians_[index];
+      sum_gradient += grad;
+      sum_hessian += hess;
+    }
+    const double leaf_output = FeatureHistogram::CalculateSplittedLeafOutput<true, true, false>(sum_gradient, sum_hessian, 
+      config_->lambda_l1, config_->lambda_l2, config_->max_delta_step, config_->path_smooth,
+      leaf_cnt, 0.0f);
+    tree->SetLeafOutput(leaf_id, leaf_output);
+  }
+}
+
 void SerialTreeLearner::RenewTreeOutput(Tree* tree, const ObjectiveFunction* obj, std::function<double(const label_t*, int)> residual_getter,
                                         data_size_t total_num_data, const data_size_t* bag_indices, data_size_t bag_cnt) const {
   if (obj != nullptr && obj->IsRenewTreeOutput()) {
