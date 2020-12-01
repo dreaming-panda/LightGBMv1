@@ -316,6 +316,10 @@ struct TrainingShareStates {
     hess_scale_ = hess_scale;
   }
 
+  double grad_scale() const { return grad_scale_; }
+
+  double hess_scale() const { return hess_scale_; }
+
  private:
   std::vector<uint32_t> feature_hist_offsets_;
   uint64_t num_hist_total_bin_ = 0;

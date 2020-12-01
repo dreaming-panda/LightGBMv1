@@ -81,6 +81,27 @@ class LeafSplits {
   }
 
   /*!
+   * \brief Init splits on the current leaf, it will traverse all data to sum up the results
+   * \param int_gradients
+   * \param int_hessians
+   */
+  void Init(const int_score_t* int_gradients, const int_score_t* int_hessians,
+    const double grad_scale, const double hess_scale) {
+    num_data_in_leaf_ = num_data_;
+    leaf_index_ = 0;
+    data_indices_ = nullptr;
+    double tmp_sum_gradients = 0.0f;
+    double tmp_sum_hessians = 0.0f;
+#pragma omp parallel for schedule(static, 512) reduction(+:tmp_sum_gradients, tmp_sum_hessians) if (num_data_in_leaf_ >= 1024 && !config_->deterministic)
+    for (data_size_t i = 0; i < num_data_in_leaf_; ++i) {
+      tmp_sum_gradients += int_gradients[i] * grad_scale;
+      tmp_sum_hessians += int_hessians[i] * hess_scale;
+    }
+    sum_gradients_ = tmp_sum_gradients;
+    sum_hessians_ = tmp_sum_hessians;
+  }
+
+  /*!
    * \brief Init splits on current leaf of partial data.
    * \param leaf Index of current leaf
    * \param data_partition current data partition
@@ -98,6 +119,30 @@ class LeafSplits {
       const data_size_t idx = data_indices_[i];
       tmp_sum_gradients += gradients[idx];
       tmp_sum_hessians += hessians[idx];
+    }
+    sum_gradients_ = tmp_sum_gradients;
+    sum_hessians_ = tmp_sum_hessians;
+  }
+
+  /*!
+   * \brief Init splits on current leaf of partial data.
+   * \param leaf Index of current leaf
+   * \param data_partition current data partition
+   * \param int_gradients
+   * \param int_hessians
+   */
+  void Init(int leaf, const DataPartition* data_partition,
+            const int_score_t* int_gradients, const int_score_t* int_hessians,
+            const double grad_scale, const double hess_scale) {
+    leaf_index_ = leaf;
+    data_indices_ = data_partition->GetIndexOnLeaf(leaf, &num_data_in_leaf_);
+    double tmp_sum_gradients = 0.0f;
+    double tmp_sum_hessians = 0.0f;
+#pragma omp parallel for schedule(static, 512) reduction(+:tmp_sum_gradients, tmp_sum_hessians) if (num_data_in_leaf_ >= 1024 && !config_->deterministic)
+    for (data_size_t i = 0; i < num_data_in_leaf_; ++i) {
+      const data_size_t idx = data_indices_[i];
+      tmp_sum_gradients += int_gradients[idx] * grad_scale;
+      tmp_sum_hessians += int_hessians[idx] * hess_scale;
     }
     sum_gradients_ = tmp_sum_gradients;
     sum_hessians_ = tmp_sum_hessians;

@@ -279,11 +279,14 @@ void SerialTreeLearner::BeforeTrain() {
   // Sumup for root
   if (data_partition_->leaf_count(0) == num_data_) {
     // use all data
-    smaller_leaf_splits_->Init(gradients_, hessians_);
-
+    //smaller_leaf_splits_->Init(gradients_, hessians_);
+    smaller_leaf_splits_->Init(int_gradients_, int_hessians_,
+      share_state_->grad_scale(), share_state_->hess_scale());
   } else {
     // use bagging, only use part of data
-    smaller_leaf_splits_->Init(0, data_partition_.get(), gradients_, hessians_);
+    //smaller_leaf_splits_->Init(0, data_partition_.get(), gradients_, hessians_);
+    smaller_leaf_splits_->Init(0, data_partition_.get(),
+      int_gradients_, int_hessians_, share_state_->grad_scale(), share_state_->hess_scale());
   }
 
   larger_leaf_splits_->Init();
