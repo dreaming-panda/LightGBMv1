@@ -460,12 +460,16 @@ void TrainingShareStates::SetMultiValBin(MultiValBin* bin, data_size_t num_data,
     bin, num_data, feature_groups_contained));
 }
 
-void TrainingShareStates::RecoverHistogramsFromInteger(hist_t* /*hist*/) {
-
+void TrainingShareStates::RecoverHistogramsFromInteger(hist_t* hist) {
+  #pragma omp parallel for schedule(static)
+  for (int i = 0; i < static_cast<int>(int_hist_buf_.size()) / 2; ++i) {
+    hist[2 * i] = int_hist_buf_[2 * i] * grad_scale_;
+    hist[2 * i + 1] = int_hist_buf_[2 * i + 1] * hess_scale_;
+  }
 }
 
-int_hist_t* TrainingShareStates::GetIntegerHistogram(int /*group_id*/) {
-  return nullptr;
+int_hist_t* TrainingShareStates::GetIntegerHistogram(int group_id) {
+  return int_hist_buf_.data() + group_bin_boundaries_[group_id] * 2;
 }
 
 }  // namespace LightGBM
