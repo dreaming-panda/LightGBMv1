@@ -112,10 +112,6 @@ class MultiValBinWrapper {
       global_timer.Stop("Dataset::sparse_bin_histogram_merge");
       global_timer.Start("Dataset::sparse_bin_histogram_move");
       if (IS_INT_GRAD) {
-        //auto& hist = *reinterpret_cast<std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>*>(hist_buf);
-        /*for (int i = 0; i < 100; ++i) {
-          Log::Warning("bin %d grad %d hess %d", i, hist[2 * i], hist[2 * i + 1]);
-        }*/
         IntHistMove(
           *reinterpret_cast<std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>*>(hist_buf));
       } else {

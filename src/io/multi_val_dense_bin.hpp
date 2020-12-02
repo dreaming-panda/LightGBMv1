@@ -60,6 +60,7 @@ class MultiValDenseBin : public MultiValBin {
     data_size_t i = start;
     HIST_T* grad = out;
     HIST_T* hess = out + 1;
+    const VAL_T* data_ptr_base = data_.data();
 
     if (USE_PREFETCH) {
       const data_size_t pf_offset = 32 / sizeof(VAL_T);
@@ -72,9 +73,9 @@ class MultiValDenseBin : public MultiValBin {
           PREFETCH_T0(gradients + pf_idx);
           PREFETCH_T0(hessians + pf_idx);
         }
-        PREFETCH_T0(data_.data() + RowPtr(pf_idx));
+        PREFETCH_T0(data_ptr_base + RowPtr(pf_idx));
         const auto j_start = RowPtr(idx);
-        const VAL_T* data_ptr = data_.data() + j_start;
+        const VAL_T* data_ptr = data_ptr_base + j_start;
         const SCORE_T gradient = ORDERED ? gradients[i] : gradients[idx];
         const SCORE_T hessian = ORDERED ? hessians[i] : hessians[idx];
         for (int j = 0; j < num_feature_; ++j) {
@@ -88,7 +89,7 @@ class MultiValDenseBin : public MultiValBin {
     for (; i < end; ++i) {
       const auto idx = USE_INDICES ? data_indices[i] : i;
       const auto j_start = RowPtr(idx);
-      const VAL_T* data_ptr = data_.data() + j_start;
+      const VAL_T* data_ptr = data_ptr_base + j_start;
       const SCORE_T gradient = ORDERED ? gradients[i] : gradients[idx];
       const SCORE_T hessian = ORDERED ? hessians[i] : hessians[idx];
       for (int j = 0; j < num_feature_; ++j) {

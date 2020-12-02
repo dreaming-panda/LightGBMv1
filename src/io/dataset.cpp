@@ -1089,27 +1089,8 @@ void Dataset::ConstructHistogramsInner(
     TrainingShareStates* share_state, hist_t* hist_data) const {
   if (!share_state->is_col_wise) {
     if (IS_INT_GRAD) {
-      auto int_ptr_ordered_grad = int_gradients;
-      auto int_ptr_ordered_hess = int_hessians;
-      if (USE_INDICES) {
-        if (USE_HESSIAN) {
-          #pragma omp parallel for schedule(static, 512) if (num_data >= 1024)
-          for (data_size_t i = 0; i < num_data; ++i) {
-            int_ordered_gradients[i] = int_gradients[data_indices[i]];
-            int_ordered_hessians[i] = int_hessians[data_indices[i]];
-          }
-          int_ptr_ordered_grad = int_ordered_gradients;
-          int_ptr_ordered_hess = int_ordered_hessians;
-        } else {
-          #pragma omp parallel for schedule(static, 512) if (num_data >= 1024)
-          for (data_size_t i = 0; i < num_data; ++i) {
-            int_ordered_gradients[i] = int_gradients[data_indices[i]];
-          }
-          int_ptr_ordered_grad = int_ordered_gradients;
-        }
-      }
-      return ConstructHistogramsMultiVal<USE_INDICES, true, int_score_t, IS_INT_GRAD>(
-          data_indices, num_data, int_ptr_ordered_grad, int_ptr_ordered_hess, share_state, hist_data);
+      return ConstructHistogramsMultiVal<USE_INDICES, false, int_score_t, IS_INT_GRAD>(
+          data_indices, num_data, int_gradients, int_hessians, share_state, hist_data);
     } else {
       return ConstructHistogramsMultiVal<USE_INDICES, false, score_t, IS_INT_GRAD>(
         data_indices, num_data, gradients, hessians, share_state, hist_data);
