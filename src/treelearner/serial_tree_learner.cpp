@@ -216,6 +216,9 @@ Tree* SerialTreeLearner::Train(const score_t* gradients, const score_t *hessians
     cur_depth = std::max(cur_depth, tree->leaf_depth(left_leaf));
   }
   Log::Debug("Trained a tree with leaves = %d and max_depth = %d", tree->num_leaves(), cur_depth);
+  global_timer.Start("SerialTreeLearner::RenewIntGradTreeOutput");
+  RenewIntGradTreeOutput(tree.get());
+  global_timer.Stop("SerialTreeLearner::RenewIntGradTreeOutput");
   return tree.release();
 }
 
