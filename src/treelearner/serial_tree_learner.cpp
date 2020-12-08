@@ -370,7 +370,7 @@ void SerialTreeLearner::ConstructHistograms(
   // construct smaller leaf
   hist_t* ptr_smaller_leaf_hist_data =
       smaller_leaf_histogram_array_[0].RawData() - kHistOffset;
-  train_data_->ConstructHistograms<true>(
+  train_data_->ConstructHistograms<false, true>(
       is_feature_used, smaller_leaf_splits_->data_indices(),
       smaller_leaf_splits_->num_data_in_leaf(),
       gradients_, hessians_,
@@ -382,7 +382,7 @@ void SerialTreeLearner::ConstructHistograms(
     // construct larger leaf
     hist_t* ptr_larger_leaf_hist_data =
         larger_leaf_histogram_array_[0].RawData() - kHistOffset;
-    train_data_->ConstructHistograms<true>(
+    train_data_->ConstructHistograms<false, true>(
         is_feature_used, larger_leaf_splits_->data_indices(),
         larger_leaf_splits_->num_data_in_leaf(), 
         gradients_, hessians_,

@@ -326,6 +326,15 @@ class Bin {
     const int_score_t* ordered_gradients, const int_score_t* ordered_hessians,
     int_hist_t* out) const = 0;
 
+  virtual void ConstructMixHistogram(
+    const data_size_t* data_indices, data_size_t start, data_size_t end,
+    const score_t* ordered_gradients, const int_score_t* ordered_hessians,
+    int_hist_t* int_out, hist_t* out) const = 0;
+
+  virtual void ConstructMixHistogram(data_size_t start, data_size_t end,
+    const score_t* ordered_gradients, const int_score_t* ordered_hessians,
+    int_hist_t* int_out, hist_t* out) const = 0;
+
   /*!
   * \brief Construct histogram of this feature,
   *        Note: We use ordered_gradients and ordered_hessians to improve cache hit chance
@@ -476,6 +485,23 @@ class MultiValBin {
                                          const int_score_t* int_ordered_gradients,
                                          const int_score_t* int_ordered_hessians,
                                          int_hist_t* out) const = 0;
+
+  virtual void ConstructMixHistogram(const data_size_t* data_indices,
+                                  data_size_t start, data_size_t end,
+                                  const score_t* gradients,
+                                  const int_score_t* int_hessians,
+                                  int_hist_t* int_out, hist_t* out) const = 0;
+
+  virtual void ConstructMixHistogram(data_size_t start, data_size_t end,
+                                  const score_t* gradients,
+                                  const int_score_t* int_hessians,
+                                  int_hist_t* int_out, hist_t* out) const = 0;
+
+  virtual void ConstructMixHistogramOrdered(const data_size_t* data_indices,
+                                         data_size_t start, data_size_t end,
+                                         const score_t* ordered_gradients,
+                                         const int_score_t* int_ordered_hessians,
+                                         int_hist_t* int_out, hist_t* out) const = 0;
 
   virtual void FinishLoad() = 0;
 

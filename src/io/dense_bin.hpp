@@ -96,15 +96,15 @@ class DenseBin : public Bin {
                            uint32_t most_freq_bin) const override;
 
   template <bool USE_INDICES, bool USE_PREFETCH, bool USE_HESSIAN,
-    typename SCORE_T, typename HIST_T>
+    typename GRAD_SCORE_T, typename HESS_SCORE_T, typename GRAD_HIST_T, typename HESS_HIST_T>
   void ConstructHistogramInner(const data_size_t* data_indices,
                                data_size_t start, data_size_t end,
-                               const SCORE_T* ordered_gradients,
-                               const SCORE_T* ordered_hessians,
-                               HIST_T* out) const {
+                               const GRAD_SCORE_T* ordered_gradients,
+                               const HESS_SCORE_T* ordered_hessians,
+                               GRAD_HIST_T* grad_out, HESS_HIST_T* hess_out) const {
     data_size_t i = start;
-    HIST_T* grad = out;
-    HIST_T* hess = out + 1;
+    GRAD_HIST_T* grad = grad_out;
+    HESS_HIST_T* hess = hess_out;
     hist_cnt_t* cnt = reinterpret_cast<hist_cnt_t*>(hess);
     if (USE_PREFETCH) {
       const data_size_t pf_offset = 64 / sizeof(VAL_T);
@@ -145,62 +145,77 @@ class DenseBin : public Bin {
                           data_size_t end, const score_t* ordered_gradients,
                           const score_t* ordered_hessians,
                           hist_t* out) const override {
-    ConstructHistogramInner<true, true, true, score_t, hist_t>(
-        data_indices, start, end, ordered_gradients, ordered_hessians, out);
+    ConstructHistogramInner<true, true, true, score_t, score_t, hist_t, hist_t>(
+        data_indices, start, end, ordered_gradients, ordered_hessians, out, out + 1);
   }
 
   void ConstructHistogram(data_size_t start, data_size_t end,
                           const score_t* ordered_gradients,
                           const score_t* ordered_hessians,
                           hist_t* out) const override {
-    ConstructHistogramInner<false, false, true, score_t, hist_t>(
-        nullptr, start, end, ordered_gradients, ordered_hessians, out);
+    ConstructHistogramInner<false, false, true, score_t, score_t, hist_t, hist_t>(
+        nullptr, start, end, ordered_gradients, ordered_hessians, out, out + 1);
   }
 
   void ConstructHistogram(const data_size_t* data_indices, data_size_t start,
                           data_size_t end, const score_t* ordered_gradients,
                           hist_t* out) const override {
-    ConstructHistogramInner<true, true, false, score_t, hist_t>(
-        data_indices, start, end, ordered_gradients, nullptr, out);
+    ConstructHistogramInner<true, true, false, score_t, score_t, hist_t, hist_t>(
+        data_indices, start, end, ordered_gradients, nullptr, out, out + 1);
   }
 
   void ConstructHistogram(data_size_t start, data_size_t end,
                           const score_t* ordered_gradients,
                           hist_t* out) const override {
-    ConstructHistogramInner<false, false, false, score_t, hist_t>(
-        nullptr, start, end, ordered_gradients, nullptr, out);
+    ConstructHistogramInner<false, false, false, score_t, score_t, hist_t, hist_t>(
+        nullptr, start, end, ordered_gradients, nullptr, out, out + 1);
   }
 
   void ConstructIntHistogram(const data_size_t* data_indices, data_size_t start,
                           data_size_t end, const int_score_t* ordered_gradients,
                           const int_score_t* ordered_hessians,
                           int_hist_t* out) const override {
-    ConstructHistogramInner<true, true, true, int_score_t, int_hist_t>(
-        data_indices, start, end, ordered_gradients, ordered_hessians, out);
+    ConstructHistogramInner<true, true, true, int_score_t, int_score_t, int_hist_t, int_hist_t>(
+        data_indices, start, end, ordered_gradients, ordered_hessians, out, out + 1);
   }
 
   void ConstructIntHistogram(data_size_t start, data_size_t end,
                           const int_score_t* ordered_gradients,
                           const int_score_t* ordered_hessians,
                           int_hist_t* out) const override {
-    ConstructHistogramInner<false, false, true, int_score_t, int_hist_t>(
-        nullptr, start, end, ordered_gradients, ordered_hessians, out);
+    ConstructHistogramInner<false, false, true, int_score_t, int_score_t, int_hist_t, int_hist_t>(
+        nullptr, start, end, ordered_gradients, ordered_hessians, out, out + 1);
   }
 
   void ConstructIntHistogram(const data_size_t* data_indices, data_size_t start,
                           data_size_t end, const int_score_t* ordered_gradients,
                           int_hist_t* out) const override {
-    ConstructHistogramInner<true, true, false, int_score_t, int_hist_t>(
-      data_indices, start, end, ordered_gradients, nullptr, out);
+    ConstructHistogramInner<true, true, false, int_score_t, int_score_t, int_hist_t, int_hist_t>(
+      data_indices, start, end, ordered_gradients, nullptr, out, out + 1);
   }
 
   void ConstructIntHistogram(data_size_t start, data_size_t end,
                           const int_score_t* ordered_gradients,
                           int_hist_t* out) const override {
-    ConstructHistogramInner<false, false, false, int_score_t, int_hist_t>(
-        nullptr, start, end, ordered_gradients, nullptr, out);
+    ConstructHistogramInner<false, false, false, int_score_t, int_score_t, int_hist_t, int_hist_t>(
+        nullptr, start, end, ordered_gradients, nullptr, out, out + 1);
   }
 
+  void ConstructMixHistogram(const data_size_t* data_indices, data_size_t start,
+                          data_size_t end, const score_t* ordered_gradients,
+                          const int_score_t* ordered_hessians,
+                          int_hist_t* int_out, hist_t* out) const override {
+    ConstructHistogramInner<true, true, true, score_t, int_score_t, hist_t, int_hist_t>(
+        data_indices, start, end, ordered_gradients, ordered_hessians, out, int_out);
+  }
+
+  void ConstructMixHistogram(data_size_t start, data_size_t end,
+                          const score_t* ordered_gradients,
+                          const int_score_t* ordered_hessians,
+                          int_hist_t* int_out, hist_t* out) const override {
+    ConstructHistogramInner<false, false, true, score_t, int_score_t, hist_t, int_hist_t>(
+        nullptr, start, end, ordered_gradients, ordered_hessians, out, int_out);
+  }
 
   template <bool MISS_IS_ZERO, bool MISS_IS_NA, bool MFB_IS_ZERO,
             bool MFB_IS_NA, bool USE_MIN_BIN>

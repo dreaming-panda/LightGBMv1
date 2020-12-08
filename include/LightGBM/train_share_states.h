@@ -38,9 +38,15 @@ class MultiValBinWrapper {
 
   void IntHistMove(const std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>& hist_buf);
 
+  void MixHistMove(const std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>& int_hist_buf,
+    const std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>& hist_buf);
+
   void HistMerge(std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf);
 
   void IntHistMerge(std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* hist_buf);
+
+  void MixHistMerge(std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* int_hist_buf,
+    std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf);
 
   void ResizeHistBuf(std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf,
     MultiValBin* sub_multi_val_bin,
@@ -50,12 +56,18 @@ class MultiValBinWrapper {
     MultiValBin* sub_multi_val_bin,
     hist_t* origin_hist_data);
 
-  template <bool USE_INDICES, bool ORDERED, typename SCORE_T, typename HIST_T,  bool IS_INT_GRAD>
+  void ResizeMixHistBuf(std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* int_hist_buf,
+    std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf,
+    MultiValBin* sub_multi_val_bin,
+    hist_t* origin_hist_data);
+
+  template <bool USE_INDICES, bool ORDERED, typename GRAD_SCORE_T, typename HESS_SCORE_T, bool IS_INT_GRAD, bool IS_MIX_GRAD>
   void ConstructHistograms(const data_size_t* data_indices,
       data_size_t num_data,
-      const SCORE_T* gradients,
-      const SCORE_T* hessians,
-      std::vector<HIST_T, Common::AlignmentAllocator<HIST_T, kAlignedSize>>* hist_buf,
+      const GRAD_SCORE_T* gradients,
+      const HESS_SCORE_T* hessians,
+      std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* int_hist_buf,
+      std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf,
       hist_t* origin_hist_data) {
     const auto cur_multi_val_bin = (is_use_subcol_ || is_use_subrow_)
           ? multi_val_bin_subset_.get()
@@ -68,12 +80,12 @@ class MultiValBinWrapper {
                                         max_block_size_, &n_data_block_, &data_block_size_);
       if (IS_INT_GRAD) {
         ResizeIntHistBuf(
-          reinterpret_cast<std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>*>(hist_buf),
-          cur_multi_val_bin, origin_hist_data);
-      } else {
+          int_hist_buf, cur_multi_val_bin, origin_hist_data);
+      } else if (!IS_MIX_GRAD) {
         ResizeHistBuf(
-          reinterpret_cast<std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>*>(hist_buf),
-          cur_multi_val_bin, origin_hist_data);
+          hist_buf, cur_multi_val_bin, origin_hist_data);
+      } else {
+        ResizeMixHistBuf(int_hist_buf, hist_buf, cur_multi_val_bin, origin_hist_data);
       }
       OMP_INIT_EX();
       #pragma omp parallel for schedule(static) num_threads(num_threads_)
@@ -87,14 +99,22 @@ class MultiValBinWrapper {
             reinterpret_cast<const int_score_t*>(gradients),
             reinterpret_cast<const int_score_t*>(hessians),
             block_id,
-            reinterpret_cast<std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>*>(hist_buf));
-        } else {
+            int_hist_buf);
+        } else if (!IS_MIX_GRAD) {
           ConstructHistogramsForBlock<USE_INDICES, ORDERED>(
             cur_multi_val_bin, start, end, data_indices,
             reinterpret_cast<const score_t*>(gradients),
             reinterpret_cast<const score_t*>(hessians),
             block_id,
-            reinterpret_cast<std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>*>(hist_buf));
+            hist_buf);
+        } else {
+          ConstructMixHistogramsForBlock<USE_INDICES, ORDERED>(
+            cur_multi_val_bin, start, end, data_indices,
+            reinterpret_cast<const score_t*>(gradients),
+            reinterpret_cast<const int_score_t*>(hessians),
+            block_id,
+            int_hist_buf,
+            hist_buf);
         }
         OMP_LOOP_EX_END();
       }
@@ -103,20 +123,20 @@ class MultiValBinWrapper {
 
       global_timer.Start("Dataset::sparse_bin_histogram_merge");
       if (IS_INT_GRAD) {
-        IntHistMerge(
-          reinterpret_cast<std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>*>(hist_buf));
+        IntHistMerge(int_hist_buf);
+      } else if (!IS_MIX_GRAD) {
+        HistMerge(hist_buf);
       } else {
-        HistMerge(
-          reinterpret_cast<std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>*>(hist_buf));
+        MixHistMerge(int_hist_buf, hist_buf);
       }
       global_timer.Stop("Dataset::sparse_bin_histogram_merge");
       global_timer.Start("Dataset::sparse_bin_histogram_move");
       if (IS_INT_GRAD) {
-        IntHistMove(
-          *reinterpret_cast<std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>*>(hist_buf));
+        IntHistMove(*int_hist_buf);
+      } else if (!IS_MIX_GRAD) {
+        HistMove(*hist_buf);
       } else {
-        HistMove(
-          *reinterpret_cast<std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>*>(hist_buf));
+        MixHistMove(*int_hist_buf, *hist_buf);
       }
       global_timer.Stop("Dataset::sparse_bin_histogram_move");
     }
@@ -169,6 +189,30 @@ class MultiValBinWrapper {
     } else {
       sub_multi_val_bin->ConstructIntHistogram(start, end, gradients, hessians,
                                         data_ptr);
+    }
+  }
+
+  template <bool USE_INDICES, bool ORDERED>
+  void ConstructMixHistogramsForBlock(const MultiValBin* sub_multi_val_bin,
+    data_size_t start, data_size_t end, const data_size_t* data_indices,
+    const score_t* gradients, const int_score_t* hessians, int block_id,
+    std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* int_hist_buf,
+    std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf) {
+    int_hist_t* int_data_ptr = int_hist_buf->data() + static_cast<size_t>(num_bin_aligned_) * block_id;
+    hist_t* data_ptr = hist_buf->data() + static_cast<size_t>(num_bin_aligned_) * block_id;
+    std::memset(reinterpret_cast<void*>(data_ptr), 0, num_bin_ * kHistBufferEntrySize / 2);
+    std::memset(reinterpret_cast<void*>(int_data_ptr), 0, num_bin_ * kHistIntBufferEntrySize / 2);
+    if (USE_INDICES) {
+      if (ORDERED) {
+        sub_multi_val_bin->ConstructMixHistogramOrdered(data_indices, start, end,
+                                                gradients, hessians, int_data_ptr, data_ptr);
+      } else {
+        sub_multi_val_bin->ConstructMixHistogram(data_indices, start, end, gradients,
+                                          hessians, int_data_ptr, data_ptr);
+      }
+    } else {
+      sub_multi_val_bin->ConstructMixHistogram(start, end, gradients, hessians,
+                                        int_data_ptr, data_ptr);
     }
   }
 
@@ -266,25 +310,20 @@ struct TrainingShareStates {
       }
       group_bin_boundaries_.push_back(offset);
       int_hist_buf_.resize(2 * group_bin_boundaries_.back());
+      hist_buf_.resize(2 * group_bin_boundaries_.back());
     }
   }
 
-  template <bool USE_INDICES, bool ORDERED, typename SCORE_T, bool IS_INT_GRAD>
+  template <bool USE_INDICES, bool ORDERED, typename GRAD_SCORE_T, typename HESS_SCORE_T, bool IS_INT_GRAD, bool IS_MIX_GRAD>
   void ConstructHistograms(const data_size_t* data_indices,
                           data_size_t num_data,
-                          const SCORE_T* gradients,
-                          const SCORE_T* hessians,
+                          const GRAD_SCORE_T* gradients,
+                          const HESS_SCORE_T* hessians,
                           hist_t* hist_data) {
     if (multi_val_bin_wrapper_ != nullptr) {
-      if (IS_INT_GRAD) {
-        multi_val_bin_wrapper_->ConstructHistograms<
-          USE_INDICES, ORDERED, SCORE_T, int_hist_t, IS_INT_GRAD>(
-          data_indices, num_data, gradients, hessians, &int_hist_buf_, hist_data);
-      } else {
-        multi_val_bin_wrapper_->ConstructHistograms<
-          USE_INDICES, ORDERED, SCORE_T, hist_t, IS_INT_GRAD>(
-          data_indices, num_data, gradients, hessians, &hist_buf_, hist_data);
-      }
+      multi_val_bin_wrapper_->ConstructHistograms<
+        USE_INDICES, ORDERED, GRAD_SCORE_T, HESS_SCORE_T, IS_INT_GRAD, IS_MIX_GRAD>(
+        data_indices, num_data, gradients, hessians, &int_hist_buf_, &hist_buf_, hist_data);
     }
   }
 
@@ -303,6 +342,10 @@ struct TrainingShareStates {
   void RecoverHistogramsFromInteger(hist_t* hist);
 
   int_hist_t* GetIntegerHistogram(int group_id);
+
+  int_hist_t* GetIntegerHistogramForMix(int group_id);
+
+  hist_t* GetHistogramForMix(int group_id);
 
   void SetGradScale(double grad_scale, double hess_scale) {
     if (multi_val_bin_wrapper_ != nullptr) {
