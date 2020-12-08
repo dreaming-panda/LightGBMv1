@@ -141,6 +141,52 @@ class DenseBin : public Bin {
     }
   }
 
+  template <bool USE_INDICES, bool USE_PREFETCH, bool USE_HESSIAN,
+    typename GRAD_SCORE_T, typename HESS_SCORE_T, typename GRAD_HIST_T, typename HESS_HIST_T>
+  void ConstructHistogramInnerMix(const data_size_t* data_indices,
+                               data_size_t start, data_size_t end,
+                               const GRAD_SCORE_T* ordered_gradients,
+                               const HESS_SCORE_T* ordered_hessians,
+                               GRAD_HIST_T* grad_out, HESS_HIST_T* hess_out) const {
+    data_size_t i = start;
+    GRAD_HIST_T* grad = grad_out;
+    HESS_HIST_T* hess = hess_out;
+    hist_cnt_t* cnt = reinterpret_cast<hist_cnt_t*>(hess);
+    if (USE_PREFETCH) {
+      const data_size_t pf_offset = 64 / sizeof(VAL_T);
+      const data_size_t pf_end = end - pf_offset;
+      for (; i < pf_end; ++i) {
+        const auto idx = USE_INDICES ? data_indices[i] : i;
+        const auto pf_idx =
+            USE_INDICES ? data_indices[i + pf_offset] : i + pf_offset;
+        if (IS_4BIT) {
+          PREFETCH_T0(data_.data() + (pf_idx >> 1));
+        } else {
+          PREFETCH_T0(data_.data() + pf_idx);
+        }
+        const auto ti = static_cast<uint32_t>(data(idx));
+        if (USE_HESSIAN) {
+          grad[ti] += ordered_gradients[i];
+          hess[ti] += ordered_hessians[i];
+        } else {
+          grad[ti] += ordered_gradients[i];
+          ++cnt[ti];
+        }
+      }
+    }
+    for (; i < end; ++i) {
+      const auto idx = USE_INDICES ? data_indices[i] : i;
+      const auto ti = static_cast<uint32_t>(data(idx));
+      if (USE_HESSIAN) {
+        grad[ti] += ordered_gradients[i];
+        hess[ti] += ordered_hessians[i];
+      } else {
+        grad[ti] += ordered_gradients[i];
+        ++cnt[ti];
+      }
+    }
+  }
+
   void ConstructHistogram(const data_size_t* data_indices, data_size_t start,
                           data_size_t end, const score_t* ordered_gradients,
                           const score_t* ordered_hessians,
@@ -205,7 +251,7 @@ class DenseBin : public Bin {
                           data_size_t end, const score_t* ordered_gradients,
                           const int_score_t* ordered_hessians,
                           int_hist_t* int_out, hist_t* out) const override {
-    ConstructHistogramInner<true, true, true, score_t, int_score_t, hist_t, int_hist_t>(
+    ConstructHistogramInnerMix<true, true, true, score_t, int_score_t, hist_t, int_hist_t>(
         data_indices, start, end, ordered_gradients, ordered_hessians, out, int_out);
   }
 
@@ -213,7 +259,7 @@ class DenseBin : public Bin {
                           const score_t* ordered_gradients,
                           const int_score_t* ordered_hessians,
                           int_hist_t* int_out, hist_t* out) const override {
-    ConstructHistogramInner<false, false, true, score_t, int_score_t, hist_t, int_hist_t>(
+    ConstructHistogramInnerMix<false, false, true, score_t, int_score_t, hist_t, int_hist_t>(
         nullptr, start, end, ordered_gradients, ordered_hessians, out, int_out);
   }
 

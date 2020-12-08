@@ -283,13 +283,16 @@ void SerialTreeLearner::BeforeTrain() {
   if (data_partition_->leaf_count(0) == num_data_) {
     // use all data
     //smaller_leaf_splits_->Init(gradients_, hessians_);
-    smaller_leaf_splits_->Init(int_gradients_, int_hessians_,
-      share_state_->grad_scale(), share_state_->hess_scale());
+    //smaller_leaf_splits_->Init(int_gradients_, int_hessians_,
+    //  share_state_->grad_scale(), share_state_->hess_scale());
+    smaller_leaf_splits_->Init(gradients_, int_hessians_, share_state_->hess_scale());
   } else {
     // use bagging, only use part of data
     //smaller_leaf_splits_->Init(0, data_partition_.get(), gradients_, hessians_);
+    //smaller_leaf_splits_->Init(0, data_partition_.get(),
+    //  int_gradients_, int_hessians_, share_state_->grad_scale(), share_state_->hess_scale());
     smaller_leaf_splits_->Init(0, data_partition_.get(),
-      int_gradients_, int_hessians_, share_state_->grad_scale(), share_state_->hess_scale());
+      gradients_, int_hessians_, share_state_->hess_scale());
   }
 
   larger_leaf_splits_->Init();
@@ -708,7 +711,7 @@ void SerialTreeLearner::RenewIntGradTreeOutput(Tree* tree) const {
     data_size_t leaf_cnt = 0;
     const data_size_t* data_indices = data_partition_->GetIndexOnLeaf(leaf_id, &leaf_cnt);
     double sum_gradient = 0.0f, sum_hessian = 0.0f;
-    #pragma omp parallel for schedule(static)
+    #pragma omp parallel for schedule(static) reduction(+:sum_gradient,sum_hessian)
     for (data_size_t i = 0; i < leaf_cnt; ++i) {
       const data_size_t index = data_indices[i];
       const score_t grad = gradients_[index];
@@ -716,7 +719,7 @@ void SerialTreeLearner::RenewIntGradTreeOutput(Tree* tree) const {
       sum_gradient += grad;
       sum_hessian += hess;
     }
-    const double leaf_output = FeatureHistogram::CalculateSplittedLeafOutput<true, true, false>(sum_gradient, sum_hessian, 
+    const double leaf_output = FeatureHistogram::CalculateSplittedLeafOutput<true, true, false>(sum_gradient, sum_hessian,
       config_->lambda_l1, config_->lambda_l2, config_->max_delta_step, config_->path_smooth,
       leaf_cnt, 0.0f);
     tree->SetLeafOutput(leaf_id, leaf_output);

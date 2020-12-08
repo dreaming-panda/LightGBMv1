@@ -536,15 +536,34 @@ void TrainingShareStates::RecoverHistogramsFromInteger(hist_t* hist) {
   }
 }
 
+void TrainingShareStates::RecoverHistogramsFromMix(hist_t* hist) {
+  #pragma omp parallel for schedule(static)
+  for (int i = 0; i < group_bin_boundaries_.back(); ++i) {
+    hist[2 * i] = hist_buf_[i];
+    hist[2 * i + 1] = int_hist_buf_[i] * hess_scale_;
+  }
+  /*for (int i = 0; i < 20; ++i) {
+    Log::Warning("bin %d grad %f hess %f", i, hist[2 * i], hist[2 * i + 1]);
+  }*/
+}
+
 int_hist_t* TrainingShareStates::GetIntegerHistogram(int group_id) {
   return int_hist_buf_.data() + group_bin_boundaries_[group_id] * 2;
 }
 
 int_hist_t* TrainingShareStates::GetIntegerHistogramForMix(int group_id) {
+  /*for (int i = group_bin_boundaries_[group_id];
+    i < group_bin_boundaries_[group_id + 1]; ++i) {
+      int_hist_buf_[i] = 0;
+    }*/
   return int_hist_buf_.data() + group_bin_boundaries_[group_id];
 }
 
 hist_t* TrainingShareStates::GetHistogramForMix(int group_id) {
+  /*for (int i = group_bin_boundaries_[group_id];
+    i < group_bin_boundaries_[group_id + 1]; ++i) {
+      hist_buf_[i] = 0.0f;
+    }*/
   return hist_buf_.data() + group_bin_boundaries_[group_id];
 }
 

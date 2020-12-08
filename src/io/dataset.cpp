@@ -1129,7 +1129,7 @@ void Dataset::ConstructHistogramsInner(
   auto int_ptr_ordered_hess = int_hessians;
   if (num_used_dense_group > 0) {
     if (USE_INDICES) {
-      if (!IS_INT_GRAD) {
+      if (!IS_INT_GRAD && !IS_MIX_GRAD) {
         if (USE_HESSIAN) {
 #pragma omp parallel for schedule(static, 512) if (num_data >= 1024)
           for (data_size_t i = 0; i < num_data; ++i) {
@@ -1207,7 +1207,9 @@ void Dataset::ConstructHistogramsInner(
             auto int_data_ptr = share_state->GetIntegerHistogramForMix(group);
             auto data_ptr = share_state->GetHistogramForMix(group);
             std::memset(reinterpret_cast<void*>(data_ptr), 0,
-                  num_bin * kHistEntrySize);
+                  num_bin * kHistEntrySize / 2);
+            std::memset(reinterpret_cast<void*>(int_data_ptr), 0,
+                  num_bin * kIntHistEntrySize / 2);
             feature_groups_[group]->bin_data_->ConstructMixHistogram(
                 data_indices, 0, num_data, ptr_ordered_grad, int_ptr_ordered_hess,
                 int_data_ptr, data_ptr);
@@ -1229,7 +1231,9 @@ void Dataset::ConstructHistogramsInner(
             auto int_data_ptr = share_state->GetIntegerHistogramForMix(group);
             auto data_ptr = share_state->GetHistogramForMix(group);
             std::memset(reinterpret_cast<void*>(data_ptr), 0,
-                  num_bin * kHistEntrySize);
+                  num_bin * kHistEntrySize / 2);
+            std::memset(reinterpret_cast<void*>(int_data_ptr), 0,
+                  num_bin * kIntHistEntrySize / 2);
             feature_groups_[group]->bin_data_->ConstructMixHistogram(
                 0, num_data, ptr_ordered_grad, int_ptr_ordered_hess, int_data_ptr, data_ptr);
           }
@@ -1276,6 +1280,8 @@ void Dataset::ConstructHistogramsInner(
   global_timer.Start("Dataset::RecoverHistogramsFromInteger");
   if (IS_INT_GRAD) {
     share_state->RecoverHistogramsFromInteger(hist_data);
+  } else if (IS_MIX_GRAD) {
+    share_state->RecoverHistogramsFromMix(hist_data);
   }
   global_timer.Stop("Dataset::RecoverHistogramsFromInteger");
   global_timer.Stop("Dataset::dense_bin_histogram");

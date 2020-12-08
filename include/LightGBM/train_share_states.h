@@ -341,6 +341,8 @@ struct TrainingShareStates {
 
   void RecoverHistogramsFromInteger(hist_t* hist);
 
+  void RecoverHistogramsFromMix(hist_t* hist);
+
   int_hist_t* GetIntegerHistogram(int group_id);
 
   int_hist_t* GetIntegerHistogramForMix(int group_id);
