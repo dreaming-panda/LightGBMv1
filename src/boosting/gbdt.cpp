@@ -107,7 +107,7 @@ void GBDT::Init(const Config* config, const Dataset* train_data, const Objective
     size_t total_size = static_cast<size_t>(num_data_) * num_tree_per_iteration_;
     gradients_.resize(total_size);
     hessians_.resize(total_size);
-    int_gradients_.resize(total_size);
+    int_gradients_.resize(2 * total_size);
     int_hessians_.resize(total_size);
   }
   // get max feature index
@@ -378,6 +378,7 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
       auto int_grad = int_gradients;
       auto int_hess = int_hessians;
       // need to copy gradients for bagging subset.
+      // TODO(shiyu1994): not supported for int gradient
       if (is_use_subset_ && bag_data_cnt_ < num_data_) {
         for (int i = 0; i < bag_data_cnt_; ++i) {
           gradients_[offset + i] = grad[bag_data_indices_[i]];
@@ -716,7 +717,7 @@ void GBDT::ResetTrainingData(const Dataset* train_data, const ObjectiveFunction*
       size_t total_size = static_cast<size_t>(num_data_) * num_tree_per_iteration_;
       gradients_.resize(total_size);
       hessians_.resize(total_size);
-      int_gradients_.resize(total_size);
+      int_gradients_.resize(2 * total_size);
       int_hessians_.resize(total_size);
     }
 
@@ -819,7 +820,7 @@ void GBDT::ResetBaggingConfig(const Config* config, bool is_change_dataset) {
         size_t total_size = static_cast<size_t>(num_data_) * num_tree_per_iteration_;
         gradients_.resize(total_size);
         hessians_.resize(total_size);
-        int_gradients_.resize(total_size);
+        int_gradients_.resize(2 * total_size);
         int_hessians_.resize(total_size);
       }
     }

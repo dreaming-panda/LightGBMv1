@@ -54,7 +54,7 @@ class MultiValDenseBin : public MultiValBin {
     return false;
   }
 
-  template<bool USE_INDICES, bool USE_PREFETCH, bool ORDERED, typename HIST_T, typename SCORE_T>
+  /*template<bool USE_INDICES, bool USE_PREFETCH, bool ORDERED, typename HIST_T, typename SCORE_T>
   void ConstructHistogramInner(const data_size_t* data_indices, data_size_t start, data_size_t end,
     const SCORE_T* gradients, const SCORE_T* hessians, HIST_T* out) const {
     data_size_t i = start;
@@ -78,6 +78,10 @@ class MultiValDenseBin : public MultiValBin {
         const VAL_T* data_ptr = data_ptr_base + j_start;
         const SCORE_T gradient = ORDERED ? gradients[i] : gradients[idx];
         const SCORE_T hessian = ORDERED ? hessians[i] : hessians[idx];
+        CHECK_LE(gradient, 125);
+        CHECK_LE(hessian, 125);
+        CHECK_GE(gradient, -125);
+        CHECK_GE(hessian, -125);
         for (int j = 0; j < num_feature_; ++j) {
           const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
           const auto ti = (bin + offsets_[j]) << 1;
@@ -92,11 +96,119 @@ class MultiValDenseBin : public MultiValBin {
       const VAL_T* data_ptr = data_ptr_base + j_start;
       const SCORE_T gradient = ORDERED ? gradients[i] : gradients[idx];
       const SCORE_T hessian = ORDERED ? hessians[i] : hessians[idx];
+      CHECK_LE(gradient, 125);
+      CHECK_LE(hessian, 125);
+      CHECK_GE(gradient, -125);
+      CHECK_GE(hessian, -125);
       for (int j = 0; j < num_feature_; ++j) {
         const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
         const auto ti = (bin + offsets_[j]) << 1;
         grad[ti] += gradient;
         hess[ti] += hessian;
+      }
+    }
+  }*/
+
+  /*template<bool USE_INDICES, bool USE_PREFETCH, bool ORDERED, typename HIST_T, typename SCORE_T>
+  void ConstructHistogramInner(const data_size_t* data_indices, data_size_t start, data_size_t end,
+    const SCORE_T* gradients, const SCORE_T*, HIST_T* out) const {
+    data_size_t i = start;
+    HIST_T* grad = out;
+    HIST_T* hess = out + 1;
+    const VAL_T* data_ptr_base = data_.data();
+
+    if (USE_PREFETCH) {
+      const data_size_t pf_offset = 32 / sizeof(VAL_T);
+      const data_size_t pf_end = end - pf_offset;
+
+      for (; i < pf_end; ++i) {
+        const auto idx = USE_INDICES ? data_indices[i] : i;
+        const auto pf_idx = USE_INDICES ? data_indices[i + pf_offset] : i + pf_offset;
+        if (!ORDERED) {
+          PREFETCH_T0(gradients + 2 * pf_idx);
+          //PREFETCH_T0(hessians + pf_idx);
+        }
+        PREFETCH_T0(data_ptr_base + RowPtr(pf_idx));
+        const auto j_start = RowPtr(idx);
+        const VAL_T* data_ptr = data_ptr_base + j_start;
+        const SCORE_T gradient = ORDERED ? gradients[2 * i] : gradients[2 * idx];
+        const SCORE_T hessian = ORDERED ? gradients[2 * i + 1] : gradients[2 * idx + 1];
+        CHECK_LE(gradient, 125);
+        CHECK_LE(hessian, 125);
+        CHECK_GE(gradient, -125);
+        CHECK_GE(hessian, -125);
+        for (int j = 0; j < num_feature_; ++j) {
+          const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
+          const auto ti = (bin + offsets_[j]) << 1;
+          grad[ti] += gradient;
+          hess[ti] += hessian;
+        }
+      }
+    }
+    for (; i < end; ++i) {
+      const auto idx = USE_INDICES ? data_indices[i] : i;
+      const auto j_start = RowPtr(idx);
+      const VAL_T* data_ptr = data_ptr_base + j_start;
+      const SCORE_T gradient = ORDERED ? gradients[2 * i] : gradients[2 * idx];
+      const SCORE_T hessian = ORDERED ? gradients[2 * i + 1] : gradients[2 * idx + 1];
+      CHECK_LE(gradient, 125);
+      CHECK_LE(hessian, 125);
+      CHECK_GE(gradient, -125);
+      CHECK_GE(hessian, -125);
+      for (int j = 0; j < num_feature_; ++j) {
+        const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
+        const auto ti = (bin + offsets_[j]) << 1;
+        grad[ti] += gradient;
+        hess[ti] += hessian;
+      }
+    }
+  }*/
+
+  template<bool USE_INDICES, bool USE_PREFETCH, bool ORDERED, typename HIST_T, typename SCORE_T>
+  void ConstructHistogramInner(const data_size_t* data_indices, data_size_t start, data_size_t end,
+    const SCORE_T* gradients, const SCORE_T*, HIST_T* out) const {
+    data_size_t i = start;
+    const VAL_T* data_ptr_base = data_.data();
+    const int64_t* gradients_ptr = reinterpret_cast<const int64_t*>(gradients);
+    int64_t* out_ptr = reinterpret_cast<int64_t*>(out);
+
+    if (USE_PREFETCH) {
+      const data_size_t pf_offset = 32 / sizeof(VAL_T);
+      const data_size_t pf_end = end - pf_offset;
+
+      for (; i < pf_end; ++i) {
+        const auto idx = USE_INDICES ? data_indices[i] : i;
+        const auto pf_idx = USE_INDICES ? data_indices[i + pf_offset] : i + pf_offset;
+        //if (!ORDERED) {
+          PREFETCH_T0(gradients_ptr + pf_idx);
+          //PREFETCH_T0(hessians + pf_idx);
+        //}
+        PREFETCH_T0(data_ptr_base + RowPtr(pf_idx));
+        const auto j_start = RowPtr(idx);
+        const VAL_T* data_ptr = data_ptr_base + j_start;
+        const int64_t gradient = gradients_ptr[idx];
+        //const SCORE_T hessian = ORDERED ? hessians[i] : hessians[idx];
+        for (int j = 0; j < num_feature_; ++j) {
+          const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
+          const auto ti = (bin + offsets_[j]);
+          //grad[ti] += gradient;
+          //hess[ti] += hessian;
+          out_ptr[ti] += gradient;
+        }
+      }
+    }
+    for (; i < end; ++i) {
+      const auto idx = USE_INDICES ? data_indices[i] : i;
+      const auto j_start = RowPtr(idx);
+      const VAL_T* data_ptr = data_ptr_base + j_start;
+      const int64_t gradient = gradients_ptr[idx];
+      //const SCORE_T hessian = ORDERED ? hessians[i] : hessians[idx];
+      for (int j = 0; j < num_feature_; ++j) {
+        const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
+        const auto ti = (bin + offsets_[j]);
+        //grad[ti] += gradient;
+        //hess[ti] += hessian;
+        out_ptr[ti] += gradient;
       }
     }
   }
