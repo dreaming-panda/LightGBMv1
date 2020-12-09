@@ -1243,7 +1243,7 @@ void Dataset::ConstructHistogramsInner(
   if (IS_INT_GRAD) {
     share_state->RecoverHistogramsFromInteger(hist_data);
   }
-  global_timer.End("Dataset::RecoverHistogramsFromInteger");
+  global_timer.Stop("Dataset::RecoverHistogramsFromInteger");
   global_timer.Stop("Dataset::dense_bin_histogram");
   if (multi_val_groud_id >= 0) {
     if (num_used_dense_group > 0) {
