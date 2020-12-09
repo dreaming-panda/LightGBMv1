@@ -42,6 +42,21 @@ const double kSparseThreshold = 0.7;
 #define GET_GRAD(hist, i) hist[(i) << 1]
 #define GET_HESS(hist, i) hist[((i) << 1) + 1]
 
+struct MixHistEntry {
+  hist_t grad;
+  int_hist_t hess;
+
+  MixHistEntry() {
+    grad = 0.0f;
+    hess = 0;
+  }
+
+  MixHistEntry(hist_t g, int_hist_t h) {
+    grad = g;
+    hess = h;
+  }
+};
+
 inline static void HistogramSumReducer(const char* src, char* dst, int type_size, comm_size_t len) {
   comm_size_t used_size = 0;
   const hist_t* p1;
@@ -502,6 +517,23 @@ class MultiValBin {
                                          const score_t* ordered_gradients,
                                          const int_score_t* int_ordered_hessians,
                                          int_hist_t* int_out, hist_t* out) const = 0;
+
+  virtual void ConstructMixHistogram(const data_size_t* data_indices,
+                                  data_size_t start, data_size_t end,
+                                  const score_t* gradients,
+                                  const int_score_t* int_hessians,
+                                  MixHistEntry* mix_out) const = 0;
+
+  virtual void ConstructMixHistogram(data_size_t start, data_size_t end,
+                                  const score_t* gradients,
+                                  const int_score_t* int_hessians,
+                                  MixHistEntry* mix_out) const = 0;
+
+  virtual void ConstructMixHistogramOrdered(const data_size_t* data_indices,
+                                         data_size_t start, data_size_t end,
+                                         const score_t* ordered_gradients,
+                                         const int_score_t* int_ordered_hessians,
+                                         MixHistEntry* mix_out) const = 0;
 
   virtual void FinishLoad() = 0;
 

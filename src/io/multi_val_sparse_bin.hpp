@@ -204,6 +204,52 @@ class MultiValSparseBin : public MultiValBin {
     }
   }
 
+  template <bool USE_INDICES, bool USE_PREFETCH, bool ORDERED, typename GRAD_SCORE_T, typename HESS_SCORE_T>
+  void ConstructHistogramInnerMix(const data_size_t* data_indices,
+                               data_size_t start, data_size_t end,
+                               const GRAD_SCORE_T* gradients,
+                               const HESS_SCORE_T* hessians, MixHistEntry* mix_out) const {
+    data_size_t i = start;
+    const VAL_T* data_ptr = data_.data();
+    if (USE_PREFETCH) {
+      const data_size_t pf_offset = 32 / sizeof(VAL_T);
+      const data_size_t pf_end = end - pf_offset;
+
+      for (; i < pf_end; ++i) {
+        const auto idx = USE_INDICES ? data_indices[i] : i;
+        const auto pf_idx =
+            USE_INDICES ? data_indices[i + pf_offset] : i + pf_offset;
+        if (!ORDERED) {
+          PREFETCH_T0(gradients + pf_idx);
+          PREFETCH_T0(hessians + pf_idx);
+        }
+        PREFETCH_T0(row_ptr_.data() + pf_idx);
+        PREFETCH_T0(data_ptr + row_ptr_[pf_idx]);
+        const auto j_start = RowPtr(idx);
+        const auto j_end = RowPtr(idx + 1);
+        const GRAD_SCORE_T gradient = ORDERED ? gradients[i] : gradients[idx];
+        const HESS_SCORE_T hessian = ORDERED ? hessians[i] : hessians[idx];
+        for (auto j = j_start; j < j_end; ++j) {
+          const auto ti = static_cast<uint32_t>(data_ptr[j]);
+          mix_out[ti].grad += gradient;
+          mix_out[ti].hess += hessian;
+        }
+      }
+    }
+    for (; i < end; ++i) {
+      const auto idx = USE_INDICES ? data_indices[i] : i;
+      const auto j_start = RowPtr(idx);
+      const auto j_end = RowPtr(idx + 1);
+      const GRAD_SCORE_T gradient = ORDERED ? gradients[i] : gradients[idx];
+      const HESS_SCORE_T hessian = ORDERED ? hessians[i] : hessians[idx];
+      for (auto j = j_start; j < j_end; ++j) {
+        const auto ti = static_cast<uint32_t>(data_ptr[j]);
+        mix_out[ti].grad += gradient;
+        mix_out[ti].hess += hessian;
+      }
+    }
+  }
+
   void ConstructHistogram(const data_size_t* data_indices, data_size_t start,
                           data_size_t end, const score_t* gradients,
                           const score_t* hessians, hist_t* out) const override {
@@ -271,6 +317,29 @@ class MultiValSparseBin : public MultiValBin {
                                  int_hist_t* int_out, hist_t* out) const override {
     ConstructHistogramInnerMix<true, true, true, hist_t, int_hist_t, score_t, int_score_t>(data_indices, start, end,
                                               gradients, hessians, out, int_out);
+  }
+
+  void ConstructMixHistogram(const data_size_t* data_indices, data_size_t start,
+                          data_size_t end, const score_t* gradients,
+                          const int_score_t* hessians, MixHistEntry* mix_out) const override {
+    ConstructHistogramInnerMix<true, true, false, score_t, int_score_t>(data_indices, start, end,
+                                               gradients, hessians, mix_out);
+  }
+
+  void ConstructMixHistogram(data_size_t start, data_size_t end,
+                          const score_t* gradients, const int_score_t* hessians,
+                          MixHistEntry* mix_out) const override {
+    ConstructHistogramInnerMix<false, false, false, score_t, int_score_t>(
+        nullptr, start, end, gradients, hessians, mix_out);
+  }
+
+  void ConstructMixHistogramOrdered(const data_size_t* data_indices,
+                                 data_size_t start, data_size_t end,
+                                 const score_t* gradients,
+                                 const int_score_t* hessians,
+                                 MixHistEntry* mix_out) const override {
+    ConstructHistogramInnerMix<true, true, true, score_t, int_score_t>(data_indices, start, end,
+                                              gradients, hessians, mix_out);
   }
 
   MultiValBin* CreateLike(data_size_t num_data, int num_bin, int,

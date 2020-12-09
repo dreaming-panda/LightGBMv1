@@ -41,12 +41,16 @@ class MultiValBinWrapper {
   void MixHistMove(const std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>& int_hist_buf,
     const std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>& hist_buf);
 
+  void MixHistMove(const std::vector<MixHistEntry>& mix_hist_buf);
+
   void HistMerge(std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf);
 
   void IntHistMerge(std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* hist_buf);
 
   void MixHistMerge(std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* int_hist_buf,
     std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf);
+
+  void MixHistMerge(std::vector<MixHistEntry>* mix_hist_buf);
 
   void ResizeHistBuf(std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf,
     MultiValBin* sub_multi_val_bin,
@@ -61,6 +65,10 @@ class MultiValBinWrapper {
     MultiValBin* sub_multi_val_bin,
     hist_t* origin_hist_data);
 
+  void ResizeMixHistBuf(std::vector<MixHistEntry>* mix_hist_buf,
+    MultiValBin* sub_multi_val_bin,
+    hist_t* origin_hist_data);
+
   template <bool USE_INDICES, bool ORDERED, typename GRAD_SCORE_T, typename HESS_SCORE_T, bool IS_INT_GRAD, bool IS_MIX_GRAD>
   void ConstructHistograms(const data_size_t* data_indices,
       data_size_t num_data,
@@ -68,6 +76,7 @@ class MultiValBinWrapper {
       const HESS_SCORE_T* hessians,
       std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* int_hist_buf,
       std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf,
+      std::vector<MixHistEntry>* mix_buf,
       hist_t* origin_hist_data) {
     const auto cur_multi_val_bin = (is_use_subcol_ || is_use_subrow_)
           ? multi_val_bin_subset_.get()
@@ -85,7 +94,8 @@ class MultiValBinWrapper {
         ResizeHistBuf(
           hist_buf, cur_multi_val_bin, origin_hist_data);
       } else {
-        ResizeMixHistBuf(int_hist_buf, hist_buf, cur_multi_val_bin, origin_hist_data);
+        //ResizeMixHistBuf(int_hist_buf, hist_buf, cur_multi_val_bin, origin_hist_data);
+        ResizeMixHistBuf(mix_buf, cur_multi_val_bin, origin_hist_data);
       }
       OMP_INIT_EX();
       #pragma omp parallel for schedule(static) num_threads(num_threads_)
@@ -108,13 +118,19 @@ class MultiValBinWrapper {
             block_id,
             hist_buf);
         } else {
-          ConstructMixHistogramsForBlock<USE_INDICES, ORDERED>(
+          /*ConstructMixHistogramsForBlock<USE_INDICES, ORDERED>(
             cur_multi_val_bin, start, end, data_indices,
             reinterpret_cast<const score_t*>(gradients),
             reinterpret_cast<const int_score_t*>(hessians),
             block_id,
             int_hist_buf,
-            hist_buf);
+            hist_buf);*/
+          ConstructMixHistogramsForBlock<USE_INDICES, ORDERED>(
+            cur_multi_val_bin, start, end, data_indices,
+            reinterpret_cast<const score_t*>(gradients),
+            reinterpret_cast<const int_score_t*>(hessians),
+            block_id,
+            mix_buf);
         }
         OMP_LOOP_EX_END();
       }
@@ -127,7 +143,8 @@ class MultiValBinWrapper {
       } else if (!IS_MIX_GRAD) {
         HistMerge(hist_buf);
       } else {
-        MixHistMerge(int_hist_buf, hist_buf);
+        //MixHistMerge(int_hist_buf, hist_buf);
+        MixHistMerge(mix_buf);
       }
       global_timer.Stop("Dataset::sparse_bin_histogram_merge");
       global_timer.Start("Dataset::sparse_bin_histogram_move");
@@ -136,7 +153,8 @@ class MultiValBinWrapper {
       } else if (!IS_MIX_GRAD) {
         HistMove(*hist_buf);
       } else {
-        MixHistMove(*int_hist_buf, *hist_buf);
+        //MixHistMove(*int_hist_buf, *hist_buf);
+        MixHistMove(*mix_buf);
       }
       global_timer.Stop("Dataset::sparse_bin_histogram_move");
     }
@@ -213,6 +231,31 @@ class MultiValBinWrapper {
     } else {
       sub_multi_val_bin->ConstructMixHistogram(start, end, gradients, hessians,
                                         int_data_ptr, data_ptr);
+    }
+  }
+
+  template <bool USE_INDICES, bool ORDERED>
+  void ConstructMixHistogramsForBlock(const MultiValBin* sub_multi_val_bin,
+    data_size_t start, data_size_t end, const data_size_t* data_indices,
+    const score_t* gradients, const int_score_t* hessians, int block_id,
+    std::vector<MixHistEntry>* mix_hist_buf) {
+    MixHistEntry* mix_data_ptr = mix_hist_buf->data() + static_cast<size_t>(num_bin_aligned_) * block_id;
+    //std::memset(reinterpret_cast<void*>(mix_data_ptr), 0, num_bin_ * sizeof(MixHistEntry));
+    for (int i = 0; i < num_bin_; ++i) {
+      mix_data_ptr[i].grad = 0.0f;
+      mix_data_ptr[i].hess = 0;
+    }
+    if (USE_INDICES) {
+      if (ORDERED) {
+        sub_multi_val_bin->ConstructMixHistogramOrdered(data_indices, start, end,
+                                                gradients, hessians, mix_data_ptr);
+      } else {
+        sub_multi_val_bin->ConstructMixHistogram(data_indices, start, end, gradients,
+                                          hessians, mix_data_ptr);
+      }
+    } else {
+      sub_multi_val_bin->ConstructMixHistogram(start, end, gradients, hessians,
+                                        mix_data_ptr);
     }
   }
 
@@ -323,7 +366,7 @@ struct TrainingShareStates {
     if (multi_val_bin_wrapper_ != nullptr) {
       multi_val_bin_wrapper_->ConstructHistograms<
         USE_INDICES, ORDERED, GRAD_SCORE_T, HESS_SCORE_T, IS_INT_GRAD, IS_MIX_GRAD>(
-        data_indices, num_data, gradients, hessians, &int_hist_buf_, &hist_buf_, hist_data);
+        data_indices, num_data, gradients, hessians, &int_hist_buf_, &hist_buf_, &mix_hist_buf_, hist_data);
     }
   }
 
@@ -367,6 +410,7 @@ struct TrainingShareStates {
   std::unique_ptr<MultiValBinWrapper> multi_val_bin_wrapper_;
   std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>> hist_buf_;
   std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>> int_hist_buf_;
+  std::vector<MixHistEntry> mix_hist_buf_;
   int num_total_bin_ = 0;
   double num_elements_per_row_ = 0.0f;
   std::vector<int> group_bin_boundaries_;
