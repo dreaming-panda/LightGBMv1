@@ -708,7 +708,7 @@ void SerialTreeLearner::RenewIntGradTreeOutput(Tree* tree) const {
     data_size_t leaf_cnt = 0;
     const data_size_t* data_indices = data_partition_->GetIndexOnLeaf(leaf_id, &leaf_cnt);
     double sum_gradient = 0.0f, sum_hessian = 0.0f;
-    #pragma omp parallel for schedule(static)
+    #pragma omp parallel for schedule(static) reduction(+:sum_gradient, sum_hessian)
     for (data_size_t i = 0; i < leaf_cnt; ++i) {
       const data_size_t index = data_indices[i];
       const score_t grad = gradients_[index];
