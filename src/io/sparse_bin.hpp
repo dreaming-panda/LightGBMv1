@@ -198,11 +198,13 @@ class SparseBin : public Bin {
 
   void ConstructIntHistogram(const data_size_t* data_indices, data_size_t start,
                           data_size_t end, const int_score_t* ordered_gradients,
-                          const int_score_t* ordered_hessians,
+                          const int_score_t* /*ordered_hessians*/,
                           int_hist_t* out) const override {
     data_size_t i_delta, cur_pos;
     InitIndex(data_indices[start], &i_delta, &cur_pos);
     data_size_t i = start;
+    int64_t* out_ptr = reinterpret_cast<int64_t*>(out);
+    const int64_t* gradients_ptr = reinterpret_cast<const int64_t*>(ordered_gradients);
     for (;;) {
       if (cur_pos < data_indices[i]) {
         cur_pos += deltas_[++i_delta];
@@ -215,7 +217,7 @@ class SparseBin : public Bin {
         }
       } else {
         const VAL_T bin = vals_[i_delta];
-        ACC_GH(out, bin, ordered_gradients[i], ordered_hessians[i]);
+        out_ptr[bin] += gradients_ptr[i];
         if (++i >= end) {
           break;
         }
@@ -229,16 +231,18 @@ class SparseBin : public Bin {
 
   void ConstructIntHistogram(data_size_t start, data_size_t end,
                           const int_score_t* ordered_gradients,
-                          const int_score_t* ordered_hessians,
+                          const int_score_t* /*ordered_hessians*/,
                           int_hist_t* out) const override {
     data_size_t i_delta, cur_pos;
+    int64_t* out_ptr = reinterpret_cast<int64_t*>(out);
+    const int64_t* gradients_ptr = reinterpret_cast<const int64_t*>(ordered_gradients);
     InitIndex(start, &i_delta, &cur_pos);
     while (cur_pos < start && i_delta < num_vals_) {
       cur_pos += deltas_[++i_delta];
     }
     while (cur_pos < end && i_delta < num_vals_) {
       const VAL_T bin = vals_[i_delta];
-      ACC_GH(out, bin, ordered_gradients[cur_pos], ordered_hessians[cur_pos]);
+      out_ptr[bin] += gradients_ptr[cur_pos];
       cur_pos += deltas_[++i_delta];
     }
   }
