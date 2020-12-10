@@ -64,8 +64,8 @@ void MultiValBinWrapper::IntHistMove(const std::vector<int_hist_t,
     const int_hist_t* src = hist_buf.data();
     #pragma omp parallel for schedule(static)
     for (int i = 0; i < num_bin_; ++i) {
-      origin_hist_data_[2 * i] = src[2 * i] * grad_scale;
-      origin_hist_data_[2 * i + 1] = src[2 * i + 1] * hess_scale;
+      origin_hist_data_[2 * i] = src[2 * i + 1] * grad_scale;
+      origin_hist_data_[2 * i + 1] = src[2 * i] * hess_scale;
     }
   } else {
     const int_hist_t* src = hist_buf.data();
@@ -74,8 +74,8 @@ void MultiValBinWrapper::IntHistMove(const std::vector<int_hist_t,
       const int_hist_t* src_ptr = src + hist_move_src_[i];
       hist_t* dst_ptr = origin_hist_data_ + hist_move_dest_[i];
       for (int j = 0; j < static_cast<int>(hist_move_size_[i]) / 2; ++j) {
-        dst_ptr[2 * j] = grad_scale * src_ptr[2 * j];
-        dst_ptr[2 * j + 1] = hess_scale * src_ptr[2 * j + 1];
+        dst_ptr[2 * j] = grad_scale * src_ptr[2 * j + 1];
+        dst_ptr[2 * j + 1] = hess_scale * src_ptr[2 * j];
       }
     }
   }

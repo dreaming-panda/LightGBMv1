@@ -94,8 +94,8 @@ class LeafSplits {
     double tmp_sum_hessians = 0.0f;
 #pragma omp parallel for schedule(static, 512) reduction(+:tmp_sum_gradients, tmp_sum_hessians) if (num_data_in_leaf_ >= 1024 && !config_->deterministic)
     for (data_size_t i = 0; i < num_data_in_leaf_; ++i) {
-      tmp_sum_gradients += int_gradients[2 * i] * grad_scale;
-      tmp_sum_hessians += int_gradients[2 * i + 1] * hess_scale;
+      tmp_sum_gradients += int_gradients[2 * i + 1] * grad_scale;
+      tmp_sum_hessians += int_gradients[2 * i] * hess_scale;
     }
     sum_gradients_ = tmp_sum_gradients;
     sum_hessians_ = tmp_sum_hessians;
@@ -141,8 +141,8 @@ class LeafSplits {
 #pragma omp parallel for schedule(static, 512) reduction(+:tmp_sum_gradients, tmp_sum_hessians) if (num_data_in_leaf_ >= 1024 && !config_->deterministic)
     for (data_size_t i = 0; i < num_data_in_leaf_; ++i) {
       const data_size_t idx = data_indices_[i];
-      tmp_sum_gradients += int_gradients[2 * idx] * grad_scale;
-      tmp_sum_hessians += int_gradients[2 * idx + 1] * hess_scale;
+      tmp_sum_gradients += int_gradients[2 * idx + 1] * grad_scale;
+      tmp_sum_hessians += int_gradients[2 * idx] * hess_scale;
     }
     sum_gradients_ = tmp_sum_gradients;
     sum_hessians_ = tmp_sum_hessians;

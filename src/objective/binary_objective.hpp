@@ -196,8 +196,8 @@ class BinaryLogloss: public ObjectiveFunction {
     const double h_inverse_scale = 1.0f / (*hess_scale);
     #pragma omp parallel for schedule(static)
     for (data_size_t i = 0; i < num_data_; ++i) {
-      int_gradients[2 * i] = static_cast<int_score_t>(gradients[i] * g_inverse_scale);
-      int_gradients[2 * i + 1] = static_cast<int_score_t>(hessians[i] * h_inverse_scale);
+      int_gradients[2 * i + 1] = static_cast<int_score_t>(gradients[i] * g_inverse_scale);
+      int_gradients[2 * i] = static_cast<int_score_t>(hessians[i] * h_inverse_scale);
       //int_hessians[i] = static_cast<int_score_t>(hessians[i] * h_inverse_scale);
     }
   }
