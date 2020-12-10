@@ -58,7 +58,7 @@ void SerialTreeLearner::Init(const Dataset* train_data, bool is_constant_hessian
   // initialize ordered gradients and hessians
   ordered_gradients_.resize(num_data_);
   ordered_hessians_.resize(num_data_);
-  int_ordered_gradients_.resize(num_data_);
+  int_ordered_gradients_.resize(2 * num_data_);
   int_ordered_hessians_.resize(num_data_);
 
   GetShareStates(train_data_, is_constant_hessian, true);
@@ -116,7 +116,7 @@ void SerialTreeLearner::ResetTrainingDataInner(const Dataset* train_data,
   // initialize ordered gradients and hessians
   ordered_gradients_.resize(num_data_);
   ordered_hessians_.resize(num_data_);
-  int_ordered_gradients_.resize(num_data_);
+  int_ordered_gradients_.resize(2 * num_data_);
   int_ordered_hessians_.resize(num_data_);
   if (cegb_ != nullptr) {
     cegb_->Init();

@@ -1146,8 +1146,9 @@ void Dataset::ConstructHistogramsInner(
         if (USE_HESSIAN) {
           #pragma omp parallel for schedule(static, 512) if (num_data >= 1024)
           for (data_size_t i = 0; i < num_data; ++i) {
-            int_ordered_gradients[i] = int_gradients[data_indices[i]];
-            int_ordered_hessians[i] = int_hessians[data_indices[i]];
+            const auto index = data_indices[i];
+            int_ordered_gradients[2 * i] = int_gradients[2 * index];
+            int_ordered_gradients[2 * i + 1] = int_gradients[2 * index + 1];
           }
           int_ptr_ordered_grad = int_ordered_gradients;
           int_ptr_ordered_hess = int_ordered_hessians;
