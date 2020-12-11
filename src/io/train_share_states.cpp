@@ -462,7 +462,7 @@ void TrainingShareStates::SetMultiValBin(MultiValBin* bin, data_size_t num_data,
 
 void TrainingShareStates::RecoverHistogramsFromInteger(hist_t* hist) {
   #pragma omp parallel for schedule(static)
-  for (int i = 0; i < static_cast<int>(int_hist_buf_.size()) / 2; ++i) {
+  for (int i = 0; i < group_bin_boundaries_.back(); ++i) {
     hist[2 * i] = int_hist_buf_[2 * i + 1] * grad_scale_;
     hist[2 * i + 1] = int_hist_buf_[2 * i] * hess_scale_;
   }
