@@ -59,7 +59,7 @@ class MultiValDenseBin : public MultiValBin {
     const SCORE_T* gradients, const SCORE_T*, HIST_T* out) const {
     data_size_t i = start;
     const VAL_T* data_ptr_base = data_.data();
-    const int64_t* gradients_ptr = reinterpret_cast<const int64_t*>(gradients);
+    const int16_t* gradients_ptr = reinterpret_cast<const int16_t*>(gradients);
     int64_t* out_ptr = reinterpret_cast<int64_t*>(out);
 
     if (USE_PREFETCH) {
@@ -75,7 +75,8 @@ class MultiValDenseBin : public MultiValBin {
         PREFETCH_T0(data_ptr_base + RowPtr(pf_idx));
         const auto j_start = RowPtr(idx);
         const VAL_T* data_ptr = data_ptr_base + j_start;
-        const int64_t gradient = gradients_ptr[idx];
+        int64_t gradient = static_cast<int64_t>(gradients_ptr[idx]);
+        gradient = ((gradient & 0xff00) << 24) | (gradient & 0xff);
         for (int j = 0; j < num_feature_; ++j) {
           const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
           const auto ti = (bin + offsets_[j]);
@@ -87,7 +88,8 @@ class MultiValDenseBin : public MultiValBin {
       const auto idx = USE_INDICES ? data_indices[i] : i;
       const auto j_start = RowPtr(idx);
       const VAL_T* data_ptr = data_ptr_base + j_start;
-      const int64_t gradient = gradients_ptr[idx];
+      int64_t gradient = static_cast<int64_t>(gradients_ptr[idx]);
+      gradient = ((gradient & 0xff00) << 24) | (gradient & 0xff);
       for (int j = 0; j < num_feature_; ++j) {
         const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
         const auto ti = (bin + offsets_[j]);

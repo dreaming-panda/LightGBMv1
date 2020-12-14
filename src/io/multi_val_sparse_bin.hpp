@@ -163,7 +163,7 @@ class MultiValSparseBin : public MultiValBin {
                                const SCORE_T* /*hessians*/, HIST_T* out) const {
     data_size_t i = start;
     int64_t* out_ptr = reinterpret_cast<int64_t*>(out);
-    const int64_t* gradients_ptr = reinterpret_cast<const int64_t*>(gradients);
+    const int16_t* gradients_ptr = reinterpret_cast<const int16_t*>(gradients);
     const VAL_T* data_ptr = data_.data();
     const INDEX_T* row_ptr_base = row_ptr_.data();
     if (USE_PREFETCH) {
@@ -181,7 +181,8 @@ class MultiValSparseBin : public MultiValBin {
         PREFETCH_T0(data_ptr + row_ptr_[pf_idx]);
         const auto j_start = RowPtr(idx);
         const auto j_end = RowPtr(idx + 1);
-        const int64_t gradient = ORDERED ? gradients_ptr[i] : gradients_ptr[idx];
+        int64_t gradient = static_cast<int64_t>(ORDERED ? gradients_ptr[i] : gradients_ptr[idx]);
+        gradient = ((gradient & 0xff00) << 24) | (gradient & 0xff);
         for (auto j = j_start; j < j_end; ++j) {
           const auto ti = static_cast<uint32_t>(data_ptr[j]);
           out_ptr[ti] += gradient;
@@ -192,7 +193,8 @@ class MultiValSparseBin : public MultiValBin {
       const auto idx = USE_INDICES ? data_indices[i] : i;
       const auto j_start = RowPtr(idx);
       const auto j_end = RowPtr(idx + 1);
-      const int64_t gradient = ORDERED ? gradients_ptr[i] : gradients_ptr[idx];
+      int64_t gradient = static_cast<int64_t>(ORDERED ? gradients_ptr[i] : gradients_ptr[idx]);
+      gradient = ((gradient & 0xff00) << 24) | (gradient & 0xff);
       for (auto j = j_start; j < j_end; ++j) {
         const auto ti = static_cast<uint32_t>(data_ptr[j]);
         out_ptr[ti] += gradient;

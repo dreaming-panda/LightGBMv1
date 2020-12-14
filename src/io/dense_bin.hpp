@@ -149,7 +149,7 @@ class DenseBin : public Bin {
                                HIST_T* out) const {
     data_size_t i = start;
     int64_t* out_ptr = reinterpret_cast<int64_t*>(out);
-    const int64_t* gradients_ptr = reinterpret_cast<const int64_t*>(ordered_gradients);
+    const int16_t* gradients_ptr = reinterpret_cast<const int16_t*>(ordered_gradients);
     if (USE_PREFETCH) {
       const data_size_t pf_offset = 64 / sizeof(VAL_T);
       const data_size_t pf_end = end - pf_offset;
@@ -164,15 +164,19 @@ class DenseBin : public Bin {
         }
         const auto ti = static_cast<uint32_t>(data(idx));
         if (USE_HESSIAN) {
-          out_ptr[ti] += gradients_ptr[i];
+          int64_t gradient = static_cast<int64_t>(gradients_ptr[i]);
+          gradient = ((gradient & 0xff00) << 24) | (gradient & 0xff);
+          out_ptr[ti] += gradient;
         }
       }
     }
     for (; i < end; ++i) {
       const auto idx = USE_INDICES ? data_indices[i] : i;
       const auto ti = static_cast<uint32_t>(data(idx));
+      int64_t gradient = static_cast<int64_t>(gradients_ptr[i]);
+      gradient = ((gradient & 0xff00) << 24) | (gradient & 0xff);
       if (USE_HESSIAN) {
-        out_ptr[ti] += gradients_ptr[i];
+        out_ptr[ti] += gradient;
       }
     }
   }

@@ -204,7 +204,7 @@ class SparseBin : public Bin {
     InitIndex(data_indices[start], &i_delta, &cur_pos);
     data_size_t i = start;
     int64_t* out_ptr = reinterpret_cast<int64_t*>(out);
-    const int64_t* gradients_ptr = reinterpret_cast<const int64_t*>(ordered_gradients);
+    const int16_t* gradients_ptr = reinterpret_cast<const int16_t*>(ordered_gradients);
     for (;;) {
       if (cur_pos < data_indices[i]) {
         cur_pos += deltas_[++i_delta];
@@ -217,7 +217,9 @@ class SparseBin : public Bin {
         }
       } else {
         const VAL_T bin = vals_[i_delta];
-        out_ptr[bin] += gradients_ptr[i];
+        int64_t gradient = static_cast<int64_t>(gradients_ptr[i]);
+        gradient = ((gradient & 0xff00) << 24) | (gradient & 0xff);
+        out_ptr[bin] += gradient;
         if (++i >= end) {
           break;
         }
@@ -235,14 +237,16 @@ class SparseBin : public Bin {
                           int_hist_t* out) const override {
     data_size_t i_delta, cur_pos;
     int64_t* out_ptr = reinterpret_cast<int64_t*>(out);
-    const int64_t* gradients_ptr = reinterpret_cast<const int64_t*>(ordered_gradients);
+    const int16_t* gradients_ptr = reinterpret_cast<const int16_t*>(ordered_gradients);
     InitIndex(start, &i_delta, &cur_pos);
     while (cur_pos < start && i_delta < num_vals_) {
       cur_pos += deltas_[++i_delta];
     }
     while (cur_pos < end && i_delta < num_vals_) {
       const VAL_T bin = vals_[i_delta];
-      out_ptr[bin] += gradients_ptr[cur_pos];
+      int64_t gradient = static_cast<int64_t>(gradients_ptr[cur_pos]);
+      gradient = ((gradient & 0xff00) << 24) | (gradient & 0xff);
+      out_ptr[bin] += gradient;
       cur_pos += deltas_[++i_delta];
     }
   }
