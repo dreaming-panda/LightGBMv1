@@ -217,9 +217,9 @@ class SparseBin : public Bin {
         }
       } else {
         const VAL_T bin = vals_[i_delta];
-        int64_t gradient = static_cast<int64_t>(gradients_ptr[i]);
-        gradient = ((gradient & 0xff00) << 24) | (gradient & 0xff);
-        out_ptr[bin] += gradient;
+        const int16_t gradient_16 = gradients_ptr[i];
+        const int64_t gradient_64 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 32) | (gradient_16 & 0xff);
+        out_ptr[bin] += gradient_64;
         if (++i >= end) {
           break;
         }
@@ -244,9 +244,9 @@ class SparseBin : public Bin {
     }
     while (cur_pos < end && i_delta < num_vals_) {
       const VAL_T bin = vals_[i_delta];
-      int64_t gradient = static_cast<int64_t>(gradients_ptr[cur_pos]);
-      gradient = ((gradient & 0xff00) << 24) | (gradient & 0xff);
-      out_ptr[bin] += gradient;
+      const int16_t gradient_16 = gradients_ptr[cur_pos];
+      const int64_t gradient_64 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 32) | (gradient_16 & 0xff);
+      out_ptr[bin] += gradient_64;
       cur_pos += deltas_[++i_delta];
     }
   }

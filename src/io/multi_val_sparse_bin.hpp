@@ -181,11 +181,11 @@ class MultiValSparseBin : public MultiValBin {
         PREFETCH_T0(data_ptr + row_ptr_[pf_idx]);
         const auto j_start = RowPtr(idx);
         const auto j_end = RowPtr(idx + 1);
-        int64_t gradient = static_cast<int64_t>(ORDERED ? gradients_ptr[i] : gradients_ptr[idx]);
-        gradient = ((gradient & 0xff00) << 24) | (gradient & 0xff);
+        const int16_t gradient_16 = ORDERED ? gradients_ptr[i] : gradients_ptr[idx];
+        const int64_t gradient_64 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 32) | (gradient_16 & 0xff);
         for (auto j = j_start; j < j_end; ++j) {
           const auto ti = static_cast<uint32_t>(data_ptr[j]);
-          out_ptr[ti] += gradient;
+          out_ptr[ti] += gradient_64;
         }
       }
     }
@@ -193,11 +193,11 @@ class MultiValSparseBin : public MultiValBin {
       const auto idx = USE_INDICES ? data_indices[i] : i;
       const auto j_start = RowPtr(idx);
       const auto j_end = RowPtr(idx + 1);
-      int64_t gradient = static_cast<int64_t>(ORDERED ? gradients_ptr[i] : gradients_ptr[idx]);
-      gradient = ((gradient & 0xff00) << 24) | (gradient & 0xff);
+      const int16_t gradient_16 = ORDERED ? gradients_ptr[i] : gradients_ptr[idx];
+      const int64_t gradient_64 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 32) | (gradient_16 & 0xff);
       for (auto j = j_start; j < j_end; ++j) {
         const auto ti = static_cast<uint32_t>(data_ptr[j]);
-        out_ptr[ti] += gradient;
+        out_ptr[ti] += gradient_64;
       }
     }
   }

@@ -75,12 +75,15 @@ class MultiValDenseBin : public MultiValBin {
         PREFETCH_T0(data_ptr_base + RowPtr(pf_idx));
         const auto j_start = RowPtr(idx);
         const VAL_T* data_ptr = data_ptr_base + j_start;
-        int64_t gradient = static_cast<int64_t>(gradients_ptr[idx]);
-        gradient = ((gradient & 0xff00) << 24) | (gradient & 0xff);
+        const int16_t gradient_16 = gradients_ptr[idx];
+        const int64_t gradient_64 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 32) | (gradient_16 & 0xff);
+        //const int64_t sign_mask = gradient_16 < 0 ? 0xffffff0000000000 : 0;
+        //const int64_t intermediate = (static_cast<int64_t>(gradient_16 & 0xff00) << 24) | (gradient_16 & 0xff);
+        //const int64_t gradient_64 = intermediate | sign_mask;
         for (int j = 0; j < num_feature_; ++j) {
           const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
           const auto ti = (bin + offsets_[j]);
-          out_ptr[ti] += gradient;
+          out_ptr[ti] += gradient_64;
         }
       }
     }
@@ -88,12 +91,15 @@ class MultiValDenseBin : public MultiValBin {
       const auto idx = USE_INDICES ? data_indices[i] : i;
       const auto j_start = RowPtr(idx);
       const VAL_T* data_ptr = data_ptr_base + j_start;
-      int64_t gradient = static_cast<int64_t>(gradients_ptr[idx]);
-      gradient = ((gradient & 0xff00) << 24) | (gradient & 0xff);
+      const int16_t gradient_16 = gradients_ptr[idx];
+      const int64_t gradient_64 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 32) | (gradient_16 & 0xff);
+      //const int64_t sign_mask = gradient_16 < 0 ? 0xffffff0000000000 : 0;
+      //const int64_t intermediate = (static_cast<int64_t>(gradient_16 & 0xff00) << 24) | (gradient_16 & 0xff);
+      //const int64_t gradient_64 = intermediate | sign_mask;
       for (int j = 0; j < num_feature_; ++j) {
         const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
         const auto ti = (bin + offsets_[j]);
-        out_ptr[ti] += gradient;
+        out_ptr[ti] += gradient_64;
       }
     }
   }
