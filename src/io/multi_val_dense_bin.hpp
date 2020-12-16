@@ -60,7 +60,7 @@ class MultiValDenseBin : public MultiValBin {
     data_size_t i = start;
     const VAL_T* data_ptr_base = data_.data();
     const int16_t* gradients_ptr = reinterpret_cast<const int16_t*>(gradients);
-    int64_t* out_ptr = reinterpret_cast<int64_t*>(out);
+    int32_t* out_ptr = reinterpret_cast<int32_t*>(out);
 
     if (USE_PREFETCH) {
       const data_size_t pf_offset = 32 / sizeof(VAL_T);
@@ -76,14 +76,11 @@ class MultiValDenseBin : public MultiValBin {
         const auto j_start = RowPtr(idx);
         const VAL_T* data_ptr = data_ptr_base + j_start;
         const int16_t gradient_16 = gradients_ptr[idx];
-        const int64_t gradient_64 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 32) | (gradient_16 & 0xff);
-        //const int64_t sign_mask = gradient_16 < 0 ? 0xffffff0000000000 : 0;
-        //const int64_t intermediate = (static_cast<int64_t>(gradient_16 & 0xff00) << 24) | (gradient_16 & 0xff);
-        //const int64_t gradient_64 = intermediate | sign_mask;
+        const int32_t gradient_32 = (static_cast<int32_t>(static_cast<int8_t>(gradient_16 >> 8)) << 16) | (gradient_16 & 0xff);
         for (int j = 0; j < num_feature_; ++j) {
           const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
           const auto ti = (bin + offsets_[j]);
-          out_ptr[ti] += gradient_64;
+          out_ptr[ti] += gradient_32;
         }
       }
     }
@@ -92,14 +89,55 @@ class MultiValDenseBin : public MultiValBin {
       const auto j_start = RowPtr(idx);
       const VAL_T* data_ptr = data_ptr_base + j_start;
       const int16_t gradient_16 = gradients_ptr[idx];
-      const int64_t gradient_64 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 32) | (gradient_16 & 0xff);
-      //const int64_t sign_mask = gradient_16 < 0 ? 0xffffff0000000000 : 0;
-      //const int64_t intermediate = (static_cast<int64_t>(gradient_16 & 0xff00) << 24) | (gradient_16 & 0xff);
-      //const int64_t gradient_64 = intermediate | sign_mask;
+      const int32_t gradient_32 = (static_cast<int32_t>(static_cast<int8_t>(gradient_16 >> 8)) << 16) | (gradient_16 & 0xff);
       for (int j = 0; j < num_feature_; ++j) {
         const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
         const auto ti = (bin + offsets_[j]);
-        out_ptr[ti] += gradient_64;
+        out_ptr[ti] += gradient_32;
+      }
+    }
+  }
+
+  template<bool USE_INDICES, bool USE_PREFETCH, bool ORDERED, typename HIST_T, typename SCORE_T>
+  void ConstructInt48HistogramInner(const data_size_t* data_indices, data_size_t start, data_size_t end,
+    const SCORE_T* gradients, const SCORE_T*, HIST_T* out) const {
+    data_size_t i = start;
+    const VAL_T* data_ptr_base = data_.data();
+    const int16_t* gradients_ptr = reinterpret_cast<const int16_t*>(gradients);
+    int16_t* out_ptr = reinterpret_cast<int16_t*>(out);
+
+    if (USE_PREFETCH) {
+      const data_size_t pf_offset = 32 / sizeof(VAL_T);
+      const data_size_t pf_end = end - pf_offset;
+
+      for (; i < pf_end; ++i) {
+        const auto idx = USE_INDICES ? data_indices[i] : i;
+        const auto pf_idx = USE_INDICES ? data_indices[i + pf_offset] : i + pf_offset;
+        if (!ORDERED) {
+          PREFETCH_T0(gradients_ptr + pf_idx);
+        }
+        PREFETCH_T0(data_ptr_base + RowPtr(pf_idx));
+        const auto j_start = RowPtr(idx);
+        const VAL_T* data_ptr = data_ptr_base + j_start;
+        const int16_t gradient_16 = gradients_ptr[idx];
+        const int64_t gradient_48 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 24) | (gradient_16 & 0xff);
+        for (int j = 0; j < num_feature_; ++j) {
+          const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
+          const auto ti = (bin + offsets_[j]) * 3;
+          *reinterpret_cast<int64_t*>(out_ptr + ti) += gradient_48;
+        }
+      }
+    }
+    for (; i < end; ++i) {
+      const auto idx = USE_INDICES ? data_indices[i] : i;
+      const auto j_start = RowPtr(idx);
+      const VAL_T* data_ptr = data_ptr_base + j_start;
+      const int16_t gradient_16 = gradients_ptr[idx];
+      const int64_t gradient_48 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 24) | (gradient_16 & 0xff);
+      for (int j = 0; j < num_feature_; ++j) {
+        const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
+        const auto ti = (bin + offsets_[j]) * 3;
+        *reinterpret_cast<int64_t*>(out_ptr + ti) += gradient_48;
       }
     }
   }
@@ -129,15 +167,15 @@ class MultiValDenseBin : public MultiValBin {
 
   void ConstructIntHistogram(const data_size_t* data_indices, data_size_t start,
                           data_size_t end, const int_score_t* gradients,
-                          const int_score_t* hessians, int_hist_t* out) const override {
-    ConstructHistogramInner<true, true, false, int_hist_t, int_score_t>(data_indices, start, end,
+                          const int_score_t* hessians, int_buf_hist_t* out) const override {
+    ConstructHistogramInner<true, true, false, int_buf_hist_t, int_score_t>(data_indices, start, end,
                                                gradients, hessians, out);
   }
 
   void ConstructIntHistogram(data_size_t start, data_size_t end,
                           const int_score_t* gradients, const int_score_t* hessians,
-                          int_hist_t* out) const override {
-    ConstructHistogramInner<false, false, false, int_hist_t, int_score_t>(
+                          int_buf_hist_t* out) const override {
+    ConstructHistogramInner<false, false, false, int_buf_hist_t, int_score_t>(
         nullptr, start, end, gradients, hessians, out);
   }
 
@@ -145,8 +183,31 @@ class MultiValDenseBin : public MultiValBin {
                                  data_size_t start, data_size_t end,
                                  const int_score_t* gradients,
                                  const int_score_t* hessians,
+                                 int_buf_hist_t* out) const override {
+    ConstructHistogramInner<true, true, true, int_buf_hist_t, int_score_t>(data_indices, start, end,
+                                              gradients, hessians, out);
+  }
+
+  void ConstructInt48Histogram(const data_size_t* data_indices, data_size_t start,
+                          data_size_t end, const int_score_t* gradients,
+                          const int_score_t* hessians, int_hist_t* out) const override {
+    ConstructInt48HistogramInner<true, true, false, int_hist_t, int_score_t>(data_indices, start, end,
+                                               gradients, hessians, out);
+  }
+
+  void ConstructInt48Histogram(data_size_t start, data_size_t end,
+                          const int_score_t* gradients, const int_score_t* hessians,
+                          int_hist_t* out) const override {
+    ConstructInt48HistogramInner<false, false, false, int_hist_t, int_score_t>(
+        nullptr, start, end, gradients, hessians, out);
+  }
+
+  void ConstructInt48HistogramOrdered(const data_size_t* data_indices,
+                                 data_size_t start, data_size_t end,
+                                 const int_score_t* gradients,
+                                 const int_score_t* hessians,
                                  int_hist_t* out) const override {
-    ConstructHistogramInner<true, true, true, int_hist_t, int_score_t>(data_indices, start, end,
+    ConstructInt48HistogramInner<true, true, true, int_hist_t, int_score_t>(data_indices, start, end,
                                               gradients, hessians, out);
   }
 

@@ -104,18 +104,22 @@ void MultiValBinWrapper::HistMerge(std::vector<hist_t,
   }
 }
 
-void MultiValBinWrapper::IntHistMerge(std::vector<int_hist_t,
-  Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* hist_buf) {
+void MultiValBinWrapper::IntHistMerge(std::vector<int_buf_hist_t, Common::AlignmentAllocator<int_buf_hist_t, kAlignedSize>>* hist_buf,
+  std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* merge_hist_buf) {
   int n_bin_block = 1;
   int bin_block_size = num_bin_;
   Threading::BlockInfo<data_size_t>(num_threads_, num_bin_, 512, &n_bin_block,
                                   &bin_block_size);
-  int_hist_t* dst = hist_buf->data();
+  int_hist_t* dst = merge_hist_buf->data();
+  #pragma omp parallel for schedule(static) num_threads(num_threads_)
+  for (int i = 0; i < num_bin_aligned_ * 2; ++i) {
+    dst[i] = 0;
+  }
   #pragma omp parallel for schedule(static, 1) num_threads(num_threads_)
   for (int t = 0; t < n_bin_block; ++t) {
     const int start = t * bin_block_size;
     const int end = std::min(start + bin_block_size, num_bin_);
-    for (int tid = 1; tid < n_data_block_; ++tid) {
+    for (int tid = 0; tid < n_data_block_; ++tid) {
       auto src_ptr = hist_buf->data() + static_cast<size_t>(num_bin_aligned_) * 2 * tid;
       for (int i = start * 2; i < end * 2; ++i) {
         dst[i] += src_ptr[i];
@@ -137,16 +141,20 @@ void MultiValBinWrapper::ResizeHistBuf(std::vector<hist_t,
   }
 }
 
-void MultiValBinWrapper::ResizeIntHistBuf(std::vector<int_hist_t,
-  Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* hist_buf,
+void MultiValBinWrapper::ResizeIntHistBuf(std::vector<int_buf_hist_t, Common::AlignmentAllocator<int_buf_hist_t, kAlignedSize>>* hist_buf,
+  std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* merged_hist_buf,
   MultiValBin* sub_multi_val_bin,
   hist_t* origin_hist_data) {
   num_bin_ = sub_multi_val_bin->num_bin();
   num_bin_aligned_ = (num_bin_ + kAlignedSize - 1) / kAlignedSize * kAlignedSize;
   origin_hist_data_ = origin_hist_data;
-  size_t new_buf_size = static_cast<size_t>(n_data_block_) * static_cast<size_t>(num_bin_aligned_) * 2;
+  size_t block_hist_size = static_cast<size_t>(num_bin_aligned_) * 2;
+  size_t new_buf_size = static_cast<size_t>(n_data_block_) * block_hist_size;
   if (hist_buf->size() < new_buf_size) {
     hist_buf->resize(new_buf_size);
+  }
+  if (merged_hist_buf->size() < block_hist_size) {
+    merged_hist_buf->resize(block_hist_size);
   }
 }
 
@@ -469,7 +477,7 @@ void TrainingShareStates::RecoverHistogramsFromInteger(hist_t* hist) {
 }
 
 int_hist_t* TrainingShareStates::GetIntegerHistogram(int group_id) {
-  return int_hist_buf_.data() + group_bin_boundaries_[group_id] * 2;
+  return merged_int_hist_buf_.data() + group_bin_boundaries_[group_id] * 2;
 }
 
 }  // namespace LightGBM

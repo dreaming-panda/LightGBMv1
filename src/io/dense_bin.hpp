@@ -150,6 +150,7 @@ class DenseBin : public Bin {
     data_size_t i = start;
     int64_t* out_ptr = reinterpret_cast<int64_t*>(out);
     const int16_t* gradients_ptr = reinterpret_cast<const int16_t*>(ordered_gradients);
+    const VAL_T* data_ptr_base = data_.data();
     if (USE_PREFETCH) {
       const data_size_t pf_offset = 64 / sizeof(VAL_T);
       const data_size_t pf_end = end - pf_offset;
@@ -158,9 +159,9 @@ class DenseBin : public Bin {
         const auto pf_idx =
             USE_INDICES ? data_indices[i + pf_offset] : i + pf_offset;
         if (IS_4BIT) {
-          PREFETCH_T0(data_.data() + (pf_idx >> 1));
+          PREFETCH_T0(data_ptr_base + (pf_idx >> 1));
         } else {
-          PREFETCH_T0(data_.data() + pf_idx);
+          PREFETCH_T0(data_ptr_base + pf_idx);
         }
         const auto ti = static_cast<uint32_t>(data(idx));
         if (USE_HESSIAN) {

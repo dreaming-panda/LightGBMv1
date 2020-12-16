@@ -464,14 +464,31 @@ class MultiValBin {
                                   data_size_t start, data_size_t end,
                                   const int_score_t* int_gradients,
                                   const int_score_t* int_hessians,
-                                  int_hist_t* out) const = 0;
+                                  int_buf_hist_t* out) const = 0;
 
   virtual void ConstructIntHistogram(data_size_t start, data_size_t end,
                                   const int_score_t* int_gradients,
                                   const int_score_t* int_hessians,
-                                  int_hist_t* out) const = 0;
+                                  int_buf_hist_t* out) const = 0;
 
   virtual void ConstructIntHistogramOrdered(const data_size_t* data_indices,
+                                         data_size_t start, data_size_t end,
+                                         const int_score_t* int_ordered_gradients,
+                                         const int_score_t* int_ordered_hessians,
+                                         int_buf_hist_t* out) const = 0;
+
+  virtual void ConstructInt48Histogram(const data_size_t* data_indices,
+                                  data_size_t start, data_size_t end,
+                                  const int_score_t* int_gradients,
+                                  const int_score_t* int_hessians,
+                                  int_hist_t* out) const = 0;
+
+  virtual void ConstructInt48Histogram(data_size_t start, data_size_t end,
+                                  const int_score_t* int_gradients,
+                                  const int_score_t* int_hessians,
+                                  int_hist_t* out) const = 0;
+
+  virtual void ConstructInt48HistogramOrdered(const data_size_t* data_indices,
                                          data_size_t start, data_size_t end,
                                          const int_score_t* int_ordered_gradients,
                                          const int_score_t* int_ordered_hessians,

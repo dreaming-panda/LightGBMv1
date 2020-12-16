@@ -40,22 +40,29 @@ class MultiValBinWrapper {
 
   void HistMerge(std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf);
 
-  void IntHistMerge(std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* hist_buf);
+  void IntHistMerge(std::vector<int_buf_hist_t, Common::AlignmentAllocator<int_buf_hist_t, kAlignedSize>>* hist_buf,
+    std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* merge_hist_buf);
 
   void ResizeHistBuf(std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf,
     MultiValBin* sub_multi_val_bin,
     hist_t* origin_hist_data);
 
-  void ResizeIntHistBuf(std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* hist_buf,
+  void ResizeIntHistBuf(std::vector<int_buf_hist_t, Common::AlignmentAllocator<int_buf_hist_t, kAlignedSize>>* hist_buf,
+    std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* merged_hist_buf,
     MultiValBin* sub_multi_val_bin,
     hist_t* origin_hist_data);
 
-  template <bool USE_INDICES, bool ORDERED, typename SCORE_T, typename HIST_T,  bool IS_INT_GRAD>
+  /*void ResizeInt48HistBuf(std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* hist_buf,
+    MultiValBin* sub_multi_val_bin,
+    hist_t* origin_hist_data);*/
+
+  template <bool USE_INDICES, bool ORDERED, typename SCORE_T, typename HIST_BUF_T, typename HIST_T,  bool IS_INT_GRAD>
   void ConstructHistograms(const data_size_t* data_indices,
       data_size_t num_data,
       const SCORE_T* gradients,
       const SCORE_T* hessians,
-      std::vector<HIST_T, Common::AlignmentAllocator<HIST_T, kAlignedSize>>* hist_buf,
+      std::vector<HIST_BUF_T, Common::AlignmentAllocator<HIST_BUF_T, kAlignedSize>>* hist_buf,
+      std::vector<HIST_T, Common::AlignmentAllocator<HIST_T, kAlignedSize>>* merged_hist_buf,
       hist_t* origin_hist_data) {
     const auto cur_multi_val_bin = (is_use_subcol_ || is_use_subrow_)
           ? multi_val_bin_subset_.get()
@@ -68,7 +75,8 @@ class MultiValBinWrapper {
                                         max_block_size_, &n_data_block_, &data_block_size_);
       if (IS_INT_GRAD) {
         ResizeIntHistBuf(
-          reinterpret_cast<std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>*>(hist_buf),
+          reinterpret_cast<std::vector<int_buf_hist_t, Common::AlignmentAllocator<int_buf_hist_t, kAlignedSize>>*>(hist_buf),
+          reinterpret_cast<std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>*>(merged_hist_buf),
           cur_multi_val_bin, origin_hist_data);
       } else {
         ResizeHistBuf(
@@ -87,7 +95,7 @@ class MultiValBinWrapper {
             reinterpret_cast<const int_score_t*>(gradients),
             reinterpret_cast<const int_score_t*>(hessians),
             block_id,
-            reinterpret_cast<std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>*>(hist_buf));
+            reinterpret_cast<std::vector<int_buf_hist_t, Common::AlignmentAllocator<int_buf_hist_t, kAlignedSize>>*>(hist_buf));
         } else {
           ConstructHistogramsForBlock<USE_INDICES, ORDERED>(
             cur_multi_val_bin, start, end, data_indices,
@@ -104,7 +112,8 @@ class MultiValBinWrapper {
       global_timer.Start("Dataset::sparse_bin_histogram_merge");
       if (IS_INT_GRAD) {
         IntHistMerge(
-          reinterpret_cast<std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>*>(hist_buf));
+          reinterpret_cast<std::vector<int_buf_hist_t, Common::AlignmentAllocator<int_buf_hist_t, kAlignedSize>>*>(hist_buf),
+          reinterpret_cast<std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>*>(merged_hist_buf));
       } else {
         HistMerge(
           reinterpret_cast<std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>*>(hist_buf));
@@ -113,7 +122,7 @@ class MultiValBinWrapper {
       global_timer.Start("Dataset::sparse_bin_histogram_move");
       if (IS_INT_GRAD) {
         IntHistMove(
-          *reinterpret_cast<std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>*>(hist_buf));
+          *reinterpret_cast<std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>*>(merged_hist_buf));
       } else {
         HistMove(
           *reinterpret_cast<std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>*>(hist_buf));
@@ -155,9 +164,9 @@ class MultiValBinWrapper {
   void ConstructIntHistogramsForBlock(const MultiValBin* sub_multi_val_bin,
     data_size_t start, data_size_t end, const data_size_t* data_indices,
     const int_score_t* gradients, const int_score_t* hessians, int block_id,
-    std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* hist_buf) {
-    int_hist_t* data_ptr = hist_buf->data() + static_cast<size_t>(num_bin_aligned_) * block_id * 2;
-    std::memset(reinterpret_cast<void*>(data_ptr), 0, num_bin_ * kHistIntBufferEntrySize);
+    std::vector<int_buf_hist_t, Common::AlignmentAllocator<int_buf_hist_t, kAlignedSize>>* hist_buf) {
+    int_buf_hist_t* data_ptr = hist_buf->data() + static_cast<size_t>(num_bin_aligned_) * block_id * 2;
+    std::memset(reinterpret_cast<void*>(data_ptr), 0, num_bin_ * kHistIntBufferEntrySize / 2);
     if (USE_INDICES) {
       if (ORDERED) {
         sub_multi_val_bin->ConstructIntHistogramOrdered(data_indices, start, end,
@@ -278,12 +287,12 @@ struct TrainingShareStates {
     if (multi_val_bin_wrapper_ != nullptr) {
       if (IS_INT_GRAD) {
         multi_val_bin_wrapper_->ConstructHistograms<
-          USE_INDICES, ORDERED, SCORE_T, int_hist_t, IS_INT_GRAD>(
-          data_indices, num_data, gradients, hessians, &int_hist_buf_, hist_data);
+          USE_INDICES, ORDERED, SCORE_T, int_buf_hist_t, int_hist_t, IS_INT_GRAD>(
+          data_indices, num_data, gradients, hessians, &int_hist_buf_, &merged_int_hist_buf_, hist_data);
       } else {
         multi_val_bin_wrapper_->ConstructHistograms<
-          USE_INDICES, ORDERED, SCORE_T, hist_t, IS_INT_GRAD>(
-          data_indices, num_data, gradients, hessians, &hist_buf_, hist_data);
+          USE_INDICES, ORDERED, SCORE_T, hist_t, hist_t, IS_INT_GRAD>(
+          data_indices, num_data, gradients, hessians, &hist_buf_, &hist_buf_, hist_data);
       }
     }
   }
@@ -321,7 +330,8 @@ struct TrainingShareStates {
   uint64_t num_hist_total_bin_ = 0;
   std::unique_ptr<MultiValBinWrapper> multi_val_bin_wrapper_;
   std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>> hist_buf_;
-  std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>> int_hist_buf_;
+  std::vector<int_buf_hist_t, Common::AlignmentAllocator<int_buf_hist_t, kAlignedSize>> int_hist_buf_;
+  std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>> merged_int_hist_buf_;
   int num_total_bin_ = 0;
   double num_elements_per_row_ = 0.0f;
   std::vector<int> group_bin_boundaries_;
