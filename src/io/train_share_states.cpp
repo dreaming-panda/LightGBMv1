@@ -170,7 +170,7 @@ void MultiValBinWrapper::Int48HistMerge(std::vector<int_hist_t, Common::Alignmen
         int32_t hess_val = static_cast<int32_t>(gh & 0x00ffffff);
         dst[i] += hess_val;
         int32_t grad_val = static_cast<int32_t>(gh >> 24) & 0x00ffffff;
-        const bool should_mask = (gh & 0x00800000) > 0;
+        const bool should_mask = (grad_val & 0x00800000) > 0;
         if (should_mask) {
           grad_val |= 0xff000000;
         }
