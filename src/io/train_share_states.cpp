@@ -166,15 +166,16 @@ void MultiValBinWrapper::Int48HistMerge(std::vector<int_hist_t, Common::Alignmen
     for (int tid = 0; tid < n_data_block_; ++tid) {
       auto src_ptr = hist_buf_ptr + static_cast<size_t>(num_bin_aligned_) * 3 * tid;
       for (int i = start * 2; i < end * 2; i += 2) {
-        int64_t gh = *reinterpret_cast<int64_t*>(src_ptr + 3 * (i / 2));
-        int32_t hess_val = static_cast<int32_t>(gh & 0xffffff);
+        int64_t gh = *reinterpret_cast<int64_t*>(src_ptr);
+        int32_t hess_val = static_cast<int32_t>(gh & 0x00ffffff);
         dst[i] += hess_val;
-        const bool should_mask = (gh & 0x0000800000000000) > 0;
-        int32_t grad_val = static_cast<int32_t>((gh & 0x0000ffffff000000) >> 24);
+        int32_t grad_val = static_cast<int32_t>(gh >> 24) & 0x00ffffff;
+        const bool should_mask = (gh & 0x00800000) > 0;
         if (should_mask) {
           grad_val |= 0xff000000;
         }
         dst[i + 1] += grad_val;
+        src_ptr += 3;
       }
     }
   }
