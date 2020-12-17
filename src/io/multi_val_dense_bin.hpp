@@ -215,9 +215,10 @@ class MultiValDenseBin : public MultiValBin {
         for (int j = 0; j < num_feature_; ++j) {
           const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
           const auto ti = (bin + offsets_[j]) * 3;
-          const int64_t res = (*reinterpret_cast<int64_t*>(out_ptr + ti) + gradient_48) & 0x0000ffffffffffff;
-          *reinterpret_cast<int64_t*>(out_ptr + ti) &= 0xffff000000000000;
-          *reinterpret_cast<int64_t*>(out_ptr + ti) |= res;
+          const auto ptr = reinterpret_cast<int64_t*>(out_ptr + ti);
+          const int64_t res = (*(ptr) + gradient_48) & 0x0000ffffffffffff;
+          *(ptr) &= 0xffff000000000000;
+          *(ptr) |= res;
         }
       }
     }
@@ -230,9 +231,10 @@ class MultiValDenseBin : public MultiValBin {
       for (int j = 0; j < num_feature_; ++j) {
         const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
         const auto ti = (bin + offsets_[j]) * 3;
-        const int64_t res = (*reinterpret_cast<int64_t*>(out_ptr + ti) + gradient_48) & 0x0000ffffffffffff;
-        *reinterpret_cast<int64_t*>(out_ptr + ti) &= 0xffff000000000000;
-        *reinterpret_cast<int64_t*>(out_ptr + ti) |= res;
+        const auto ptr = reinterpret_cast<int64_t*>(out_ptr + ti);
+        const int64_t res = (*(ptr) + gradient_48) & 0x0000ffffffffffff;
+        *(ptr) &= 0xffff000000000000;
+        *(ptr) |= res;
       }
     }
   }
