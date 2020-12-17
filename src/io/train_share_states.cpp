@@ -164,12 +164,12 @@ void MultiValBinWrapper::Int48HistMerge(std::vector<int_hist_t, Common::Alignmen
     const int start = t * bin_block_size;
     const int end = std::min(start + bin_block_size, num_bin_);
     for (int tid = 0; tid < n_data_block_; ++tid) {
-      auto src_ptr = hist_buf_ptr + static_cast<size_t>(num_bin_aligned_) * 3 * tid;
+      auto src_ptr = hist_buf_ptr + static_cast<size_t>(num_bin_aligned_) * 3 * tid + 3 * start;
       for (int i = start * 2; i < end * 2; i += 2) {
         int64_t gh = *reinterpret_cast<int64_t*>(src_ptr);
         int32_t hess_val = static_cast<int32_t>(gh & 0x00ffffff);
         dst[i] += hess_val;
-        int32_t grad_val = static_cast<int32_t>(gh >> 24) & 0x00ffffff;
+        int32_t grad_val = static_cast<int32_t>((gh >> 24) & 0x00ffffff);
         const bool should_mask = (grad_val & 0x00800000) > 0;
         if (should_mask) {
           grad_val |= 0xff000000;
@@ -561,6 +561,10 @@ void TrainingShareStates::RecoverHistogramsFromInteger(hist_t* hist) {
 
 int_hist_t* TrainingShareStates::GetIntegerHistogram(int group_id) {
   return merged_int_hist_buf_.data() + group_bin_boundaries_[group_id] * 2;
+}
+
+TrainingShareStates::HIST_BIT TrainingShareStates::CalcHistBit(data_size_t num_data) const {
+
 }
 
 }  // namespace LightGBM
