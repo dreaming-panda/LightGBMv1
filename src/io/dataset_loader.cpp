@@ -545,6 +545,7 @@ Dataset* DatasetLoader::ConstructFromSampleData(double** sample_values,
     num_total_features = Network::GlobalSyncUpByMax(num_total_features);
   }
   std::vector<std::unique_ptr<BinMapper>> bin_mappers(num_total_features);
+  std::vector<int> max_cnt_in_bin(num_total_features);
   // fill feature_names_ if not header
   if (feature_names_.empty()) {
     for (int i = 0; i < num_col; ++i) {
@@ -584,12 +585,12 @@ Dataset* DatasetLoader::ConstructFromSampleData(double** sample_values,
       }
       bin_mappers[i].reset(new BinMapper());
       if (config_.max_bin_by_feature.empty()) {
-        bin_mappers[i]->FindBin(sample_values[i], num_per_col[i], total_sample_size,
+        max_cnt_in_bin[i] = bin_mappers[i]->FindBin(sample_values[i], num_per_col[i], total_sample_size,
                                 config_.max_bin, config_.min_data_in_bin, filter_cnt, config_.feature_pre_filter,
                                 bin_type, config_.use_missing, config_.zero_as_missing,
                                 forced_bin_bounds[i]);
       } else {
-        bin_mappers[i]->FindBin(sample_values[i], num_per_col[i], total_sample_size,
+        max_cnt_in_bin[i] = bin_mappers[i]->FindBin(sample_values[i], num_per_col[i], total_sample_size,
                                 config_.max_bin_by_feature[i], config_.min_data_in_bin,
                                 filter_cnt, config_.feature_pre_filter, bin_type, config_.use_missing,
                                 config_.zero_as_missing, forced_bin_bounds[i]);
@@ -631,12 +632,12 @@ Dataset* DatasetLoader::ConstructFromSampleData(double** sample_values,
         continue;
       }
       if (config_.max_bin_by_feature.empty()) {
-        bin_mappers[i]->FindBin(sample_values[start[rank] + i], num_per_col[start[rank] + i],
+        max_cnt_in_bin[i] = bin_mappers[i]->FindBin(sample_values[start[rank] + i], num_per_col[start[rank] + i],
                                 total_sample_size, config_.max_bin, config_.min_data_in_bin,
                                 filter_cnt, config_.feature_pre_filter, bin_type, config_.use_missing, config_.zero_as_missing,
                                 forced_bin_bounds[i]);
       } else {
-        bin_mappers[i]->FindBin(sample_values[start[rank] + i], num_per_col[start[rank] + i],
+        max_cnt_in_bin[i] = bin_mappers[i]->FindBin(sample_values[start[rank] + i], num_per_col[start[rank] + i],
                                 total_sample_size, config_.max_bin_by_feature[start[rank] + i],
                                 config_.min_data_in_bin, filter_cnt, config_.feature_pre_filter, bin_type, config_.use_missing,
                                 config_.zero_as_missing, forced_bin_bounds[i]);
@@ -686,6 +687,7 @@ Dataset* DatasetLoader::ConstructFromSampleData(double** sample_values,
   auto dataset = std::unique_ptr<Dataset>(new Dataset(num_data));
   dataset->Construct(&bin_mappers, num_total_features, forced_bin_bounds, sample_indices, sample_values, num_per_col, num_col, total_sample_size, config_);
   dataset->set_feature_names(feature_names_);
+  dataset->PrepareHistBitInfo(max_cnt_in_bin, static_cast<int>(total_sample_size));
   return dataset.release();
 }
 
@@ -891,6 +893,7 @@ void DatasetLoader::ConstructBinMappersFromTextData(int rank, int num_machines,
   }
   dataset->set_feature_names(feature_names_);
   std::vector<std::unique_ptr<BinMapper>> bin_mappers(dataset->num_total_features_);
+  std::vector<int> max_cnt_in_bin(dataset->num_total_features_);
   const data_size_t filter_cnt = static_cast<data_size_t>(
     static_cast<double>(config_.min_data_in_leaf* sample_data.size()) / dataset->num_data_);
   // start find bins
@@ -910,12 +913,12 @@ void DatasetLoader::ConstructBinMappersFromTextData(int rank, int num_machines,
       }
       bin_mappers[i].reset(new BinMapper());
       if (config_.max_bin_by_feature.empty()) {
-        bin_mappers[i]->FindBin(sample_values[i].data(), static_cast<int>(sample_values[i].size()),
+        max_cnt_in_bin[i] = bin_mappers[i]->FindBin(sample_values[i].data(), static_cast<int>(sample_values[i].size()),
                                 sample_data.size(), config_.max_bin, config_.min_data_in_bin,
                                 filter_cnt, config_.feature_pre_filter, bin_type, config_.use_missing, config_.zero_as_missing,
                                 forced_bin_bounds[i]);
       } else {
-        bin_mappers[i]->FindBin(sample_values[i].data(), static_cast<int>(sample_values[i].size()),
+        max_cnt_in_bin[i] = bin_mappers[i]->FindBin(sample_values[i].data(), static_cast<int>(sample_values[i].size()),
                                 sample_data.size(), config_.max_bin_by_feature[i],
                                 config_.min_data_in_bin, filter_cnt, config_.feature_pre_filter, bin_type, config_.use_missing,
                                 config_.zero_as_missing, forced_bin_bounds[i]);
@@ -953,13 +956,13 @@ void DatasetLoader::ConstructBinMappersFromTextData(int rank, int num_machines,
         continue;
       }
       if (config_.max_bin_by_feature.empty()) {
-        bin_mappers[i]->FindBin(sample_values[start[rank] + i].data(),
+        max_cnt_in_bin[i] = bin_mappers[i]->FindBin(sample_values[start[rank] + i].data(),
                                 static_cast<int>(sample_values[start[rank] + i].size()),
                                 sample_data.size(), config_.max_bin, config_.min_data_in_bin,
                                 filter_cnt, config_.feature_pre_filter, bin_type, config_.use_missing, config_.zero_as_missing,
                                 forced_bin_bounds[i]);
       } else {
-        bin_mappers[i]->FindBin(sample_values[start[rank] + i].data(),
+        max_cnt_in_bin[i] = bin_mappers[i]->FindBin(sample_values[start[rank] + i].data(),
                                 static_cast<int>(sample_values[start[rank] + i].size()),
                                 sample_data.size(), config_.max_bin_by_feature[i],
                                 config_.min_data_in_bin, filter_cnt, config_.feature_pre_filter, bin_type,
@@ -1010,6 +1013,7 @@ void DatasetLoader::ConstructBinMappersFromTextData(int rank, int num_machines,
   dataset->Construct(&bin_mappers, dataset->num_total_features_, forced_bin_bounds, Common::Vector2Ptr<int>(&sample_indices).data(),
                      Common::Vector2Ptr<double>(&sample_values).data(),
                      Common::VectorSize<int>(sample_indices).data(), static_cast<int>(sample_indices.size()), sample_data.size(), config_);
+  dataset->PrepareHistBitInfo(max_cnt_in_bin, static_cast<int>(sample_data.size()));
 }
 
 /*! \brief Extract local features from memory */

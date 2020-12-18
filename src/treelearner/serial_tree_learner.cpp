@@ -370,6 +370,18 @@ void SerialTreeLearner::ConstructHistograms(
   // construct smaller leaf
   hist_t* ptr_smaller_leaf_hist_data =
       smaller_leaf_histogram_array_[0].RawData() - kHistOffset;
+  if (larger_leaf_splits_ != nullptr && larger_leaf_histogram_array_ != nullptr) {
+    std::vector<const hist_t*> feature_hists(num_features_, nullptr);
+    std::vector<const BinMapper*> feature_bin_mappers(num_features_, nullptr);
+    #pragma omp parallel for schedule(static) if (num_features_ >= 1024)
+    for (int i = 0; i < num_features_; ++i) {
+      feature_hists[i] = larger_leaf_histogram_array_[i].RawData();
+      feature_bin_mappers[i] = train_data_->FeatureBinMapper(i);
+    }
+    share_state_->CalcHistBit(feature_hists, feature_bin_mappers,
+      smaller_leaf_splits_->sum_gradients(), smaller_leaf_splits_->sum_hessians(), smaller_leaf_splits_->num_data_in_leaf(),
+      larger_leaf_splits_->sum_gradients(), larger_leaf_splits_->sum_hessians(), larger_leaf_splits_->num_data_in_leaf(), true);
+  }
   train_data_->ConstructHistograms<true>(
       is_feature_used, smaller_leaf_splits_->data_indices(),
       smaller_leaf_splits_->num_data_in_leaf(),
@@ -380,6 +392,9 @@ void SerialTreeLearner::ConstructHistograms(
       ptr_smaller_leaf_hist_data);
   if (larger_leaf_histogram_array_ != nullptr && !use_subtract) {
     // construct larger leaf
+    share_state_->CalcHistBit(std::vector<const hist_t*>{nullptr}, std::vector<const BinMapper*>{nullptr},
+      smaller_leaf_splits_->sum_gradients(), smaller_leaf_splits_->sum_hessians(), smaller_leaf_splits_->num_data_in_leaf(),
+      larger_leaf_splits_->sum_gradients(), larger_leaf_splits_->sum_hessians(), larger_leaf_splits_->num_data_in_leaf(), false);
     hist_t* ptr_larger_leaf_hist_data =
         larger_leaf_histogram_array_[0].RawData() - kHistOffset;
     train_data_->ConstructHistograms<true>(

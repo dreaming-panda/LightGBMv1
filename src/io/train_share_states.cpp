@@ -549,6 +549,7 @@ void TrainingShareStates::SetMultiValBin(MultiValBin* bin, data_size_t num_data,
   num_elements_per_row_ += bin->num_element_per_row();
   multi_val_bin_wrapper_.reset(new MultiValBinWrapper(
     bin, num_data, feature_groups_contained));
+  total_num_data_ = num_data;
 }
 
 void TrainingShareStates::RecoverHistogramsFromInteger(hist_t* hist) {
@@ -563,8 +564,81 @@ int_hist_t* TrainingShareStates::GetIntegerHistogram(int group_id) {
   return merged_int_hist_buf_.data() + group_bin_boundaries_[group_id] * 2;
 }
 
-TrainingShareStates::HIST_BIT TrainingShareStates::CalcHistBit(data_size_t num_data) const {
+void TrainingShareStates::CalcHistBit(const std::vector<const hist_t*>& parent_hist, 
+  const std::vector<const BinMapper*>& feature_bin_mappers,
+  double /*small_leaf_sum_gradient*/,
+  double small_leaf_sum_hessian, data_size_t small_leaf_num_data,
+  double /*large_leaf_sum_gradient*/, double large_leaf_sum_hessian,
+  data_size_t large_leaf_num_data, bool is_small_leaf) {
+  data_size_t max_cnt_per_bin = 0;
+  if (is_small_leaf) {
+    double sum_hessian = small_leaf_sum_hessian + large_leaf_sum_hessian;
+    data_size_t num_data = small_leaf_num_data + large_leaf_num_data;
+    double cnt_hess = num_data / sum_hessian;
+    std::vector<data_size_t> thread_max_cnt_per_bin(num_threads, 0);
+    Threading::For<size_t>(0, feature_bin_mappers.size(), 1,
+      [&thread_max_cnt_per_bin, parent_hist, cnt_hess, &feature_bin_mappers]
+      (int tid, int32_t start, int32_t end) {
+        for (int32_t i = start; i < end; ++i) {
+          const hist_t* feature_hist = parent_hist[i];
+          const int num_bin = feature_bin_mappers[i]->num_bin();
+          const int most_freq_bin = feature_bin_mappers[i]->GetMostFreqBin();
+          const int offset = static_cast<int>(most_freq_bin == 0);
+          for (int j = 0; j < num_bin - offset; ++j) {
+            const hist_t hess = feature_hist[2 * j + 1];
+            if (offset == 0 && j == most_freq_bin) continue;
+            const data_size_t est_cnt = static_cast<data_size_t>(hess * cnt_hess);
+            if (est_cnt > thread_max_cnt_per_bin[tid]) {
+              thread_max_cnt_per_bin[tid] = est_cnt;
+            }
+          }
+        }
+    });
+    for (int tid = 0; tid < num_threads; ++tid) {
+      if (thread_max_cnt_per_bin[tid] > max_cnt_per_bin) {
+        max_cnt_per_bin = thread_max_cnt_per_bin[tid];
+      }
+    }
+    max_cnt_per_bin_est_ = max_cnt_per_bin;
+    if (max_cnt_per_bin <= 256) {
+      hist_bit_ = BIT16_HIST;
+    } else if (max_cnt_per_bin <= 65536) {
+      hist_bit_ = BIT24_HIST;
+    } else {
+      hist_bit_ = BIT32_HIST;
+    }
+  } else {
+    hist_bit_ = BIT32_HIST;
+  }
+}
 
+void MultiValBinWrapper::RefreshHistBit() {
+  if (data_block_size_ <= 256) {
+    hist_bit_ = std::min(hist_bit_, BIT16_HIST);
+  } else if (data_block_size_ <= 65536) {
+    hist_bit_ = std::min(hist_bit_, BIT24_HIST);
+  }
+
+  int max_cnt_per_bin_per_block_est_ = (max_cnt_per_bin_est_ + n_data_block_ - 1) / n_data_block_;
+  if (max_cnt_per_bin_per_block_est_ <= 256) {
+    hist_bit_ = std::min(hist_bit_, BIT16_HIST);
+  } else if (max_cnt_per_bin_per_block_est_ <= 65536) {
+    hist_bit_ = std::min(hist_bit_, BIT24_HIST);
+  }
+  if (hist_bit_ == BIT32_HIST) {
+    Log::Warning("BIT32_HIST");
+  } else if (hist_bit_ == BIT24_HIST) {
+    Log::Warning("BIT24_HIST");
+  } else if (hist_bit_ == BIT16_HIST) {
+    Log::Warning("BIT16_HIST");
+  } else {
+    Log::Fatal("Unknown hist_bit_");
+  }
+}
+
+void MultiValBinWrapper::SetHistBitInfo(HIST_BIT hist_bit, int max_cnt_per_bin_est) {
+  hist_bit_ = hist_bit;
+  max_cnt_per_bin_est_ = max_cnt_per_bin_est;
 }
 
 }  // namespace LightGBM

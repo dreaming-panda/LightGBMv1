@@ -1063,7 +1063,8 @@ void Dataset::InitTrain(const std::vector<int8_t>& is_feature_used,
   Common::FunctionTimer fun_time("Dataset::InitTrain", global_timer);
   share_state->InitTrain(group_feature_start_,
         feature_groups_,
-        is_feature_used);
+        is_feature_used,
+        all_max_cnt_);
 }
 
 template <bool USE_INDICES, bool ORDERED, typename SCORE_T, bool IS_INT_GRAD>
@@ -1524,6 +1525,17 @@ void Dataset::AddFeaturesFrom(Dataset* other) {
   PushClearIfEmpty(&max_bin_by_feature_, num_total_features_,
                    other->max_bin_by_feature_, other->num_total_features_, -1);
   num_total_features_ += other->num_total_features_;
+}
+
+void Dataset::PrepareHistBitInfo(const std::vector<int>& max_cnt_in_bin, int num_sampled) {
+  all_max_cnt_ = 0;
+  const double factor = static_cast<double>(num_data_) / static_cast<double>(num_sampled);
+  for (size_t i = 0; i < max_cnt_in_bin.size(); ++i) {
+    const int max_cnt = static_cast<int>(max_cnt_in_bin[i] * factor);
+    if (max_cnt > all_max_cnt_) {
+      all_max_cnt_ = max_cnt;
+    }
+  }
 }
 
 }  // namespace LightGBM

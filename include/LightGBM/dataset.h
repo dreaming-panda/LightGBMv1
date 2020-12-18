@@ -652,6 +652,8 @@ class Dataset {
 
   void AddFeaturesFrom(Dataset* other);
 
+  void PrepareHistBitInfo(const std::vector<int>& max_cnt_in_bin, data_size_t num_sampled);
+
  private:
   std::string data_filename_;
   /*! \brief Store used features */
@@ -688,6 +690,7 @@ class Dataset {
   bool use_missing_;
   bool zero_as_missing_;
   std::vector<int> feature_need_push_zeros_;
+  int all_max_cnt_;
 };
 
 }  // namespace LightGBM

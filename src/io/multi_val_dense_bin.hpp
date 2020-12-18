@@ -107,7 +107,7 @@ class MultiValDenseBin : public MultiValBin {
     data_size_t i = start;
     const VAL_T* data_ptr_base = data_.data();
     const int16_t* gradients_ptr = reinterpret_cast<const int16_t*>(gradients);
-    int32_t* out_ptr = reinterpret_cast<int32_t*>(out);
+    int64_t* out_ptr = reinterpret_cast<int64_t*>(out);
 
     if (USE_PREFETCH) {
       const data_size_t pf_offset = 32 / sizeof(VAL_T);
