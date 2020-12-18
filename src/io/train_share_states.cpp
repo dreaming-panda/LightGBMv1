@@ -154,7 +154,7 @@ void MultiValBinWrapper::Int48HistMerge(std::vector<int_hist_t, Common::Alignmen
   Threading::BlockInfo<data_size_t>(num_threads_, num_bin_, 512, &n_bin_block,
                                   &bin_block_size);
   int32_t* dst = reinterpret_cast<int32_t*>(merge_hist_buf->data());
-  int16_t* hist_buf_ptr = reinterpret_cast<int16_t*>(hist_buf->data());
+  int16_t* hist_buf_ptr = reinterpret_cast<int16_t*>(hist_buf->data()) + 1;
   #pragma omp parallel for schedule(static) num_threads(num_threads_)
   for (int i = 0; i < num_bin_aligned_ * 2; ++i) {
     dst[i] = 0;
@@ -164,7 +164,7 @@ void MultiValBinWrapper::Int48HistMerge(std::vector<int_hist_t, Common::Alignmen
     const int start = t * bin_block_size;
     const int end = std::min(start + bin_block_size, num_bin_);
     for (int tid = 0; tid < n_data_block_; ++tid) {
-      auto src_ptr = hist_buf_ptr + static_cast<size_t>(num_bin_aligned_) * 3 * tid + 3 * start;
+      auto src_ptr = hist_buf_ptr + static_cast<size_t>(int48_hist_block_size_) * tid + 3 * start;
       for (int i = start * 2; i < end * 2; i += 2) {
         int64_t gh = *reinterpret_cast<int64_t*>(src_ptr);
         int32_t hess_val = static_cast<int32_t>(gh & 0x00ffffff);
@@ -231,13 +231,18 @@ void MultiValBinWrapper::Resize48IntHistBuf(std::vector<int_hist_t, Common::Alig
   num_bin_ = sub_multi_val_bin->num_bin();
   num_bin_aligned_ = (num_bin_ + kAlignedSize - 1) / kAlignedSize * kAlignedSize;
   origin_hist_data_ = origin_hist_data;
-  size_t block_hist_size = static_cast<size_t>(num_bin_aligned_) * 2;
+  size_t block_hist_size = static_cast<size_t>(num_bin_aligned_) / 2 * 3 + 3;
+  if (!block_hist_size % kAlignedSize == 0) {
+    block_hist_size += (block_hist_size - (block_hist_size % kAlignedSize));
+  }
+  int48_hist_block_size_ = block_hist_size;
   size_t new_buf_size = static_cast<size_t>(n_data_block_) * block_hist_size;
   if (hist_buf->size() < new_buf_size) {
     hist_buf->resize(new_buf_size);
   }
-  if (merged_hist_buf->size() < block_hist_size) {
-    merged_hist_buf->resize(block_hist_size);
+  size_t merged_hist_buf_size = num_bin_aligned_ * 2;
+  if (merged_hist_buf->size() < merged_hist_buf_size) {
+    merged_hist_buf->resize(merged_hist_buf_size);
   }
 }
 
@@ -608,9 +613,9 @@ void TrainingShareStates::CalcHistBit(const std::vector<const hist_t*>& parent_h
     max_cnt_per_bin_est_ = max_cnt_per_bin;
     if (max_cnt_per_bin <= 256) {
       hist_bit_ = BIT16_HIST;
-    } /*else if (max_cnt_per_bin <= 65536) {
+    } else if (max_cnt_per_bin <= 65536) {
       hist_bit_ = BIT24_HIST;
-    }*/ else {
+    } else {
       hist_bit_ = BIT32_HIST;
     }
   } else {
@@ -622,21 +627,21 @@ void TrainingShareStates::CalcHistBit(const std::vector<const hist_t*>& parent_h
 void MultiValBinWrapper::RefreshHistBit() {
   if (data_block_size_ <= 256) {
     hist_bit_ = std::min(hist_bit_, BIT16_HIST);
-  } /*else if (data_block_size_ <= 65536) {
+  } else if (data_block_size_ <= 65536) {
     hist_bit_ = std::min(hist_bit_, BIT24_HIST);
-  }*/
+  }
 
   int max_cnt_per_bin_per_block_est_ = (max_cnt_per_bin_est_ + n_data_block_ - 1) / n_data_block_;
   if (max_cnt_per_bin_per_block_est_ <= 256) {
     hist_bit_ = std::min(hist_bit_, BIT16_HIST);
-  } /*else if (max_cnt_per_bin_per_block_est_ <= 65536) {
+  } else if (max_cnt_per_bin_per_block_est_ <= 65536) {
     hist_bit_ = std::min(hist_bit_, BIT24_HIST);
-  }*/
+  }
   if (hist_bit_ == BIT32_HIST) {
     //Log::Warning("BIT32_HIST");
-  } /*else if (hist_bit_ == BIT24_HIST) {
-    Log::Warning("BIT24_HIST");
-  }*/ else if (hist_bit_ == BIT16_HIST) {
+  } else if (hist_bit_ == BIT24_HIST) {
+    //Log::Warning("BIT24_HIST");
+  } else if (hist_bit_ == BIT16_HIST) {
     //Log::Warning("BIT16_HIST");
   } else {
     Log::Fatal("Unknown hist_bit_");

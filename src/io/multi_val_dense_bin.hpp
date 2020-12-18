@@ -211,14 +211,12 @@ class MultiValDenseBin : public MultiValBin {
         const auto j_start = RowPtr(idx);
         const VAL_T* data_ptr = data_ptr_base + j_start;
         const int16_t gradient_16 = gradients_ptr[idx];
-        const int64_t gradient_48 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 24) | (gradient_16 & 0xff);
+        const int64_t gradient_48 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 40) | ((gradient_16 & 0xff) << 16);
         for (int j = 0; j < num_feature_; ++j) {
           const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
           const auto ti = (bin + offsets_[j]) * 3;
           const auto ptr = reinterpret_cast<int64_t*>(out_ptr + ti);
-          const int64_t res = (*(ptr) + gradient_48) & 0x0000ffffffffffff;
-          *(ptr) &= 0xffff000000000000;
-          *(ptr) |= res;
+          *(ptr) += gradient_48;
         }
       }
     }
@@ -227,14 +225,12 @@ class MultiValDenseBin : public MultiValBin {
       const auto j_start = RowPtr(idx);
       const VAL_T* data_ptr = data_ptr_base + j_start;
       const int16_t gradient_16 = gradients_ptr[idx];
-      const int64_t gradient_48 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 24) | (gradient_16 & 0xff);
+      const int64_t gradient_48 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 40) | ((gradient_16 & 0xff) << 16);
       for (int j = 0; j < num_feature_; ++j) {
         const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
         const auto ti = (bin + offsets_[j]) * 3;
         const auto ptr = reinterpret_cast<int64_t*>(out_ptr + ti);
-        const int64_t res = (*(ptr) + gradient_48) & 0x0000ffffffffffff;
-        *(ptr) &= 0xffff000000000000;
-        *(ptr) |= res;
+        *(ptr) += gradient_48;
       }
     }
   }
