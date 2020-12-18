@@ -611,9 +611,9 @@ void TrainingShareStates::CalcHistBit(const std::vector<const hist_t*>& parent_h
       }
     }
     max_cnt_per_bin_est_ = max_cnt_per_bin;
-    if (max_cnt_per_bin <= 256) {
+    if (max_cnt_per_bin <= 200) {
       hist_bit_ = BIT16_HIST;
-    } else if (max_cnt_per_bin <= 65536) {
+    } else if (max_cnt_per_bin <= 60000) {
       hist_bit_ = BIT24_HIST;
     } else {
       hist_bit_ = BIT32_HIST;
@@ -625,16 +625,16 @@ void TrainingShareStates::CalcHistBit(const std::vector<const hist_t*>& parent_h
 }
 
 void MultiValBinWrapper::RefreshHistBit() {
-  if (data_block_size_ <= 256) {
+  if (data_block_size_ <= 200) {
     hist_bit_ = std::min(hist_bit_, BIT16_HIST);
-  } else if (data_block_size_ <= 65536) {
+  } else if (data_block_size_ <= 60000) {
     hist_bit_ = std::min(hist_bit_, BIT24_HIST);
   }
 
   int max_cnt_per_bin_per_block_est_ = (max_cnt_per_bin_est_ + n_data_block_ - 1) / n_data_block_;
-  if (max_cnt_per_bin_per_block_est_ <= 256) {
+  if (max_cnt_per_bin_per_block_est_ <= 200) {
     hist_bit_ = std::min(hist_bit_, BIT16_HIST);
-  } else if (max_cnt_per_bin_per_block_est_ <= 65536) {
+  } else if (max_cnt_per_bin_per_block_est_ <= 60000) {
     hist_bit_ = std::min(hist_bit_, BIT24_HIST);
   }
   if (hist_bit_ == BIT32_HIST) {

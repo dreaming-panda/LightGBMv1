@@ -1529,6 +1529,11 @@ void Dataset::AddFeaturesFrom(Dataset* other) {
 
 void Dataset::PrepareHistBitInfo(const std::vector<int>& max_cnt_in_bin, int num_sampled) {
   all_max_cnt_ = 0;
+  for (int i = 0; i < num_features_; ++i) {
+    if (FeatureBinMapper(i)->num_bin() <= 10) {
+      Log::Warning("feature %d has bin %d", RealFeatureIndex(i), FeatureBinMapper(i)->num_bin());
+    }
+  }
   const double factor = static_cast<double>(num_data_) / static_cast<double>(num_sampled);
   for (size_t i = 0; i < max_cnt_in_bin.size(); ++i) {
     const int max_cnt = static_cast<int>(max_cnt_in_bin[i] * factor);
