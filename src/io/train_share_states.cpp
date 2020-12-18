@@ -577,24 +577,29 @@ void TrainingShareStates::CalcHistBit(const std::vector<const hist_t*>& parent_h
     data_size_t num_data = small_leaf_num_data + large_leaf_num_data;
     double cnt_hess = num_data / sum_hessian;
     std::vector<data_size_t> thread_max_cnt_per_bin(num_threads, 0);
-    Threading::For<size_t>(0, feature_bin_mappers.size(), 1,
-      [&thread_max_cnt_per_bin, parent_hist, cnt_hess, &feature_bin_mappers]
-      (int tid, int32_t start, int32_t end) {
-        for (int32_t i = start; i < end; ++i) {
-          const hist_t* feature_hist = parent_hist[i];
-          const int num_bin = feature_bin_mappers[i]->num_bin();
-          const int most_freq_bin = feature_bin_mappers[i]->GetMostFreqBin();
-          const int offset = static_cast<int>(most_freq_bin == 0);
-          for (int j = 0; j < num_bin - offset; ++j) {
-            const hist_t hess = feature_hist[2 * j + 1];
-            if (offset == 0 && j == most_freq_bin) continue;
-            const data_size_t est_cnt = static_cast<data_size_t>(hess * cnt_hess);
-            if (est_cnt > thread_max_cnt_per_bin[tid]) {
-              thread_max_cnt_per_bin[tid] = est_cnt;
-            }
+    std::vector<int> thread_max_cnt_feature(num_threads, -1);
+    int num_features = static_cast<int>(feature_bin_mappers.size());
+    int block_size = (num_features + num_threads - 1) / num_threads;
+    #pragma omp parallel for schedule(static, 1) num_threads(num_threads)
+    for (int tid = 0; tid < num_threads; ++tid) {
+      int start = tid * block_size;
+      int end = std::min<int>(start + block_size, num_features);
+      for (int i = start; i < end; ++i) {
+        const hist_t* feature_hist = parent_hist[i];
+        const int num_bin = feature_bin_mappers[i]->num_bin();
+        const int most_freq_bin = feature_bin_mappers[i]->GetMostFreqBin();
+        const int offset = static_cast<int>(most_freq_bin == 0);
+        for (int j = 0; j < num_bin - offset; ++j) {
+          const hist_t hess = feature_hist[2 * j + 1];
+          if (offset == 0 && j == most_freq_bin) continue;
+          const data_size_t est_cnt = static_cast<data_size_t>(hess * cnt_hess);
+          if (est_cnt > thread_max_cnt_per_bin[tid]) {
+            thread_max_cnt_per_bin[tid] = est_cnt;
+            thread_max_cnt_feature[tid] = i;
           }
         }
-    });
+      }
+    }
     for (int tid = 0; tid < num_threads; ++tid) {
       if (thread_max_cnt_per_bin[tid] > max_cnt_per_bin) {
         max_cnt_per_bin = thread_max_cnt_per_bin[tid];
@@ -628,11 +633,11 @@ void MultiValBinWrapper::RefreshHistBit() {
     hist_bit_ = std::min(hist_bit_, BIT24_HIST);
   }*/
   if (hist_bit_ == BIT32_HIST) {
-    Log::Warning("BIT32_HIST");
+    //Log::Warning("BIT32_HIST");
   } /*else if (hist_bit_ == BIT24_HIST) {
     Log::Warning("BIT24_HIST");
   }*/ else if (hist_bit_ == BIT16_HIST) {
-    Log::Warning("BIT16_HIST");
+    //Log::Warning("BIT16_HIST");
   } else {
     Log::Fatal("Unknown hist_bit_");
   }
