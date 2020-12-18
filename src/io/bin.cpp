@@ -518,7 +518,7 @@ namespace LightGBM {
       sparse_rate_ = 1.0f;
     }
     int max_cnt_in_bin = 0;
-    for (uint32_t i = 0; i < num_bin_; ++i) {
+    for (uint32_t i = 0; i < static_cast<uint32_t>(num_bin_); ++i) {
       if (i == most_freq_bin_) continue;
       if (cnt_in_bin[i] > max_cnt_in_bin) {
         max_cnt_in_bin = cnt_in_bin[i];
