@@ -339,6 +339,7 @@ void TrainingShareStates::CalcBinOffsets(const std::vector<std::unique_ptr<Featu
         } else {
           offsets->push_back(cur_num_bin);
           cur_num_bin += feature_group->bin_offsets_.back() - 1;
+          CHECK(feature_group->bin_offsets_[0] == 1);
           for (int i = 0; i < feature_group->num_feature_; ++i) {
             feature_hist_offsets_.push_back(hist_cur_num_bin + feature_group->bin_offsets_[i] - 1);
           }

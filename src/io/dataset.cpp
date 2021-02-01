@@ -1466,4 +1466,14 @@ void Dataset::AddFeaturesFrom(Dataset* other) {
   }
 }
 
+template <typename SMALL_LEAF_INDEX_T>
+void Dataset::ConstructSymmetricLevelHistogram(
+    const int group_index, hist_t* out, score_t* gradients, score_t* hessians,
+    data_size_t num_data_in_small_leaf, data_size_t* data_indices_in_small_leaf,
+    SMALL_LEAF_INDEX_T* small_leaf_indices) const {
+  //feature_groups_[group_index]->bin_data_->ConstructSymmetricLevelHistogram(
+
+  //);
+}
+
 }  // namespace LightGBM
