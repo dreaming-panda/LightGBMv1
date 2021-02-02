@@ -15,6 +15,7 @@
 
 #include "dense_bin.hpp"
 #include "multi_val_dense_bin.hpp"
+#include "multi_val_mix_bin.hpp"
 #include "multi_val_sparse_bin.hpp"
 #include "sparse_bin.hpp"
 

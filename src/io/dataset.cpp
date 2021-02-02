@@ -183,6 +183,11 @@ std::vector<std::vector<int>> FindGroups(
           (bin_mappers[fidx]->GetDefaultBin() == 0 ? -1 : 0));
     }
   }
+  for (int gid = 0; gid < static_cast<int>(group_num_bin.size()); ++gid) {
+    if (group_num_bin[gid] > max_bin_per_group) {
+      Log::Warning("group %d has large bin size %d", gid, group_num_bin[gid]);
+    }
+  }
   if (!is_sparse) {
     multi_val_group->resize(features_in_group.size(), false);
     return features_in_group;
@@ -202,6 +207,7 @@ std::vector<std::vector<int>> FindGroups(
       for (auto fidx : features_in_group[gid]) {
         second_round_features.push_back(fidx);
       }
+      Log::Warning("group %d has been moved to second round", gid);
     }
   }
 
@@ -213,8 +219,11 @@ std::vector<std::vector<int>> FindGroups(
     conflict_marks.emplace_back(total_sample_cnt, false);
     bool is_multi_val = is_use_gpu ? true : false;
     int conflict_cnt = 0;
+    int total_bin_in_group = 1;
     for (auto fidx : second_round_features) {
       features_in_group.back().push_back(fidx);
+      total_bin_in_group += bin_mappers[fidx]->num_bin() +
+          (bin_mappers[fidx]->GetDefaultBin() == 0 ? -1 : 0);
       if (!is_multi_val) {
         const int rest_max_cnt = single_val_max_conflict_cnt - conflict_cnt;
         const auto cnt =
@@ -229,6 +238,7 @@ std::vector<std::vector<int>> FindGroups(
                  num_per_col[fidx]);
       }
     }
+    Log::Warning("total_bin_in_group in second round = %d", total_bin_in_group);
     multi_val_group->push_back(is_multi_val);
   }
   return features_in_group;
@@ -287,18 +297,23 @@ std::vector<std::vector<int>> FastFeatureBundling(
     }
   }
   std::vector<int8_t> group_is_multi_val, group_is_multi_val2;
+  Log::Warning("before first find group order");
   auto features_in_group =
       FindGroups(bin_mappers, used_features, sample_indices,
                  tmp_num_per_col.data(), num_sample_col, total_sample_cnt,
                  num_data, is_use_gpu, is_sparse, &group_is_multi_val);
+  Log::Warning("before second find group order");
   auto group2 =
       FindGroups(bin_mappers, feature_order_by_cnt, sample_indices,
                  tmp_num_per_col.data(), num_sample_col, total_sample_cnt,
                  num_data, is_use_gpu, is_sparse, &group_is_multi_val2);
 
   if (features_in_group.size() > group2.size()) {
+    Log::Warning("use second find group order");
     features_in_group = group2;
     group_is_multi_val = group_is_multi_val2;
+  } else {
+    Log::Warning("use first find group order");
   }
   // shuffle groups
   int num_group = static_cast<int>(features_in_group.size());
@@ -393,9 +408,12 @@ void Dataset::Construct(std::vector<std::unique_ptr<BinMapper>>* bin_mappers,
     }
     feature_groups_.emplace_back(std::unique_ptr<FeatureGroup>(
       new FeatureGroup(cur_cnt_features, group_is_multi_val[i], &cur_bin_mappers, num_data_)));
+    Log::Warning("feature group %d bin size %d is multi val %d", i, feature_groups_.back()->num_total_bin_, static_cast<int>(feature_groups_.back()->is_multi_val_));
     num_total_bin += feature_groups_[i]->num_total_bin_;
     group_bin_boundaries_.push_back(num_total_bin);
   }
+  Log::Warning("sorting");
+  OrderFeatureGroupsByBinSize(features_in_group);
   if (!io_config.max_bin_by_feature.empty()) {
     CHECK_EQ(static_cast<size_t>(num_total_features_),
              io_config.max_bin_by_feature.size());
@@ -530,17 +548,29 @@ MultiValBin* Dataset::GetMultiBinFromAllFeatures(const std::vector<uint32_t>& of
   std::vector<std::vector<std::unique_ptr<BinIterator>>> iters(num_threads);
   std::vector<uint32_t> most_freq_bins;
   int ncol = 0;
+  int dense_col = 0;
+  int sparse_col = 0;
+  double sum_dense_dense_ratio = 0.0f, sum_sparse_dense_ratio = 0.0f;
   for (int gid = 0; gid < num_groups_; ++gid) {
     if (feature_groups_[gid]->is_multi_val_) {
       ncol += feature_groups_[gid]->num_feature_;
+      sparse_col = feature_groups_[gid]->num_feature_;
     } else {
       ++ncol;
+      ++dense_col;
     }
     for (int fid = 0; fid < feature_groups_[gid]->num_feature_; ++fid) {
       const auto& bin_mapper = feature_groups_[gid]->bin_mappers_[fid];
       sum_dense_ratio += 1.0f - bin_mapper->sparse_rate();
+      if (feature_groups_[gid]->is_multi_val_) {
+        sum_sparse_dense_ratio += 1.0f - bin_mapper->sparse_rate();
+      } else {
+        sum_dense_dense_ratio += 1.0f - bin_mapper->sparse_rate();
+      }
     }
   }
+  Log::Warning("dense_dense_ration = %f, dense_col = %d", sum_dense_dense_ratio / dense_col, dense_col);
+  Log::Warning("sparse_dense_ratio = %f, sparse_col = %d", sum_sparse_dense_ratio / sparse_col, sparse_col);
   sum_dense_ratio /= ncol;
   const int offset = (1.0f - sum_dense_ratio) >=
     MultiValBin::multi_val_bin_sparse_threshold ? 1 : 0;
@@ -1523,6 +1553,72 @@ void Dataset::AddFeaturesFrom(Dataset* other) {
   PushClearIfEmpty(&max_bin_by_feature_, num_total_features_,
                    other->max_bin_by_feature_, other->num_total_features_, -1);
   num_total_features_ += other->num_total_features_;
+}
+
+void Dataset::OrderFeatureGroupsByBinSize(const std::vector<std::vector<int>>& features_in_group) {
+  std::vector<int> group_order(num_groups_);
+  for (int group_index = 0; group_index < num_groups_; ++group_index) {
+    group_order[group_index] = group_index;
+  }
+  std::sort(group_order.begin(), group_order.end(), [this] (int group_index_1, int group_index_2) {
+    return (feature_groups_[group_index_1]->num_total_bin_ < feature_groups_[group_index_2]->num_total_bin_);
+  });
+  for (int i = 0; i < num_groups_; ++i) {
+    const int group_index = group_order[i];
+    if (feature_groups_[group_index]->is_multi_val_ && i != num_groups_ - 1) {
+      for (int j = i + 1; j < num_groups_; ++j) {
+        group_order[j - 1] = group_order[j];
+      }
+      group_order[num_groups_ - 1] = group_index;
+      break;
+    }
+  }
+  std::vector<std::vector<int>> new_features_in_group(features_in_group.size());
+  const int num_threads = OMP_NUM_THREADS();
+  #pragma omp parallel for schedule(static) num_threads(num_threads)
+  for (int i = 0; i < num_groups_; ++i) {
+    const int group_index = group_order[i];
+    new_features_in_group[i] = features_in_group[group_index];
+  }
+  int cur_fidx = 0;
+  std::vector<bool> is_feature_need_push_zero(num_features_, false);
+  const int num_features_need_push_zero = static_cast<int>(feature_need_push_zeros_.size());
+  #pragma omp parallel for schedule(static) num_threads(num_threads) if (num_features_need_push_zero >= 1024)
+  for (int i = 0; i < num_features_need_push_zero; ++i) {
+    is_feature_need_push_zero[feature_need_push_zeros_[i]] = true;
+  }
+  feature_need_push_zeros_.clear();
+  group_bin_boundaries_.clear();
+  uint64_t num_total_bin = 0;
+  std::vector<std::unique_ptr<FeatureGroup>> old_feature_groups;
+  for (auto& ptr : feature_groups_) {
+    old_feature_groups.emplace_back(ptr.release());
+  }
+  feature_groups_.clear();
+  group_bin_boundaries_.push_back(num_total_bin);
+  for (int i = 0; i < num_groups_; ++i) {
+    const auto& cur_features = new_features_in_group[i];
+    const int cur_cnt_features = static_cast<int>(cur_features.size());
+    const int old_feature_group_index = group_order[i];
+    group_feature_start_[i] = cur_fidx;
+    group_feature_cnt_[i] = cur_cnt_features;
+    for (int j = 0; j < cur_cnt_features; ++j) {
+      int real_fidx = cur_features[j];
+      const int old_fidx = used_feature_map_[real_fidx];
+      used_feature_map_[real_fidx] = cur_fidx;
+      real_feature_idx_[cur_fidx] = real_fidx;
+      feature2group_[cur_fidx] = i;
+      feature2subfeature_[cur_fidx] = j;
+      if (is_feature_need_push_zero[old_fidx]) {
+        feature_need_push_zeros_.push_back(cur_fidx);
+      }
+      ++cur_fidx;
+    }
+    feature_groups_.emplace_back(old_feature_groups[old_feature_group_index].release());
+    Log::Warning("feature group %d bin size %d is multi val %d", i, feature_groups_.back()->num_total_bin_, static_cast<int>(feature_groups_.back()->is_multi_val_));
+    num_total_bin += feature_groups_[i]->num_total_bin_;
+    group_bin_boundaries_.push_back(num_total_bin);
+  }
 }
 
 }  // namespace LightGBM

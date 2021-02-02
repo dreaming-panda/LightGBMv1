@@ -53,6 +53,17 @@ class FeatureGroup {
       offset = 0;
       is_dense_multi_val_ = true;
     }
+    if (is_multi_val_) {
+      int estimated_num_bin = 1;
+      for (int i = 0; i < num_feature_; ++i) {
+        auto num_bin = bin_mappers_[i]->num_bin();
+        if (bin_mappers_[i]->GetMostFreqBin() == 0) {
+          num_bin -= 1;
+        }
+        estimated_num_bin += num_bin;
+      }
+      Log::Warning("estimated num bin for multi val group = %d", estimated_num_bin);
+    }
     // use bin at zero to store most_freq_bin only when not using dense multi val bin
     num_total_bin_ = offset;
     bin_offsets_.emplace_back(num_total_bin_);
@@ -63,6 +74,10 @@ class FeatureGroup {
       }
       num_total_bin_ += num_bin;
       bin_offsets_.emplace_back(num_total_bin_);
+    }
+    if (is_multi_val_) {
+      Log::Warning("true num bin for multi val group = %d", num_total_bin_);
+      Log::Warning("num features in multi val group = %d", num_feature_);
     }
     CreateBinData(num_data, is_multi_val_, true, false);
   }

@@ -653,6 +653,8 @@ class Dataset {
   void AddFeaturesFrom(Dataset* other);
 
  private:
+  void OrderFeatureGroupsByBinSize(const std::vector<std::vector<int>>& features_in_group);
+
   std::string data_filename_;
   /*! \brief Store used features */
   std::vector<std::unique_ptr<FeatureGroup>> feature_groups_;
