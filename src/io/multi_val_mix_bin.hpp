@@ -21,8 +21,8 @@ class MultiValMixBin : public MultiValBin {
  public:
   explicit MultiValMixBin(data_size_t num_data, int num_bin, int num_feature,
     const std::vector<uint32_t>& offsets, const int num_single_val_groups,
-    const double estimate_element_per_row)
-    : num_data_(num_data), num_bin_(num_bin), num_feature_(num_feature),
+    const double estimate_element_per_row);
+    /*: num_data_(num_data), num_bin_(num_bin), num_feature_(num_feature),
       offsets_(offsets), estimate_element_per_row_(estimate_element_per_row) {
     bit_states_.clear();
     num_bit_state_groups_.clear();
@@ -114,7 +114,7 @@ class MultiValMixBin : public MultiValBin {
     thread_compressed_values_.resize(num_threads);
     mvg_offset_ = offsets_[num_single_val_groups];
     num_dense_feature_groups_ = num_single_val_groups;
-  }
+  }*/
 
   ~MultiValMixBin() {
   }
@@ -363,7 +363,6 @@ class MultiValMixBin : public MultiValBin {
   data_size_t num_data_;
   int num_bin_;
   int num_feature_;
-  int num_dense_units_per_row_;
   std::vector<uint32_t> offsets_;
   std::vector<VAL_T, Common::AlignmentAllocator<VAL_T, 32>> data_;
   std::vector<BIT_STATE> bit_states_;
@@ -376,16 +375,12 @@ class MultiValMixBin : public MultiValBin {
   double estimate_element_per_row_;
 
   int bit4_start_ = 0;
-  int bit4_end_res_ = 0;
   int bit4_end_ = 0;
   int bit8_start_ = 0;
-  int bit8_end_res_ = 0;
   int bit8_end_ = 0;
   int bit16_start_ = 0;
-  int bit16_end_res_ = 0;
   int bit16_end_ = 0;
   int bit32_start_ = 0;
-  int bit32_end_res_ = 0;
   int bit32_end_ = 0;
 
   bool has_bit_state_4_ = false;
@@ -414,145 +409,6 @@ template <>
 template<bool USE_INDICES, bool USE_PREFETCH, bool ORDERED, typename HIST_T, typename SCORE_T,
     bool HAS_BIT_STATE_4, bool HAS_BIT_STATE_8, bool HAS_BIT_STATE_16, bool HAS_BIT_STATE_32,
     bool MVG_BIT_STATE_4, bool MVG_BIT_STATE_8, bool MVG_BIT_STATE_16, bool MVG_BIT_STATE_32>
-void MultiValMixBin<uint8_t>::ConstructHistogramInnerMost(const data_size_t* data_indices, data_size_t start, data_size_t end,
-  const SCORE_T* gradients, const SCORE_T* hessians, HIST_T* out) const {
-  data_size_t i = start;
-  HIST_T* grad = out;
-  HIST_T* hess = out + 1;
-  const uint8_t* data_ptr_base = data_.data();
-  if (USE_PREFETCH) {
-    const data_size_t pf_offset = 32 / sizeof(uint8_t);
-    const data_size_t pf_end = end - pf_offset;
-
-    for (; i < pf_end; ++i) {
-      const auto idx = USE_INDICES ? data_indices[i] : i;
-      const auto pf_idx = USE_INDICES ? data_indices[i + pf_offset] : i + pf_offset;
-      if (!ORDERED) {
-        PREFETCH_T0(gradients + pf_idx);
-        PREFETCH_T0(hessians + pf_idx);
-      }
-      PREFETCH_T0(data_ptr_base + RowPtr(pf_idx));
-      const auto j_start = RowPtr(idx);
-      const uint8_t* data_ptr = data_ptr_base + j_start;
-      const SCORE_T gradient = ORDERED ? gradients[i] : gradients[idx];
-      const SCORE_T hessian = ORDERED ? hessians[i] : hessians[idx];
-      int j = 0;
-      int i = 0;
-      if (HAS_BIT_STATE_4) { 
-        for (; j < bit4_end_; ++j) {
-          const uint8_t packed_bin = data_ptr[j];
-          const uint32_t bin0 = static_cast<uint32_t>(packed_bin & 0xf);
-          const uint32_t bin1 = static_cast<uint32_t>((packed_bin >> 4) & 0xf);
-          const auto ti0 = (bin0 + offsets_[i]) << 1;
-          const auto ti1 = (bin1 + offsets_[i + 1]) << 1;
-          grad[ti0] += gradient;
-          hess[ti0] += hessian;
-          grad[ti1] += gradient;
-          hess[ti1] += hessian;
-          i += 2;
-        }
-        if (bit4_end_res_ > 0) {
-          const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
-          const auto ti = (bin + offsets_[i]) << 1;
-          grad[ti] += gradient;
-          hess[ti] += hessian;
-          ++j;
-          ++i;
-        }
-      }
-      if (HAS_BIT_STATE_8) {
-        for (; j < bit8_end_; ++j) {
-          const uint8_t bin = data_ptr[j];
-          const auto ti = (bin + offsets_[i]) << 1;
-          grad[ti] += gradient;
-          hess[ti] += hessian;
-          ++i;
-        }
-      }
-      if (MVG_BIT_STATE_4) {
-        const auto num_values = static_cast<int>(RowPtr(idx + 1) - j_start);
-        for (; j < num_values; ++j) {
-          const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
-          const auto ti = (bin + mvg_offset_) << 1;
-          grad[ti] += gradient;
-          hess[ti] += hessian;
-        }
-      }
-      if (MVG_BIT_STATE_8) {
-        const auto num_values = static_cast<int>(RowPtr(idx + 1) - j_start);
-        for (; j < num_values; ++j) {
-          const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
-          const auto ti = (bin + mvg_offset_) << 1;
-          grad[ti] += gradient;
-          hess[ti] += hessian;
-        }
-      }
-    }
-  }
-  for (; i < end; ++i) {
-    const auto idx = USE_INDICES ? data_indices[i] : i;
-    const auto j_start = RowPtr(idx);
-    const uint8_t* data_ptr = data_ptr_base + j_start;
-    const SCORE_T gradient = ORDERED ? gradients[i] : gradients[idx];
-    const SCORE_T hessian = ORDERED ? hessians[i] : hessians[idx];
-    int j = 0;
-    int i = 0;
-    if (HAS_BIT_STATE_4) { 
-      for (; j < bit4_end_; ++j) {
-        const uint8_t packed_bin = data_ptr[j];
-        const uint32_t bin0 = static_cast<uint32_t>(packed_bin & 0xf);
-        const uint32_t bin1 = static_cast<uint32_t>((packed_bin >> 4) & 0xf);
-        const auto ti0 = (bin0 + offsets_[i]) << 1;
-        const auto ti1 = (bin1 + offsets_[i + 1]) << 1;
-        grad[ti0] += gradient;
-        hess[ti0] += hessian;
-        grad[ti1] += gradient;
-        hess[ti1] += hessian;
-        i += 2;
-      }
-      if (bit4_end_res_ > 0) {
-        const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
-        const auto ti = (bin + offsets_[i]) << 1;
-        grad[ti] += gradient;
-        hess[ti] += hessian;
-        ++j;
-        ++i;
-      }
-    }
-    if (HAS_BIT_STATE_8) {
-      for (; j < bit8_end_; ++j) {
-        const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
-        const auto ti = (bin + offsets_[i]) << 1;
-        grad[ti] += gradient;
-        hess[ti] += hessian;
-        ++i;
-      }
-    }
-    if (MVG_BIT_STATE_4) {
-      const auto num_values = static_cast<int>(RowPtr(idx + 1) - j_start);
-      for (; j < num_values; ++j) {
-        const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
-        const auto ti = (bin + mvg_offset_) << 1;
-        grad[ti] += gradient;
-        hess[ti] += hessian;
-      }
-    }
-    if (MVG_BIT_STATE_8) {
-      const auto num_values = static_cast<int>(RowPtr(idx + 1) - j_start);
-      for (; j < num_values; ++j) {
-        const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
-        const auto ti = (bin + mvg_offset_) << 1;
-        grad[ti] += gradient;
-        hess[ti] += hessian;
-      }
-    }
-  }
-}
-
-template <>
-template<bool USE_INDICES, bool USE_PREFETCH, bool ORDERED, typename HIST_T, typename SCORE_T,
-    bool HAS_BIT_STATE_4, bool HAS_BIT_STATE_8, bool HAS_BIT_STATE_16, bool HAS_BIT_STATE_32,
-    bool MVG_BIT_STATE_4, bool MVG_BIT_STATE_8, bool MVG_BIT_STATE_16, bool MVG_BIT_STATE_32>
 void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* data_indices, data_size_t start, data_size_t end,
   const SCORE_T* gradients, const SCORE_T* hessians, HIST_T* out) const {
   data_size_t i = start;
@@ -573,13 +429,14 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
       PREFETCH_T0(data_ptr_base + RowPtr(pf_idx));
       const auto j_start = RowPtr(idx);
       const uint16_t* data_ptr = data_ptr_base + j_start;
+      const uint8_t* data_ptr_uint8 = reinterpret_cast<const uint8_t*>(data_ptr) + bit8_start_;
+      const uint16_t* data_ptr_uint16 = data_ptr + bit16_start_;
       const SCORE_T gradient = ORDERED ? gradients[i] : gradients[idx];
       const SCORE_T hessian = ORDERED ? hessians[i] : hessians[idx];
       int j = 0;
-      int i = 0;
-      if (HAS_BIT_STATE_4) { 
-        for (; j < bit4_end_; ++j) {
-          uint16_t packed_bin = data_ptr[j];
+      if (HAS_BIT_STATE_4) {
+        for (; j < bit4_end_; j += 4) {
+          uint16_t packed_bin = data_ptr[j >> 2];
           const uint32_t bin0 = static_cast<uint32_t>(packed_bin & 0xf);
           packed_bin >>= 4;
           const uint32_t bin1 = static_cast<uint32_t>(packed_bin & 0xf);
@@ -587,10 +444,10 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
           const uint32_t bin2 = static_cast<uint32_t>(packed_bin & 0xf);
           packed_bin >>= 4;
           const uint32_t bin3 = static_cast<uint32_t>(packed_bin & 0xf);
-          const auto ti0 = (bin0 + offsets_[i]) << 1;
-          const auto ti1 = (bin1 + offsets_[i + 1]) << 1;
-          const auto ti2 = (bin2 + offsets_[i + 2]) << 1;
-          const auto ti3 = (bin3 + offsets_[i + 3]) << 1;
+          const auto ti0 = (bin0 + offsets_[j]) << 1;
+          const auto ti1 = (bin1 + offsets_[j + 1]) << 1;
+          const auto ti2 = (bin2 + offsets_[j + 2]) << 1;
+          const auto ti3 = (bin3 + offsets_[j + 3]) << 1;
           //CHECK_LT(ti0, 5459 * 2 - 1);
           //CHECK_LT(ti1, 5459 * 2 - 1);
           //CHECK_LT(ti2, 5459 * 2 - 1);
@@ -603,55 +460,24 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
           hess[ti2] += hessian;
           grad[ti3] += gradient;
           hess[ti3] += hessian;
-          i += 4;
-        }
-        if (bit4_end_res_ > 0) {
-          uint16_t packed_bin = data_ptr[j];
-          for (int k = 0; k < bit4_end_res_; ++k) {
-            const uint32_t bin = static_cast<uint32_t>(packed_bin & 0xf);
-            packed_bin >>= 4;
-            const auto ti = (bin + offsets_[i]) << 1;
-            //CHECK_LT(ti, 5459 * 2 - 1);
-            grad[ti] += gradient;
-            hess[ti] += hessian;
-            ++i;
-          }
-          ++j;
         }
       }
       if (HAS_BIT_STATE_8) {
         for (; j < bit8_end_; ++j) {
-          uint16_t packed_bin = data_ptr[j];
-          const uint32_t bin0 = static_cast<uint32_t>(packed_bin & 0xff);
-          const uint32_t bin1 = static_cast<uint32_t>((packed_bin >> 8) & 0xff);
-          const auto ti0 = (bin0 + offsets_[i]) << 1;
-          const auto ti1 = (bin1 + offsets_[i + 1]) << 1;
+          const uint32_t bin = static_cast<uint32_t>(data_ptr_uint8[j]);
+          const auto ti = (bin + offsets_[j]) << 1;
           //CHECK_LT(ti0, 5459 * 2 - 1);
           //CHECK_LT(ti1, 5459 * 2 - 1);
-          grad[ti0] += gradient;
-          hess[ti0] += hessian;
-          grad[ti1] += gradient;
-          hess[ti1] += hessian;
-          i += 2;
-        }
-        if (bit8_end_res_ > 0) {
-          const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
-          const auto ti = (bin + offsets_[i]) << 1;
-          //CHECK_LT(ti, 5459 * 2 - 1);
           grad[ti] += gradient;
           hess[ti] += hessian;
-          ++i;
-          ++j;
         }
       }
       if (HAS_BIT_STATE_16) {
         for (; j < bit16_end_; ++j) {
-          uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
-          const auto ti = (bin + offsets_[i]) << 1;
-          //CHECK_LT(ti, 5459 * 2 - 1);
+          uint32_t bin = static_cast<uint32_t>(data_ptr_uint16[j]);
+          const auto ti = (bin + offsets_[j]) << 1;
           grad[ti] += gradient;
           hess[ti] += hessian;
-          ++i;
         }
       }
       if (MVG_BIT_STATE_4) {
@@ -692,13 +518,14 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
     const auto idx = USE_INDICES ? data_indices[i] : i;
     const auto j_start = RowPtr(idx);
     const uint16_t* data_ptr = data_ptr_base + j_start;
+    const uint8_t* data_ptr_uint8 = reinterpret_cast<const uint8_t*>(data_ptr) + bit8_start_;
+    const uint16_t* data_ptr_uint16 = data_ptr + bit16_start_;
     const SCORE_T gradient = ORDERED ? gradients[i] : gradients[idx];
     const SCORE_T hessian = ORDERED ? hessians[i] : hessians[idx];
     int j = 0;
-    int i = 0;
     if (HAS_BIT_STATE_4) { 
-      for (; j < bit4_end_; ++j) {
-        uint16_t packed_bin = data_ptr[j];
+      for (; j < bit4_end_; j += 4) {
+        uint16_t packed_bin = data_ptr[j >> 2];
         const uint32_t bin0 = static_cast<uint32_t>(packed_bin & 0xf);
         packed_bin >>= 4;
         const uint32_t bin1 = static_cast<uint32_t>(packed_bin & 0xf);
@@ -706,10 +533,10 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
         const uint32_t bin2 = static_cast<uint32_t>(packed_bin & 0xf);
         packed_bin >>= 4;
         const uint32_t bin3 = static_cast<uint32_t>(packed_bin & 0xf);
-        const auto ti0 = (bin0 + offsets_[i]) << 1;
-        const auto ti1 = (bin1 + offsets_[i + 1]) << 1;
-        const auto ti2 = (bin2 + offsets_[i + 2]) << 1;
-        const auto ti3 = (bin3 + offsets_[i + 3]) << 1;
+        const auto ti0 = (bin0 + offsets_[j]) << 1;
+        const auto ti1 = (bin1 + offsets_[j + 1]) << 1;
+        const auto ti2 = (bin2 + offsets_[j + 2]) << 1;
+        const auto ti3 = (bin3 + offsets_[j + 3]) << 1;
         //CHECK_LT(ti0, 5459 * 2 - 1);
         //CHECK_LT(ti1, 5459 * 2 - 1);
         //CHECK_LT(ti2, 5459 * 2 - 1);
@@ -722,55 +549,24 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
         hess[ti2] += hessian;
         grad[ti3] += gradient;
         hess[ti3] += hessian;
-        i += 4;
-      }
-      if (bit4_end_res_ > 0) {
-        uint16_t packed_bin = data_ptr[j];
-        for (int k = 0; k < bit4_end_res_; ++k) {
-          const uint32_t bin = static_cast<uint32_t>(packed_bin & 0xf);
-          packed_bin >>= 4;
-          const auto ti = (bin + offsets_[i]) << 1;
-          //CHECK_LT(ti, 5459 * 2 - 1);
-          grad[ti] += gradient;
-          hess[ti] += hessian;
-          ++i;
-        }
-        ++j;
       }
     }
     if (HAS_BIT_STATE_8) {
       for (; j < bit8_end_; ++j) {
-        uint16_t packed_bin = data_ptr[j];
-        const uint32_t bin0 = static_cast<uint32_t>(packed_bin & 0xff);
-        const uint32_t bin1 = static_cast<uint32_t>((packed_bin >> 8) & 0xff);
-        const auto ti0 = (bin0 + offsets_[i]) << 1;
-        const auto ti1 = (bin1 + offsets_[i + 1]) << 1;
+        const uint32_t bin = static_cast<uint32_t>(data_ptr_uint8[j]);
+        const auto ti = (bin + offsets_[j]) << 1;
         //CHECK_LT(ti0, 5459 * 2 - 1);
         //CHECK_LT(ti1, 5459 * 2 - 1);
-        grad[ti0] += gradient;
-        hess[ti0] += hessian;
-        grad[ti1] += gradient;
-        hess[ti1] += hessian;
-        i += 2;
-      }
-      if (bit8_end_res_ > 0) {
-        const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
-        const auto ti = (bin + offsets_[i]) << 1;
-        //CHECK_LT(ti, 5459 * 2 - 1);
         grad[ti] += gradient;
         hess[ti] += hessian;
-        ++i;
-        ++j;
       }
     }
     if (HAS_BIT_STATE_16) {
       for (; j < bit16_end_; ++j) {
-        uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
-        const auto ti = (bin + offsets_[i]) << 1;
-        //CHECK_LT(ti, 5459 * 2 - 1);
+        uint32_t bin = static_cast<uint32_t>(data_ptr_uint16[j]);
+        const auto ti = (bin + offsets_[j]) << 1;
         grad[ti] += gradient;
         hess[ti] += hessian;
-        ++i;
       }
     }
     if (MVG_BIT_STATE_4) {

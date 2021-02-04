@@ -580,25 +580,7 @@ void MultiValMixBin<VAL_T>::ConstructHistogramInnerUnroll7(const data_size_t* da
 
 template <>
 void MultiValMixBin<uint8_t>::CalcBitBoundaries() {
-  int cur_end = 0;
-  for (int i = 0; i < static_cast<int>(num_bit_state_groups_.size()); ++i) {
-    const auto bit_state = bit_states_[i];
-    const int cur_num_groups = num_bit_state_groups_[i];
-    if (bit_state == BIT_STATE_4) {
-      bit4_start_ = 0;
-      bit4_end_ = cur_num_groups / 2;
-      cur_end = (cur_num_groups + 1) / 2;
-      bit4_end_res_ = cur_num_groups % 2;
-    } else if (bit_state == BIT_STATE_8) {
-			bit8_start_ = cur_end;
-      cur_end += cur_num_groups;
-      bit8_end_ = cur_end;
-      bit8_end_res_ = 0;
-    } else {
-      Log::Fatal("Too large bit_state encountered in 8 bit multi val mix bin.");
-    }
-  }
-  num_dense_units_per_row_ = cur_end;
+  Log::Fatal("unsupported");
 }
 
 template <>
@@ -607,73 +589,31 @@ void MultiValMixBin<uint16_t>::CalcBitBoundaries() {
   for (int i = 0; i < static_cast<int>(num_bit_state_groups_.size()); ++i) {
     const auto bit_state = bit_states_[i];
     const int cur_num_groups = num_bit_state_groups_[i];
+    cur_end += cur_num_groups;
     if (bit_state == BIT_STATE_4) {
       bit4_start_ = 0;
-      bit4_end_ = cur_num_groups / 4;
-			bit4_end_res_ = cur_num_groups % 4;
-      cur_end = (cur_num_groups + 3) / 4;
+      bit4_end_ = cur_end;
+      Log::Warning("bit4_end_ = %d, bit4_start_ = %d", bit4_end_, bit4_start_);
     } else if (bit_state == BIT_STATE_8) {
-			bit8_start_ = cur_end;
-      bit8_end_ = cur_end + (cur_num_groups / 2);
-      bit8_end_res_ = cur_num_groups % 2;
-      cur_end += (cur_num_groups + 1) / 2;
+			bit8_start_ = -(bit4_end_ / 2);
+      bit8_end_ = cur_end;
+      Log::Warning("bit8_end_ = %d, bit8_start_ = %d", bit8_end_, bit8_start_);
     } else if (bit_state == BIT_STATE_16) {
-      bit16_start_ = cur_end;
-      cur_end += cur_num_groups;
+      bit16_start_ = (bit4_end_ * 4 + (bit8_end_ - bit4_end_) * 8) / 16 - bit8_end_;
       bit16_end_ = cur_end;
-      bit16_end_res_ = 0;
+      Log::Warning("bit16_end_ = %d bit16_start_ = %d", bit16_end_, bit16_start_);
     } else {
       Log::Fatal("Too large bit_state encountered in 16 bit multi val mix bin.");
-    }
-  }
-  num_dense_units_per_row_ = cur_end;
-}
-
-template <>
-void MultiValMixBin<uint8_t>::CompressOneRow(const std::vector<uint32_t>& values, std::vector<uint8_t>* compressed_values) {
-  compressed_values->clear();
-  int j = 0, i = 0;
-  if (has_bit_state_4_) {
-    for (; j < bit4_end_; ++j) {
-      const uint32_t bin0 = values[i];
-      const uint32_t bin1 = values[i + 1];
-      const uint8_t compressed_bin = static_cast<uint8_t>((bin0 & 0xf) | ((bin1 << 4) & 0xf0));
-      compressed_values->push_back(compressed_bin);
-      i += 2;
-    }
-    if (bit4_end_res_ > 0) {
-      const uint8_t bin = static_cast<uint8_t>(values[i]);
-      compressed_values->push_back(bin);
-      ++i;
-      ++j;
-    }
-  }
-  if (has_bit_state_8_) {
-    for (; j < bit8_end_; ++j) {
-      const uint8_t bin = static_cast<uint8_t>(values[i]);
-      compressed_values->push_back(bin);
-      ++i;
-    }
-  }
-  const int num_values = static_cast<int>(values.size());
-  if (mvg_bit_state_4_) {
-    for (; i < num_values; ++i) {
-      compressed_values->push_back(static_cast<uint8_t>(values[i] - mvg_offset_));
-    }
-  }
-  if (mvg_bit_state_8_) {
-    for (; i < num_values; ++i) {
-      compressed_values->push_back(static_cast<uint8_t>(values[i] - mvg_offset_));
     }
   }
 }
 
 template <>
 void MultiValMixBin<uint16_t>::CompressOneRow(const std::vector<uint32_t>& values, std::vector<uint16_t>* compressed_values) {
-  int j = 0, i = 0;
+  int i = 0;
   compressed_values->clear();
   if (has_bit_state_4_) {
-    for (; j < bit4_end_; ++j) {
+    for (; i < bit4_end_; i += 4) {
       const uint32_t bin0 = values[i];
       const uint32_t bin1 = values[i + 1];
       const uint32_t bin2 = values[i + 2];
@@ -681,36 +621,19 @@ void MultiValMixBin<uint16_t>::CompressOneRow(const std::vector<uint32_t>& value
       const uint16_t compressed_bin = static_cast<uint16_t>((bin0 & 0xf) | ((bin1 << 4) & 0xf0) |
         ((bin2 << 8) & 0xf00) | ((bin3 << 12) & 0xf000));
       compressed_values->push_back(compressed_bin);
-      i += 4;
-    }
-    if (bit4_end_res_ > 0) {
-      uint16_t compressed_bin = 0;
-      for (int k = 0; k < bit4_end_res_; ++k) {
-        compressed_bin |= (values[i] << (4 * k));
-        ++i;
-      }
-      compressed_values->push_back(compressed_bin);
-      ++j;
     }
   }
   if (has_bit_state_8_) {
-    for (; j < bit8_end_; ++j) {
+    for (; i < bit8_end_; i += 2) {
       const uint32_t bin0 = values[i];
       const uint32_t bin1 = values[i + 1];
       const uint16_t compressed_bin = static_cast<uint16_t>((bin0 & 0xff) | ((bin1 & 0xff) << 8));
       compressed_values->push_back(compressed_bin);
-      i += 2;
-    }
-    if (bit8_end_res_ > 0) {
-      compressed_values->push_back(static_cast<uint16_t>(values[i]));
-      ++i;
-      ++j;
     }
   }
   if (has_bit_state_16_) {
-    for (; j < bit16_end_; ++j) {
+    for (; i < bit16_end_; ++i) {
       compressed_values->push_back(static_cast<uint16_t>(values[i]));
-      ++i;
     }
   }
   const int num_values = static_cast<int>(values.size());
@@ -730,6 +653,102 @@ void MultiValMixBin<uint16_t>::CompressOneRow(const std::vector<uint32_t>& value
       compressed_values->push_back(static_cast<uint16_t>(values[i] - mvg_offset_));
     }
   }
+}
+
+template <>
+MultiValMixBin<uint16_t>::MultiValMixBin(data_size_t num_data, int num_bin, int num_feature,
+  const std::vector<uint32_t>& offsets, const int num_single_val_groups,
+  const double estimate_element_per_row)
+  : num_data_(num_data), num_bin_(num_bin), num_feature_(num_feature),
+    offsets_(offsets), estimate_element_per_row_(estimate_element_per_row) {
+  bit_states_.clear();
+  num_bit_state_groups_.clear();
+  BIT_STATE cur_bit_state = BIT_STATE_4;
+  int num_groups_in_cur_bit_state = 0;
+  for (int group_index = 0; group_index < num_single_val_groups; ++group_index) {
+    const int num_bin_in_group = offsets_[group_index + 1] - offsets_[group_index];
+    if (num_bin_in_group <= 16) {
+      ++num_groups_in_cur_bit_state;
+    } else if (num_bin_in_group <= 256) {
+      if (cur_bit_state == BIT_STATE_4) {
+        if (num_groups_in_cur_bit_state >= num_single_val_groups / 3) {
+          const int res = num_groups_in_cur_bit_state % 4;
+          if (res < num_groups_in_cur_bit_state) {
+            bit_states_.push_back(BIT_STATE_4);
+            num_groups_in_cur_bit_state -= res;
+            num_bit_state_groups_.push_back(num_groups_in_cur_bit_state);
+            num_groups_in_cur_bit_state = res;
+            has_bit_state_4_ = true;
+          }
+        }
+      }
+      cur_bit_state = BIT_STATE_8;
+      ++num_groups_in_cur_bit_state;
+    } else if (num_bin_in_group <= 65536) {
+      if (cur_bit_state == BIT_STATE_8) {
+        if (num_groups_in_cur_bit_state >= num_single_val_groups / 3) {
+          const int res = num_groups_in_cur_bit_state % 2;
+          if (res < num_groups_in_cur_bit_state) {
+            bit_states_.push_back(BIT_STATE_8);
+            num_groups_in_cur_bit_state -= res;
+            num_bit_state_groups_.push_back(num_groups_in_cur_bit_state);
+            num_groups_in_cur_bit_state = 0;
+            has_bit_state_8_ = true;
+          }
+        }
+      }
+      cur_bit_state = BIT_STATE_16;
+      ++num_groups_in_cur_bit_state;
+    } else {
+      Log::Fatal("invalid in line 736 multi_val_mix_bin.cpp");
+    }
+  }
+  if (bit_states_.empty() || bit_states_.back() != cur_bit_state) {
+    bit_states_.push_back(cur_bit_state);
+    num_bit_state_groups_.push_back(num_groups_in_cur_bit_state);
+    if (cur_bit_state == BIT_STATE_4) {
+      has_bit_state_4_ = true;
+    } else if (cur_bit_state == BIT_STATE_8) {
+      has_bit_state_8_ = true;
+    } else if (cur_bit_state == BIT_STATE_16) {
+      has_bit_state_16_ = true;
+    } else if (cur_bit_state == BIT_STATE_32) {
+      Log::Fatal("invalid in line 749 multi_val_mix_bin.cpp");
+    }
+  }
+  if (num_single_val_groups < num_feature_) {
+    // has multi val bin
+    const int num_multi_val_group_bin = offsets.back() - offsets[num_single_val_groups];
+    if (num_multi_val_group_bin <= 16) {
+      bit_states_.push_back(BIT_STATE_4);
+      mvg_bit_state_4_ = true;
+    } else if (num_multi_val_group_bin <= 256) {
+      bit_states_.push_back(BIT_STATE_8);
+      mvg_bit_state_8_ = true;
+    } else if (num_multi_val_group_bin <= 65536) {
+      bit_states_.push_back(BIT_STATE_16);
+      mvg_bit_state_16_ = true;
+    } else {
+      Log::Fatal("invalid in line 765 multi_val_mix_bin.cpp");
+    }
+  }
+  CalcBitBoundaries();
+  row_ptr_.resize(num_data_ + 1, 0);
+  //sparse_row_ptr_.resize(num_data_ + 1, 0);
+  const int num_threads = OMP_NUM_THREADS();
+  t_size_.resize(num_threads, 0);
+  uint32_t estimate_num_data = static_cast<uint32_t>(estimate_element_per_row_ * 1.1 * num_data_);
+  if (num_threads > 1) {
+    t_data_.resize(num_threads - 1);
+    #pragma omp parallel for schedule(static) num_threads(num_threads - 1)
+    for (int i = 0; i < num_threads - 1; ++i) {
+      t_data_[i].resize(estimate_num_data / num_threads);
+    }
+  }
+  data_.resize(estimate_num_data / num_threads);
+  thread_compressed_values_.resize(num_threads);
+  mvg_offset_ = offsets_[num_single_val_groups];
+  num_dense_feature_groups_ = num_single_val_groups;
 }
 
 } //  namespace LightGBM

@@ -760,7 +760,9 @@ MultiValBin* MultiValBin::CreateMultiValMixBin(data_size_t num_data, int num_bin
   }
   Log::Warning("max bin = %d", max_bin);
   if (max_bin <= 256) {
-    return new MultiValMixBin<uint8_t>(num_data, num_bin, num_feature, offsets, num_dense_feature_groups, estimate_element_per_row);
+    Log::Fatal("unsupported");
+    return nullptr;
+    //return new MultiValMixBin<uint8_t>(num_data, num_bin, num_feature, offsets, num_dense_feature_groups, estimate_element_per_row);
   } else if (max_bin <= 65536) {
     return new MultiValMixBin<uint16_t>(num_data, num_bin, num_feature, offsets, num_dense_feature_groups, estimate_element_per_row);
   } else {
