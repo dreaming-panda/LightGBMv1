@@ -5,6 +5,7 @@
  */
 
 #include <LightGBM/train_share_states.h>
+#include <fstream>
 
 namespace LightGBM {
 
@@ -472,6 +473,14 @@ void TrainingShareStates::CalcBinOffsets(const std::vector<std::unique_ptr<Featu
       feature_hist_offsets_.push_back(hist_cur_num_bin);
     }
     num_hist_total_bin_ = static_cast<uint64_t>(feature_hist_offsets_.back());
+  }
+  std::ofstream fout("offset");
+  for (size_t i = 0; i < offsets->size(); ++i) {
+    fout << i << " " << offsets->at(i) << std::endl;
+  }
+  std::ofstream fout2("feature_hist_offsets");
+  for (size_t i = 0; i < feature_hist_offsets_.size(); ++i) {
+    fout2 << i << " " << feature_hist_offsets_[i] << std::endl;
   }
 }
 
