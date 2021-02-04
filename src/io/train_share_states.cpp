@@ -31,11 +31,11 @@ void MultiValBinWrapper::InitTrain(const std::vector<int>& group_feature_start,
   if (multi_val_bin_ == nullptr) {
     return;
   }
-  CopyMultiValBinSubset(group_feature_start, feature_groups,
-    is_feature_used, bagging_use_indices, bagging_indices_cnt);
-  const auto cur_multi_val_bin = (is_use_subcol_ || is_use_subrow_)
+  /*CopyMultiValBinSubset(group_feature_start, feature_groups,
+    is_feature_used, bagging_use_indices, bagging_indices_cnt);*/
+  const auto cur_multi_val_bin = /*(is_use_subcol_ || is_use_subrow_)
         ? multi_val_bin_subset_.get()
-        : multi_val_bin_.get();
+        :*/ multi_val_bin_.get();
   if (cur_multi_val_bin != nullptr) {
     num_bin_ = cur_multi_val_bin->num_bin();
     num_bin_aligned_ = (num_bin_ + kAlignedSize - 1) / kAlignedSize * kAlignedSize;
@@ -161,6 +161,7 @@ void MultiValBinWrapper::CopyMultiValBinSubset(
   int num_used = 0;
   int total = 0;
   std::vector<int> used_feature_index;
+  Log::Fatal("unsupported");
   for (int i : feature_groups_contained_) {
     int f_start = group_feature_start[i];
     if (feature_groups[i]->is_multi_val_) {
@@ -200,11 +201,11 @@ void MultiValBinWrapper::CopyMultiValBinSubset(
       if (multi_val_bin_subset_ == nullptr) {
         multi_val_bin_subset_.reset(multi_val_bin_->CreateLike(
             bagging_indices_cnt, multi_val_bin_->num_bin(), total,
-            multi_val_bin_->num_element_per_row(), multi_val_bin_->offsets()));
+            multi_val_bin_->num_element_per_row(), multi_val_bin_->offsets(), -1));
       } else {
         multi_val_bin_subset_->ReSize(
             bagging_indices_cnt, multi_val_bin_->num_bin(), total,
-            multi_val_bin_->num_element_per_row(), multi_val_bin_->offsets());
+            multi_val_bin_->num_element_per_row(), multi_val_bin_->offsets(), -1);
       }
       multi_val_bin_subset_->CopySubrow(
           multi_val_bin_.get(), bagging_use_indices,
@@ -281,10 +282,10 @@ void MultiValBinWrapper::CopyMultiValBinSubset(
     data_size_t num_data = is_use_subrow_ ? bagging_indices_cnt : num_data_;
     if (multi_val_bin_subset_ == nullptr) {
       multi_val_bin_subset_.reset(multi_val_bin_->CreateLike(
-          num_data, new_num_total_bin, num_used, sum_used_dense_ratio, offsets));
+          num_data, new_num_total_bin, num_used, sum_used_dense_ratio, offsets, -1));
     } else {
       multi_val_bin_subset_->ReSize(num_data, new_num_total_bin,
-                                              num_used, sum_used_dense_ratio, offsets);
+                                              num_used, sum_used_dense_ratio, offsets, -1);
     }
     if (is_use_subrow_) {
       multi_val_bin_subset_->CopySubrowAndSubcol(
@@ -301,10 +302,48 @@ void MultiValBinWrapper::CopyMultiValBinSubset(
 }
 
 void TrainingShareStates::CalcBinOffsets(const std::vector<std::unique_ptr<FeatureGroup>>& feature_groups,
-  std::vector<uint32_t>* offsets, bool is_col_wise) {
+  std::vector<uint32_t>* offsets, bool is_col_wise, bool is_mix) {
   offsets->clear();
   feature_hist_offsets_.clear();
-  if (is_col_wise) {
+  if (is_mix) {
+    uint32_t cur_num_bin = 0;
+    uint32_t hist_cur_num_bin = 0;
+    for (int group = 0; group < static_cast<int>(feature_groups.size()); ++group) {
+      const std::unique_ptr<FeatureGroup>& feature_group = feature_groups[group];
+      if (feature_group->is_multi_val_) {
+        if (feature_group->is_dense_multi_val_) {
+          Log::Fatal("unsupported with mix multi val bin");
+        } else {
+          cur_num_bin += 1;
+          hist_cur_num_bin += 1;
+          for (int i = 0; i < feature_group->num_feature_; ++i) {
+            offsets->push_back(cur_num_bin);
+            feature_hist_offsets_.push_back(hist_cur_num_bin);
+            const std::unique_ptr<BinMapper>& bin_mapper = feature_group->bin_mappers_[i];
+            int num_bin = bin_mapper->num_bin();
+            if (bin_mapper->GetMostFreqBin() == 0) {
+              num_bin -= 1;
+            }
+            hist_cur_num_bin += num_bin;
+            cur_num_bin += num_bin;
+          }
+        }
+      } else {
+        for (int i = 0; i < feature_group->num_feature_; ++i) {
+          feature_hist_offsets_.push_back(hist_cur_num_bin + feature_group->bin_offsets_[i]);
+        }
+        offsets->push_back(cur_num_bin);
+        cur_num_bin += feature_group->bin_offsets_.back();
+        hist_cur_num_bin += feature_group->bin_offsets_.back();
+      }
+    }
+    offsets->push_back(cur_num_bin);
+    feature_hist_offsets_.push_back(hist_cur_num_bin);
+    for (size_t i = 0; i < feature_hist_offsets_.size(); ++i) {
+      Log::Warning("feature_hist_offsets_[%d] = %d", i, feature_hist_offsets_[i]);
+    }
+    num_hist_total_bin_ = static_cast<uint64_t>(feature_hist_offsets_.back());
+  } else if (is_col_wise) {
     uint32_t cur_num_bin = 0;
     uint32_t hist_cur_num_bin = 0;
     for (int group = 0; group < static_cast<int>(feature_groups.size()); ++group) {

@@ -54,6 +54,10 @@ class MultiValDenseBin : public MultiValBin {
     return false;
   }
 
+  bool IsMix() override {
+    return false;
+  }
+
   template<bool USE_INDICES, bool USE_PREFETCH, bool ORDERED, typename HIST_T, typename SCORE_T>
   void ConstructHistogramInner(const data_size_t* data_indices, data_size_t start, data_size_t end,
     const SCORE_T* gradients, const SCORE_T* hessians, HIST_T* out) const {
@@ -148,12 +152,13 @@ class MultiValDenseBin : public MultiValBin {
   }
 
   MultiValBin* CreateLike(data_size_t num_data, int num_bin, int num_feature, double,
-    const std::vector<uint32_t>& offsets) const override {
+    const std::vector<uint32_t>& offsets, const int /*num_dense_feature_groups*/) const override {
     return new MultiValDenseBin<VAL_T>(num_data, num_bin, num_feature, offsets);
   }
 
   void ReSize(data_size_t num_data, int num_bin, int num_feature,
-              double, const std::vector<uint32_t>& offsets) override {
+              double, const std::vector<uint32_t>& offsets,
+              const int /*num_dense_feature_groups*/) override {
     num_data_ = num_data;
     num_bin_ = num_bin;
     num_feature_ = num_feature;

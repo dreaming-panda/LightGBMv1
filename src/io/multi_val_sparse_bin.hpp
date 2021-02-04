@@ -108,6 +108,8 @@ class MultiValSparseBin : public MultiValBin {
 
   bool IsSparse() override { return true; }
 
+  bool IsMix() override { return false; }
+
   template <bool USE_INDICES, bool USE_PREFETCH, bool ORDERED, typename HIST_T, typename SCORE_T>
   void ConstructHistogramInner(const data_size_t* data_indices,
                                data_size_t start, data_size_t end,
@@ -204,13 +206,14 @@ class MultiValSparseBin : public MultiValBin {
 
   MultiValBin* CreateLike(data_size_t num_data, int num_bin, int,
                           double estimate_element_per_row,
-                          const std::vector<uint32_t>& /*offsets*/) const override {
+                          const std::vector<uint32_t>& /*offsets*/, const int /*num_dense_feature_groups*/) const override {
     return new MultiValSparseBin<INDEX_T, VAL_T>(num_data, num_bin,
                                                  estimate_element_per_row);
   }
 
   void ReSize(data_size_t num_data, int num_bin, int,
-              double estimate_element_per_row, const std::vector<uint32_t>& /*offsets*/) override {
+              double estimate_element_per_row, const std::vector<uint32_t>& /*offsets*/,
+              const int /*num_dense_feature_groups*/) override {
     num_data_ = num_data;
     num_bin_ = num_bin;
     estimate_element_per_row_ = estimate_element_per_row;

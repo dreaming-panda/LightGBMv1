@@ -447,10 +447,38 @@ void PushDataToMultiValBin(
     data_size_t num_data, const std::vector<uint32_t> most_freq_bins,
     const std::vector<uint32_t> offsets,
     std::vector<std::vector<std::unique_ptr<BinIterator>>>* iters,
-    MultiValBin* ret) {
+    MultiValBin* ret, const int num_dense_feature_groups) {
   Common::FunctionTimer fun_time("Dataset::PushDataToMultiValBin",
                                  global_timer);
-  if (ret->IsSparse()) {
+  if (ret->IsMix()) {
+    Threading::For<data_size_t>(
+        0, num_data, 1024, [&](int tid, data_size_t start, data_size_t end) {
+          std::vector<uint32_t> cur_data(num_dense_feature_groups, 0);
+          for (size_t j = 0; j < most_freq_bins.size(); ++j) {
+            (*iters)[tid][j]->Reset(start);
+          }
+          for (data_size_t i = start; i < end; ++i) {
+            cur_data.resize(num_dense_feature_groups, 0);
+            for (int j = 0; j < num_dense_feature_groups; ++j) {
+              // for dense multi value bin, the feature bin values without offsets are used
+              auto cur_bin = (*iters)[tid][j]->Get(i);
+              cur_data[j] = cur_bin;
+            }
+            for (int j = num_dense_feature_groups; j < static_cast<int>(most_freq_bins.size()); ++j) {
+              auto cur_bin = (*iters)[tid][j]->Get(i);
+              if (cur_bin == most_freq_bins[j]) {
+                continue;
+              }
+              cur_bin += offsets[j];
+              if (most_freq_bins[j] == 0) {
+                cur_bin -= 1;
+              }
+              cur_data.push_back(cur_bin);
+            }
+            ret->PushOneRow(tid, i, cur_data);
+          }
+        });
+  } else if (ret->IsSparse()) {
     Threading::For<data_size_t>(
         0, num_data, 1024, [&](int tid, data_size_t start, data_size_t end) {
           std::vector<uint32_t> cur_data;
@@ -532,8 +560,8 @@ MultiValBin* Dataset::GetMultiBinFromSparseFeatures(const std::vector<uint32_t>&
              sum_sparse_rate);
   std::unique_ptr<MultiValBin> ret;
   ret.reset(MultiValBin::CreateMultiValBin(num_data_, offsets.back(),
-                                           num_feature, sum_sparse_rate, offsets));
-  PushDataToMultiValBin(num_data_, most_freq_bins, offsets, &iters, ret.get());
+                                           num_feature, sum_sparse_rate, offsets, -1));
+  PushDataToMultiValBin(num_data_, most_freq_bins, offsets, &iters, ret.get(), -1);
   ret->FinishLoad();
   return ret.release();
 }
@@ -575,6 +603,7 @@ MultiValBin* Dataset::GetMultiBinFromAllFeatures(const std::vector<uint32_t>& of
   const int offset = (1.0f - sum_dense_ratio) >=
     MultiValBin::multi_val_bin_sparse_threshold ? 1 : 0;
   int num_total_bin = offset;
+  int num_dense_feature_groups = 0;
   for (int gid = 0; gid < num_groups_; ++gid) {
     if (feature_groups_[gid]->is_multi_val_) {
       for (int fid = 0; fid < feature_groups_[gid]->num_feature_; ++fid) {
@@ -591,6 +620,7 @@ MultiValBin* Dataset::GetMultiBinFromAllFeatures(const std::vector<uint32_t>& of
         }
       }
     } else {
+      ++num_dense_feature_groups;
       most_freq_bins.push_back(0);
       num_total_bin += feature_groups_[gid]->bin_offsets_.back() - offset;
       for (int tid = 0; tid < num_threads; ++tid) {
@@ -601,10 +631,11 @@ MultiValBin* Dataset::GetMultiBinFromAllFeatures(const std::vector<uint32_t>& of
   CHECK(static_cast<int>(most_freq_bins.size()) == ncol);
   Log::Debug("Dataset::GetMultiBinFromAllFeatures: sparse rate %f",
              1.0 - sum_dense_ratio);
+  CHECK_GT(num_dense_feature_groups, 0);
   ret.reset(MultiValBin::CreateMultiValBin(
       num_data_, num_total_bin, static_cast<int>(most_freq_bins.size()),
-      1.0 - sum_dense_ratio, offsets));
-  PushDataToMultiValBin(num_data_, most_freq_bins, offsets, &iters, ret.get());
+      1.0 - sum_dense_ratio, offsets, num_dense_feature_groups));
+  PushDataToMultiValBin(num_data_, most_freq_bins, offsets, &iters, ret.get(), num_dense_feature_groups);
   ret->FinishLoad();
   return ret.release();
 }
@@ -631,7 +662,7 @@ TrainingShareStates* Dataset::GetShareStates(
     TrainingShareStates* share_state = new TrainingShareStates();
     std::vector<uint32_t> offsets;
     share_state->CalcBinOffsets(
-      feature_groups_, &offsets, true);
+      feature_groups_, &offsets, true, false);
     share_state->SetMultiValBin(GetMultiBinFromSparseFeatures(offsets),
       num_data_, feature_groups_, false, true);
     share_state->is_col_wise = true;
@@ -640,8 +671,9 @@ TrainingShareStates* Dataset::GetShareStates(
   } else if (force_row_wise) {
     TrainingShareStates* share_state = new TrainingShareStates();
     std::vector<uint32_t> offsets;
+    // assert that use mix multi val bin
     share_state->CalcBinOffsets(
-      feature_groups_, &offsets, false);
+      feature_groups_, &offsets, false, true);
     share_state->SetMultiValBin(GetMultiBinFromAllFeatures(offsets), num_data_,
       feature_groups_, false, false);
     share_state->is_col_wise = false;
@@ -658,14 +690,14 @@ TrainingShareStates* Dataset::GetShareStates(
     std::chrono::duration<double, std::milli> col_wise_init_time, row_wise_init_time;
     auto start_time = std::chrono::steady_clock::now();
     std::vector<uint32_t> col_wise_offsets;
-    col_wise_state->CalcBinOffsets(feature_groups_, &col_wise_offsets, true);
+    col_wise_state->CalcBinOffsets(feature_groups_, &col_wise_offsets, true, false);
     col_wise_state->SetMultiValBin(GetMultiBinFromSparseFeatures(col_wise_offsets), num_data_,
       feature_groups_, false, true);
     col_wise_init_time = std::chrono::steady_clock::now() - start_time;
 
     start_time = std::chrono::steady_clock::now();
     std::vector<uint32_t> row_wise_offsets;
-    row_wise_state->CalcBinOffsets(feature_groups_, &row_wise_offsets, false);
+    row_wise_state->CalcBinOffsets(feature_groups_, &row_wise_offsets, false, false);
     row_wise_state->SetMultiValBin(GetMultiBinFromAllFeatures(row_wise_offsets), num_data_,
       feature_groups_, false, false);
     row_wise_init_time = std::chrono::steady_clock::now() - start_time;

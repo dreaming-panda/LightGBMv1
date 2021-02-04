@@ -426,7 +426,8 @@ class MultiValBin {
   virtual MultiValBin* CreateLike(data_size_t num_data, int num_bin,
                                   int num_feature,
                                   double estimate_element_per_row,
-                                  const std::vector<uint32_t>& offsets) const = 0;
+                                  const std::vector<uint32_t>& offsets,
+                                  const int num_dense_feature_groups) const = 0;
 
   virtual void CopySubcol(const MultiValBin* full_bin,
                           const std::vector<int>& used_feature_index,
@@ -435,7 +436,8 @@ class MultiValBin {
                           const std::vector<uint32_t>& delta) = 0;
 
   virtual void ReSize(data_size_t num_data, int num_bin, int num_feature,
-                      double estimate_element_per_row, const std::vector<uint32_t>& offsets) = 0;
+                      double estimate_element_per_row, const std::vector<uint32_t>& offsets,
+                      const int num_dense_feature_groups) = 0;
 
   virtual void CopySubrowAndSubcol(
       const MultiValBin* full_bin, const data_size_t* used_indices,
@@ -481,11 +483,18 @@ class MultiValBin {
 
   virtual bool IsSparse() = 0;
 
+  virtual bool IsMix() = 0;
+
   static MultiValBin* CreateMultiValBin(data_size_t num_data, int num_bin,
-                                        int num_feature, double sparse_rate, const std::vector<uint32_t>& offsets);
+                                        int num_feature, double sparse_rate,
+                                        const std::vector<uint32_t>& offsets, const int num_dense_feature_groups);
 
   static MultiValBin* CreateMultiValDenseBin(data_size_t num_data, int num_bin,
                                              int num_feature, const std::vector<uint32_t>& offsets);
+
+  static MultiValBin* CreateMultiValMixBin(data_size_t num_data, int num_bin,
+                                             int num_feature, const double sparse_rate, const double estimate_element_per_row,
+                                             const std::vector<uint32_t>& offsets, const int num_dense_feature_groups);
 
   static MultiValBin* CreateMultiValSparseBin(data_size_t num_data, int num_bin, double estimate_element_per_row);
 

@@ -244,7 +244,7 @@ struct TrainingShareStates {
     bool dense_only, bool sparse_only);
 
   void CalcBinOffsets(const std::vector<std::unique_ptr<FeatureGroup>>& feature_groups,
-    std::vector<uint32_t>* offsets, bool is_col_wise);
+    std::vector<uint32_t>* offsets, bool is_col_wise, bool is_mix);
 
   void InitTrain(const std::vector<int>& group_feature_start,
         const std::vector<std::unique_ptr<FeatureGroup>>& feature_groups,
