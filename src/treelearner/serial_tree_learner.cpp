@@ -378,6 +378,9 @@ void SerialTreeLearner::ConstructHistograms(
       int_gradients_, int_hessians_,
       int_ordered_gradients_.data(), int_ordered_hessians_.data(), share_state_.get(),
       ptr_smaller_leaf_hist_data);
+  for (int i = 0; i < 100; ++i) {
+    Log::Warning("hist bin %d gradient %d hessian %d", i, ptr_smaller_leaf_hist_data[2 * i], ptr_small)
+  }
   if (larger_leaf_histogram_array_ != nullptr && !use_subtract) {
     // construct larger leaf
     hist_t* ptr_larger_leaf_hist_data =
