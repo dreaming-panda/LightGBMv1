@@ -591,10 +591,10 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
           const auto ti1 = (bin1 + offsets_[i + 1]) << 1;
           const auto ti2 = (bin2 + offsets_[i + 2]) << 1;
           const auto ti3 = (bin3 + offsets_[i + 3]) << 1;
-          CHECK_LT(ti0, 5459 * 2 - 1);
-          CHECK_LT(ti1, 5459 * 2 - 1);
-          CHECK_LT(ti2, 5459 * 2 - 1);
-          CHECK_LT(ti3, 5459 * 2 - 1);
+          //CHECK_LT(ti0, 5459 * 2 - 1);
+          //CHECK_LT(ti1, 5459 * 2 - 1);
+          //CHECK_LT(ti2, 5459 * 2 - 1);
+          //CHECK_LT(ti3, 5459 * 2 - 1);
           grad[ti0] += gradient;
           hess[ti0] += hessian;
           grad[ti1] += gradient;
@@ -611,7 +611,7 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
             const uint32_t bin = static_cast<uint32_t>(packed_bin & 0xf);
             packed_bin >>= 4;
             const auto ti = (bin + offsets_[i]) << 1;
-            CHECK_LT(ti, 5459 * 2 - 1);
+            //CHECK_LT(ti, 5459 * 2 - 1);
             grad[ti] += gradient;
             hess[ti] += hessian;
             ++i;
@@ -626,8 +626,8 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
           const uint32_t bin1 = static_cast<uint32_t>((packed_bin >> 8) & 0xff);
           const auto ti0 = (bin0 + offsets_[i]) << 1;
           const auto ti1 = (bin1 + offsets_[i + 1]) << 1;
-          CHECK_LT(ti0, 5459 * 2 - 1);
-          CHECK_LT(ti1, 5459 * 2 - 1);
+          //CHECK_LT(ti0, 5459 * 2 - 1);
+          //CHECK_LT(ti1, 5459 * 2 - 1);
           grad[ti0] += gradient;
           hess[ti0] += hessian;
           grad[ti1] += gradient;
@@ -637,7 +637,7 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
         if (bit8_end_res_ > 0) {
           const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
           const auto ti = (bin + offsets_[i]) << 1;
-          CHECK_LT(ti, 5459 * 2 - 1);
+          //CHECK_LT(ti, 5459 * 2 - 1);
           grad[ti] += gradient;
           hess[ti] += hessian;
           ++i;
@@ -648,7 +648,7 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
         for (; j < bit16_end_; ++j) {
           uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
           const auto ti = (bin + offsets_[i]) << 1;
-          CHECK_LT(ti, 5459 * 2 - 1);
+          //CHECK_LT(ti, 5459 * 2 - 1);
           grad[ti] += gradient;
           hess[ti] += hessian;
           ++i;
@@ -659,7 +659,7 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
         for (; j < num_values; ++j) {
           const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
           const auto ti = (bin + mvg_offset_) << 1;
-          CHECK_LT(ti, 5459 * 2 - 1);
+          //CHECK_LT(ti, 5459 * 2 - 1);
           grad[ti] += gradient;
           hess[ti] += hessian;
         }
@@ -669,7 +669,7 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
         for (; j < num_values; ++j) {
           const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
           const auto ti = (bin + mvg_offset_) << 1;
-          CHECK_LT(ti, 5459 * 2 - 1);
+          //CHECK_LT(ti, 5459 * 2 - 1);
           grad[ti] += gradient;
           hess[ti] += hessian;
         }
@@ -679,13 +679,13 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
         for (; j < num_values; ++j) {
           const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
           const auto ti = (bin + mvg_offset_) << 1;
-          CHECK_LT(ti, 5459 * 2 - 1);
+          //CHECK_LT(ti, 5459 * 2 - 1);
           grad[ti] += gradient;
           hess[ti] += hessian;
         }
       }
-      CHECK_EQ(i, num_dense_feature_groups_);
-      CHECK_EQ(j, static_cast<int>(RowPtr(idx + 1) - j_start));
+      //CHECK_EQ(i, num_dense_feature_groups_);
+      //CHECK_EQ(j, static_cast<int>(RowPtr(idx + 1) - j_start));
     }
   }
   for (; i < end; ++i) {
@@ -710,10 +710,10 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
         const auto ti1 = (bin1 + offsets_[i + 1]) << 1;
         const auto ti2 = (bin2 + offsets_[i + 2]) << 1;
         const auto ti3 = (bin3 + offsets_[i + 3]) << 1;
-        CHECK_LT(ti0, 5459 * 2 - 1);
-        CHECK_LT(ti1, 5459 * 2 - 1);
-        CHECK_LT(ti2, 5459 * 2 - 1);
-        CHECK_LT(ti3, 5459 * 2 - 1);
+        //CHECK_LT(ti0, 5459 * 2 - 1);
+        //CHECK_LT(ti1, 5459 * 2 - 1);
+        //CHECK_LT(ti2, 5459 * 2 - 1);
+        //CHECK_LT(ti3, 5459 * 2 - 1);
         grad[ti0] += gradient;
         hess[ti0] += hessian;
         grad[ti1] += gradient;
@@ -730,7 +730,7 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
           const uint32_t bin = static_cast<uint32_t>(packed_bin & 0xf);
           packed_bin >>= 4;
           const auto ti = (bin + offsets_[i]) << 1;
-          CHECK_LT(ti, 5459 * 2 - 1);
+          //CHECK_LT(ti, 5459 * 2 - 1);
           grad[ti] += gradient;
           hess[ti] += hessian;
           ++i;
@@ -745,8 +745,8 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
         const uint32_t bin1 = static_cast<uint32_t>((packed_bin >> 8) & 0xff);
         const auto ti0 = (bin0 + offsets_[i]) << 1;
         const auto ti1 = (bin1 + offsets_[i + 1]) << 1;
-        CHECK_LT(ti0, 5459 * 2 - 1);
-        CHECK_LT(ti1, 5459 * 2 - 1);
+        //CHECK_LT(ti0, 5459 * 2 - 1);
+        //CHECK_LT(ti1, 5459 * 2 - 1);
         grad[ti0] += gradient;
         hess[ti0] += hessian;
         grad[ti1] += gradient;
@@ -756,7 +756,7 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
       if (bit8_end_res_ > 0) {
         const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
         const auto ti = (bin + offsets_[i]) << 1;
-        CHECK_LT(ti, 5459 * 2 - 1);
+        //CHECK_LT(ti, 5459 * 2 - 1);
         grad[ti] += gradient;
         hess[ti] += hessian;
         ++i;
@@ -767,7 +767,7 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
       for (; j < bit16_end_; ++j) {
         uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
         const auto ti = (bin + offsets_[i]) << 1;
-        CHECK_LT(ti, 5459 * 2 - 1);
+        //CHECK_LT(ti, 5459 * 2 - 1);
         grad[ti] += gradient;
         hess[ti] += hessian;
         ++i;
@@ -778,7 +778,7 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
       for (; j < num_values; ++j) {
         const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
         const auto ti = (bin + mvg_offset_) << 1;
-        CHECK_LT(ti, 5459 * 2 - 1);
+        //CHECK_LT(ti, 5459 * 2 - 1);
         grad[ti] += gradient;
         hess[ti] += hessian;
       }
@@ -788,7 +788,7 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
       for (; j < num_values; ++j) {
         const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
         const auto ti = (bin + mvg_offset_) << 1;
-        CHECK_LT(ti, 5459 * 2 - 1);
+        //CHECK_LT(ti, 5459 * 2 - 1);
         grad[ti] += gradient;
         hess[ti] += hessian;
       }
@@ -798,13 +798,13 @@ void MultiValMixBin<uint16_t>::ConstructHistogramInnerMost(const data_size_t* da
       for (; j < num_values; ++j) {
         const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
         const auto ti = (bin + mvg_offset_) << 1;
-        CHECK_LT(ti, 5459 * 2 - 1);
+        //CHECK_LT(ti, 5459 * 2 - 1);
         grad[ti] += gradient;
         hess[ti] += hessian;
       }
     }
-    CHECK_EQ(i, num_dense_feature_groups_);
-    CHECK_EQ(j, static_cast<int>(RowPtr(idx + 1) - j_start));
+    //CHECK_EQ(i, num_dense_feature_groups_);
+    //CHECK_EQ(j, static_cast<int>(RowPtr(idx + 1) - j_start));
   }
 }
 

@@ -686,8 +686,7 @@ void MultiValMixBin<uint16_t>::CompressOneRow(const std::vector<uint32_t>& value
     if (bit4_end_res_ > 0) {
       uint16_t compressed_bin = 0;
       for (int k = 0; k < bit4_end_res_; ++k) {
-        compressed_bin <<= 4;
-        compressed_bin |= values[i];
+        compressed_bin |= (values[i] << (4 * k));
         ++i;
       }
       compressed_values->push_back(compressed_bin);

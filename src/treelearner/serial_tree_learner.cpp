@@ -13,6 +13,7 @@
 #include <queue>
 #include <unordered_map>
 #include <utility>
+#include <fstream>
 
 #include "cost_effective_gradient_boosting.hpp"
 
@@ -378,9 +379,14 @@ void SerialTreeLearner::ConstructHistograms(
       int_gradients_, int_hessians_,
       int_ordered_gradients_.data(), int_ordered_hessians_.data(), share_state_.get(),
       ptr_smaller_leaf_hist_data);
-  for (int i = 0; i < 100; ++i) {
+  /*for (int i = 0; i < 100; ++i) {
     Log::Warning("hist bin %d gradient %f hessian %f", i, ptr_smaller_leaf_hist_data[2 * i], ptr_smaller_leaf_hist_data[2 * i + 1]);
   }
+  std::ofstream fout("hist_values");
+  for (int i = 0; i < 5459; ++i) {
+    fout << i << " " << ptr_smaller_leaf_hist_data[2 * i] << " " << ptr_smaller_leaf_hist_data[2 * i + 1] << std::endl;
+  }
+  fout.close();*/
   if (larger_leaf_histogram_array_ != nullptr && !use_subtract) {
     // construct larger leaf
     hist_t* ptr_larger_leaf_hist_data =

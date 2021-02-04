@@ -1584,7 +1584,7 @@ void Dataset::OrderFeatureGroupsByBinSize(const std::vector<std::vector<int>>& f
   for (int group_index = 0; group_index < num_groups_; ++group_index) {
     group_order[group_index] = group_index;
   }
-  std::sort(group_order.begin(), group_order.end(), [this] (int group_index_1, int group_index_2) {
+  std::stable_sort(group_order.begin(), group_order.end(), [this] (int group_index_1, int group_index_2) {
     return (feature_groups_[group_index_1]->num_total_bin_ < feature_groups_[group_index_2]->num_total_bin_);
   });
   for (int i = 0; i < num_groups_; ++i) {
