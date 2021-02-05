@@ -398,6 +398,7 @@ void Dataset::Construct(std::vector<std::unique_ptr<BinMapper>>* bin_mappers,
     num_total_bin += feature_groups_[i]->num_total_bin_;
     group_bin_boundaries_.push_back(num_total_bin);
   }
+  OrderFeatureGroupsByBinSize(features_in_group);
   if (!io_config.max_bin_by_feature.empty()) {
     CHECK_EQ(static_cast<size_t>(num_total_features_),
              io_config.max_bin_by_feature.size());
@@ -443,10 +444,39 @@ void PushDataToMultiValBin(
     data_size_t num_data, const std::vector<uint32_t> most_freq_bins,
     const std::vector<uint32_t> offsets,
     std::vector<std::vector<std::unique_ptr<BinIterator>>>* iters,
-    MultiValBin* ret) {
+    MultiValBin* ret, const int num_dense_col) {
   Common::FunctionTimer fun_time("Dataset::PushDataToMultiValBin",
                                  global_timer);
-  if (ret->IsSparse()) {
+  if (ret->IsMix()) {
+    Threading::For<data_size_t>(
+        0, num_data, 1024, [&](int tid, data_size_t start, data_size_t end) {
+          std::vector<uint32_t> cur_data(num_dense_col, 0);
+          const int multi_val_offset = offsets[num_dense_col];
+          for (size_t j = 0; j < most_freq_bins.size(); ++j) {
+            (*iters)[tid][j]->Reset(start);
+          }
+          for (data_size_t i = start; i < end; ++i) {
+            cur_data.resize(num_dense_col);
+            for (int j = 0; j < num_dense_col; ++j) {
+              // for dense multi value bin, the feature bin values without offsets are used
+              auto cur_bin = (*iters)[tid][j]->Get(i);
+              cur_data[j] = cur_bin;
+            }
+            for (int j = num_dense_col; j < static_cast<int>(most_freq_bins.size()); ++j) {
+              auto cur_bin = (*iters)[tid][j]->Get(i);
+              if (cur_bin == most_freq_bins[j]) {
+                continue;
+              }
+              cur_bin += (offsets[j] - multi_val_offset);
+              if (most_freq_bins[j] == 0) {
+                cur_bin -= 1;
+              }
+              cur_data.push_back(cur_bin);
+            }
+            ret->PushOneRow(tid, i, cur_data);
+          }
+        });
+  } else if (ret->IsSparse()) {
     Threading::For<data_size_t>(
         0, num_data, 1024, [&](int tid, data_size_t start, data_size_t end) {
           std::vector<uint32_t> cur_data;
@@ -528,8 +558,8 @@ MultiValBin* Dataset::GetMultiBinFromSparseFeatures(const std::vector<uint32_t>&
              sum_sparse_rate);
   std::unique_ptr<MultiValBin> ret;
   ret.reset(MultiValBin::CreateMultiValBin(num_data_, offsets.back(),
-                                           num_feature, sum_sparse_rate, offsets));
-  PushDataToMultiValBin(num_data_, most_freq_bins, offsets, &iters, ret.get());
+                                           num_feature, sum_sparse_rate, offsets, false, 0));
+  PushDataToMultiValBin(num_data_, most_freq_bins, offsets, &iters, ret.get(), 0);
   ret->FinishLoad();
   return ret.release();
 }
@@ -544,11 +574,13 @@ MultiValBin* Dataset::GetMultiBinFromAllFeatures(const std::vector<uint32_t>& of
   std::vector<std::vector<std::unique_ptr<BinIterator>>> iters(num_threads);
   std::vector<uint32_t> most_freq_bins;
   int ncol = 0;
+  int num_dense_col = 0;
   for (int gid = 0; gid < num_groups_; ++gid) {
     if (feature_groups_[gid]->is_multi_val_) {
       ncol += feature_groups_[gid]->num_feature_;
     } else {
       ++ncol;
+      ++num_dense_col;
     }
     for (int fid = 0; fid < feature_groups_[gid]->num_feature_; ++fid) {
       const auto& bin_mapper = feature_groups_[gid]->bin_mappers_[fid];
@@ -579,8 +611,8 @@ MultiValBin* Dataset::GetMultiBinFromAllFeatures(const std::vector<uint32_t>& of
              1.0 - sum_dense_ratio);
   ret.reset(MultiValBin::CreateMultiValBin(
       num_data_, offsets.back(), static_cast<int>(most_freq_bins.size()),
-      1.0 - sum_dense_ratio, offsets));
-  PushDataToMultiValBin(num_data_, most_freq_bins, offsets, &iters, ret.get());
+      1.0 - sum_dense_ratio, offsets, true, num_dense_col));
+  PushDataToMultiValBin(num_data_, most_freq_bins, offsets, &iters, ret.get(), num_dense_col);
   ret->FinishLoad();
   return ret.release();
 }
@@ -606,7 +638,7 @@ TrainingShareStates* Dataset::GetShareStates(
     TrainingShareStates* share_state = new TrainingShareStates();
     std::vector<uint32_t> offsets;
     share_state->CalcBinOffsets(
-      feature_groups_, &offsets, true);
+      feature_groups_, &offsets, true, false);
     share_state->SetMultiValBin(GetMultiBinFromSparseFeatures(offsets),
       num_data_, feature_groups_, false, true);
     share_state->is_col_wise = true;
@@ -616,7 +648,7 @@ TrainingShareStates* Dataset::GetShareStates(
     TrainingShareStates* share_state = new TrainingShareStates();
     std::vector<uint32_t> offsets;
     share_state->CalcBinOffsets(
-      feature_groups_, &offsets, false);
+      feature_groups_, &offsets, false, true);
     share_state->SetMultiValBin(GetMultiBinFromAllFeatures(offsets), num_data_,
       feature_groups_, false, false);
     share_state->is_col_wise = false;
@@ -633,14 +665,14 @@ TrainingShareStates* Dataset::GetShareStates(
     std::chrono::duration<double, std::milli> col_wise_init_time, row_wise_init_time;
     auto start_time = std::chrono::steady_clock::now();
     std::vector<uint32_t> col_wise_offsets;
-    col_wise_state->CalcBinOffsets(feature_groups_, &col_wise_offsets, true);
+    col_wise_state->CalcBinOffsets(feature_groups_, &col_wise_offsets, true, false);
     col_wise_state->SetMultiValBin(GetMultiBinFromSparseFeatures(col_wise_offsets), num_data_,
       feature_groups_, false, true);
     col_wise_init_time = std::chrono::steady_clock::now() - start_time;
 
     start_time = std::chrono::steady_clock::now();
     std::vector<uint32_t> row_wise_offsets;
-    row_wise_state->CalcBinOffsets(feature_groups_, &row_wise_offsets, false);
+    row_wise_state->CalcBinOffsets(feature_groups_, &row_wise_offsets, false, true);
     row_wise_state->SetMultiValBin(GetMultiBinFromAllFeatures(row_wise_offsets), num_data_,
       feature_groups_, false, false);
     row_wise_init_time = std::chrono::steady_clock::now() - start_time;
@@ -1463,6 +1495,71 @@ void Dataset::AddFeaturesFrom(Dataset* other) {
     for (int i = 0; i < other->num_numeric_features_; ++i) {
       raw_data_.push_back(other->raw_data_[i]);
     }
+  }
+}
+
+void Dataset::OrderFeatureGroupsByBinSize(const std::vector<std::vector<int>>& features_in_group) {
+  std::vector<int> group_order(num_groups_);
+  for (int group_index = 0; group_index < num_groups_; ++group_index) {
+    group_order[group_index] = group_index;
+  }
+  std::stable_sort(group_order.begin(), group_order.end(), [this] (int group_index_1, int group_index_2) {
+    return (feature_groups_[group_index_1]->num_total_bin_ < feature_groups_[group_index_2]->num_total_bin_);
+  });
+  for (int i = 0; i < num_groups_; ++i) {
+    const int group_index = group_order[i];
+    if (feature_groups_[group_index]->is_multi_val_ && i != num_groups_ - 1) {
+      for (int j = i + 1; j < num_groups_; ++j) {
+        group_order[j - 1] = group_order[j];
+      }
+      group_order[num_groups_ - 1] = group_index;
+      break;
+    }
+  }
+  std::vector<std::vector<int>> new_features_in_group(features_in_group.size());
+  const int num_threads = OMP_NUM_THREADS();
+  #pragma omp parallel for schedule(static) num_threads(num_threads)
+  for (int i = 0; i < num_groups_; ++i) {
+    const int group_index = group_order[i];
+    new_features_in_group[i] = features_in_group[group_index];
+  }
+  int cur_fidx = 0;
+  std::vector<bool> is_feature_need_push_zero(num_features_, false);
+  const int num_features_need_push_zero = static_cast<int>(feature_need_push_zeros_.size());
+  #pragma omp parallel for schedule(static) num_threads(num_threads) if (num_features_need_push_zero >= 1024)
+  for (int i = 0; i < num_features_need_push_zero; ++i) {
+    is_feature_need_push_zero[feature_need_push_zeros_[i]] = true;
+  }
+  feature_need_push_zeros_.clear();
+  group_bin_boundaries_.clear();
+  uint64_t num_total_bin = 0;
+  std::vector<std::unique_ptr<FeatureGroup>> old_feature_groups;
+  for (auto& ptr : feature_groups_) {
+    old_feature_groups.emplace_back(ptr.release());
+  }
+  feature_groups_.clear();
+  group_bin_boundaries_.push_back(num_total_bin);
+  for (int i = 0; i < num_groups_; ++i) {
+    const auto& cur_features = new_features_in_group[i];
+    const int cur_cnt_features = static_cast<int>(cur_features.size());
+    const int old_feature_group_index = group_order[i];
+    group_feature_start_[i] = cur_fidx;
+    group_feature_cnt_[i] = cur_cnt_features;
+    for (int j = 0; j < cur_cnt_features; ++j) {
+      int real_fidx = cur_features[j];
+      const int old_fidx = used_feature_map_[real_fidx];
+      used_feature_map_[real_fidx] = cur_fidx;
+      real_feature_idx_[cur_fidx] = real_fidx;
+      feature2group_[cur_fidx] = i;
+      feature2subfeature_[cur_fidx] = j;
+      if (is_feature_need_push_zero[old_fidx]) {
+        feature_need_push_zeros_.push_back(cur_fidx);
+      }
+      ++cur_fidx;
+    }
+    feature_groups_.emplace_back(old_feature_groups[old_feature_group_index].release());
+    num_total_bin += feature_groups_[i]->num_total_bin_;
+    group_bin_boundaries_.push_back(num_total_bin);
   }
 }
 

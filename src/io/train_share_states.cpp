@@ -249,10 +249,45 @@ void MultiValBinWrapper::CopyMultiValBinSubset(
 }
 
 void TrainingShareStates::CalcBinOffsets(const std::vector<std::unique_ptr<FeatureGroup>>& feature_groups,
-  std::vector<uint32_t>* offsets, bool in_is_col_wise) {
+  std::vector<uint32_t>* offsets, bool in_is_col_wise, bool is_mix) {
   offsets->clear();
   feature_hist_offsets_.clear();
-  if (in_is_col_wise) {
+  if (is_mix) {
+    uint32_t cur_num_bin = 0;
+    uint32_t hist_cur_num_bin = 0;
+    for (int group = 0; group < static_cast<int>(feature_groups.size()); ++group) {
+      const std::unique_ptr<FeatureGroup>& feature_group = feature_groups[group];
+      if (feature_group->is_multi_val_) {
+        if (feature_group->is_dense_multi_val_) {
+          Log::Fatal("unsupported with mix multi val bin");
+        } else {
+          cur_num_bin += 1;
+          hist_cur_num_bin += 1;
+          for (int i = 0; i < feature_group->num_feature_; ++i) {
+            offsets->push_back(cur_num_bin);
+            feature_hist_offsets_.push_back(hist_cur_num_bin);
+            const std::unique_ptr<BinMapper>& bin_mapper = feature_group->bin_mappers_[i];
+            int num_bin = bin_mapper->num_bin();
+            if (bin_mapper->GetMostFreqBin() == 0) {
+              num_bin -= 1;
+            }
+            hist_cur_num_bin += num_bin;
+            cur_num_bin += num_bin;
+          }
+        }
+      } else {
+        for (int i = 0; i < feature_group->num_feature_; ++i) {
+          feature_hist_offsets_.push_back(hist_cur_num_bin + feature_group->bin_offsets_[i]);
+        }
+        offsets->push_back(cur_num_bin);
+        cur_num_bin += feature_group->bin_offsets_.back();
+        hist_cur_num_bin += feature_group->bin_offsets_.back();
+      }
+    }
+    offsets->push_back(cur_num_bin);
+    feature_hist_offsets_.push_back(hist_cur_num_bin);
+    num_hist_total_bin_ = static_cast<uint64_t>(feature_hist_offsets_.back());
+  } else if (in_is_col_wise) {
     uint32_t cur_num_bin = 0;
     uint32_t hist_cur_num_bin = 0;
     for (int group = 0; group < static_cast<int>(feature_groups.size()); ++group) {

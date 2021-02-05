@@ -15,6 +15,7 @@
 
 #include "dense_bin.hpp"
 #include "multi_val_dense_bin.hpp"
+#include "multi_val_mix_bin.hpp"
 #include "multi_val_sparse_bin.hpp"
 #include "sparse_bin.hpp"
 
@@ -662,13 +663,18 @@ namespace LightGBM {
   }
 
   MultiValBin* MultiValBin::CreateMultiValBin(data_size_t num_data, int num_bin, int num_feature,
-    double sparse_rate, const std::vector<uint32_t>& offsets) {
-    if (sparse_rate >= multi_val_bin_sparse_threshold) {
-      const double average_element_per_row = (1.0 - sparse_rate) * num_feature;
-      return CreateMultiValSparseBin(num_data, num_bin,
-                                     average_element_per_row);
+    double sparse_rate, const std::vector<uint32_t>& offsets, const bool use_mix, const int num_dense_col) {
+    const double average_element_per_row = (1.0 - sparse_rate) * num_feature;
+    if (use_mix) {
+      return CreateMultiValMixBin(num_data, num_bin, num_feature,
+        average_element_per_row, offsets, num_dense_col);
     } else {
-      return CreateMultiValDenseBin(num_data, num_bin, num_feature, offsets);
+      if (sparse_rate >= multi_val_bin_sparse_threshold) {
+        return CreateMultiValSparseBin(num_data, num_bin,
+                                      average_element_per_row);
+      } else {
+        return CreateMultiValDenseBin(num_data, num_bin, num_feature, offsets);
+      }
     }
   }
 
@@ -733,5 +739,32 @@ namespace LightGBM {
       }
     }
   }
+
+MultiValBin* MultiValBin::CreateMultiValMixBin(data_size_t num_data, int num_bin,
+                                             int num_feature, const double estimate_element_per_row,
+                                             const std::vector<uint32_t>& offsets, const int num_dense_col) {
+  int max_bin = 0;
+  for (int i = 0; i < num_dense_col; ++i) {
+    int feature_bin = offsets[i + 1] - offsets[i];
+    if (feature_bin > max_bin) {
+      max_bin = feature_bin;
+    }
+  }
+  if (num_dense_col < num_feature) {
+    // has multi val feature group
+    const int multi_val_num_bin = offsets.back() - offsets[num_dense_col];
+    if (multi_val_num_bin > max_bin) {
+      max_bin = multi_val_num_bin;
+    }
+  }
+  if (max_bin <= 256) {
+    return new MultiValMixBin<uint8_t>(num_data, num_bin, num_feature, offsets, estimate_element_per_row, num_dense_col);
+  } else if (max_bin <= 65536) {
+    return new MultiValMixBin<uint16_t>(num_data, num_bin, num_feature, offsets, estimate_element_per_row, num_dense_col);
+  } else {
+    Log::Fatal("unsupported");
+    return nullptr;
+  }
+}
 
 }  // namespace LightGBM

@@ -54,6 +54,10 @@ class MultiValDenseBin : public MultiValBin {
     return false;
   }
 
+  bool IsMix() override {
+    return false;
+  }
+
   template<bool USE_INDICES, bool USE_PREFETCH, bool ORDERED>
   void ConstructHistogramInner(const data_size_t* data_indices, data_size_t start, data_size_t end,
     const score_t* gradients, const score_t* hessians, hist_t* out) const {
