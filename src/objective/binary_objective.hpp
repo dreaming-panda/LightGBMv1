@@ -275,7 +275,7 @@ class BinaryLogloss: public ObjectiveFunction {
       if (dist[thread_id](mt_generators[thread_id]) <= gradient_bias) {
         int_gradients[i] = int_grad;
       } else {
-        if (gradient_bias < 0.0f) {
+        if (gradient < 0.0f) {
           int_gradients[i] = int_grad - 1;
         } else {
           int_gradients[i] = int_grad + 1;
