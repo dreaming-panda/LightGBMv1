@@ -258,30 +258,35 @@ class BinaryLogloss: public ObjectiveFunction {
     for (int i = 0; i < OMP_NUM_THREADS(); ++i) {
       mt_generators.emplace_back(i + iter);
     }
-    std::vector<std::uniform_real_distribution<double>> dist(OMP_NUM_THREADS());
+    std::vector<std::uniform_real_distribution<double>> dist;
+    for (int i = 0; i < OMP_NUM_THREADS(); ++i) {
+      dist.push_back(std::uniform_real_distribution<double>(0.0f, 1.0f));
+    }
     #pragma omp parallel for schedule(static)
     for (data_size_t i = 0; i < num_data_; ++i) {
       const int thread_id = omp_get_thread_num();
       const score_t gradient = gradients[i];
       const score_t hessian = hessians[i];
-      const int_score_t int_grad = static_cast<int_score_t>(std::lround(gradients[i] * g_inverse_scale));
-      const int_score_t int_hess = static_cast<int_score_t>(std::lround(hessians[i] * h_inverse_scale));
+      const int_score_t int_grad = static_cast<int_score_t>(std::lround(gradient * g_inverse_scale));
+      const int_score_t int_hess = static_cast<int_score_t>(std::lround(hessian * h_inverse_scale));
       const score_t gradient_low = int_grad * gs;
       const score_t gradient_high = gradient >= 0.0f ? (int_grad + 1) * gs : (int_grad - 1) * gs;
       const score_t hessian_low = int_hess * hs;
       const score_t hessian_high = (int_hess + 1) * hs;
       const score_t gradient_bias = (gradient - gradient_low) / (gradient_high - gradient_low);
       const score_t hessian_bias = (hessian - hessian_low) / (hessian_high - hessian_low);
-      if (dist[thread_id](mt_generators[thread_id]) <= gradient_bias) {
+      if (dist[thread_id](mt_generators[thread_id]) > gradient_bias) {
         int_gradients[i] = int_grad;
       } else {
         if (gradient < 0.0f) {
+          CHECK(int_grad <= 0);
           int_gradients[i] = int_grad - 1;
         } else {
+          CHECK(int_grad >= 0);
           int_gradients[i] = int_grad + 1;
         }
       }
-      if (dist[thread_id](mt_generators[thread_id]) <= hessian_bias) {
+      if (dist[thread_id](mt_generators[thread_id]) > hessian_bias) {
         int_hessians[i] = int_hess;
       } else {
         int_hessians[i] = int_hess + 1;
