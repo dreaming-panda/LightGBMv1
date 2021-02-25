@@ -12,6 +12,8 @@
 #include <string>
 #include <functional>
 
+#include <fstream>
+
 namespace LightGBM {
 /*!
 * \brief The interface of Objective Function.
@@ -90,6 +92,20 @@ class ObjectiveFunction {
   }
 
   virtual std::string ToString() const = 0;
+
+  void DumpGradientToFile(const score_t* gradients, const score_t* hessians, const int iter,
+    const int num_data, const int num_class) const {
+    std::vector<char> buffer(100);
+    Common::Int32ToStr(iter, buffer.data());
+    std::ofstream fout(std::string("gradient_" + std::string(buffer.data()) + std::string(".csv")));
+    fout << "gradient,hessian" << std::endl;
+    for (int i = 0; i < num_class; ++i) {
+      const int base = i * num_data;
+      for (int j = 0; j < num_data; ++j) {
+        fout << gradients[base + j] << "," << hessians[base + j] << std::endl;
+      }
+    }
+  }
 
   ObjectiveFunction() = default;
   /*! \brief Disable copy */
