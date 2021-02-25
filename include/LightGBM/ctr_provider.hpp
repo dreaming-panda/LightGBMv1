@@ -263,13 +263,13 @@ class CTRProvider {
   void PrepareCTRStatVectors();
 
   void ProcessOneLine(const std::vector<double>& one_line, double label,
-    int line_idx, int thread_id, const int fold_id);
+    int line_idx, int thread_id, const std::vector<int>& fold_ids);
 
   void ProcessOneLine(const std::vector<std::pair<int, double>>& one_line, double label,
-    int line_idx, std::vector<bool>* is_feature_processed, int thread_id, const int fold_id);
+    int line_idx, std::vector<bool>* is_feature_processed, int thread_id, const std::vector<int>& fold_ids);
 
   void ProcessOneLine(const std::vector<std::pair<int, double>>& one_line, double label,
-    int line_idx, std::vector<bool>* is_feature_processed, const int fold_id);
+    int line_idx, std::vector<bool>* is_feature_processed, const std::vector<int>& fold_ids);
 
   std::string DumpModelInfo() const;
 
@@ -304,40 +304,53 @@ class CTRProvider {
     const std::function<void(int fid)>& post_process_func) const;
 
   template <bool IS_TRAIN>
-  inline void GetCTRStatForOneCatValue(int fid, double fval, int fold_id,
-    double* out_label_sum, double* out_total_count, double* out_all_fold_total_count) const {
-    *out_label_sum = 0.0f;
-    *out_total_count = 0.0f;
-    *out_all_fold_total_count = 0.0f;
-    const int int_fval = static_cast<int>(fval);
-    const auto& fold_label_info = IS_TRAIN ?
-      label_info_.at(fid).at(fold_id) : label_info_.at(fid).back();
-    const auto& fold_count_info = IS_TRAIN ?
-      count_info_.at(fid).at(fold_id) : count_info_.at(fid).back();
-    if (fold_count_info.count(int_fval) > 0) {
-      *out_label_sum = fold_label_info.at(int_fval);
-      *out_total_count = fold_count_info.at(int_fval);
+  inline void GetCTRStatForOneCatValue(int fid, double fval, const std::vector<int>& fold_ids,
+    std::vector<double>* out_label_sum, std::vector<double>* out_total_count,
+    std::vector<double>* out_all_fold_total_count) const {
+    auto& out_label_sum_ref = *out_label_sum;
+    auto& out_total_count_ref = *out_total_count;
+    auto& out_all_fold_total_count_ref = *out_all_fold_total_count;
+    for (int i = 0; i < num_ctr_partitions_; ++i) {
+      out_label_sum_ref[i] = 0.0f;
+      out_total_count_ref[i] = 0.0f;
+      out_all_fold_total_count_ref[i] = 0.0f;
     }
-    if (IS_TRAIN) {
-      const auto& all_fold_count_info = count_info_.at(fid).back();
-      if (all_fold_count_info.count(int_fval) > 0) {
-        *out_all_fold_total_count = all_fold_count_info.at(int_fval);
+    const int int_fval = static_cast<int>(fval);
+    for (int i = 0; i < num_ctr_partitions_; ++i) {
+      const auto& fold_label_info = IS_TRAIN ?
+        label_info_.at(fid)[i].at(fold_ids[i]) : label_info_.at(fid)[i].back();
+      const auto& fold_count_info = IS_TRAIN ?
+        count_info_.at(fid)[i].at(fold_ids[i]) : count_info_.at(fid)[i].back();
+      if (fold_count_info.count(int_fval) > 0) {
+        out_label_sum_ref[i] = fold_label_info.at(int_fval);
+        out_total_count_ref[i] = fold_count_info.at(int_fval);
       }
-    } else {
-      *out_all_fold_total_count = *out_total_count;
+      if (IS_TRAIN) {
+        const auto& all_fold_count_info = count_info_.at(fid)[i].back();
+        if (all_fold_count_info.count(int_fval) > 0) {
+          out_all_fold_total_count_ref[i] = all_fold_count_info.at(int_fval);
+        }
+      } else {
+        out_all_fold_total_count_ref[i] = out_total_count_ref[i];
+      }
     }
   }
 
   template <bool IS_TRAIN>
-  void IterateOverCatConvertersInner(int fid, double fval, int fold_id,
+  void IterateOverCatConvertersInner(int fid, double fval, const std::vector<int>& fold_ids,
     const std::function<void(int convert_fid, int fid, double convert_value)>& write_func,
     const std::function<void(int fid)>& post_process_func) const {
-    double label_sum = 0.0f, total_count = 0.0f, all_fold_total_count = 0.0f;
-    GetCTRStatForOneCatValue<IS_TRAIN>(fid, fval, fold_id, &label_sum, &total_count, &all_fold_total_count);
+    std::vector<double> label_sum(num_ctr_partitions_, 0.0f);
+    std::vector<double> total_count(num_ctr_partitions_, 0.0f);
+    std::vector<double> all_fold_total_count(num_ctr_partitions_, 0.0f);
+    GetCTRStatForOneCatValue<IS_TRAIN>(fid, fval, fold_ids, &label_sum, &total_count, &all_fold_total_count);
     for (const auto& cat_converter : cat_converters_) {
-      const double convert_value = IS_TRAIN ?
-        cat_converter->CalcValue(label_sum, total_count, all_fold_total_count, fold_prior_[fold_id]) :
-        cat_converter->CalcValue(label_sum, total_count, all_fold_total_count);
+      double convert_value = 0.0f;
+      for (int i = 0; i < num_ctr_partitions_; ++i) {
+        convert_value += IS_TRAIN ?
+          cat_converter->CalcValue(label_sum[i], total_count[i], all_fold_total_count[i], fold_prior_[i][fold_ids[i]]) :
+          cat_converter->CalcValue(label_sum[i], total_count[i], all_fold_total_count[i]);
+      }
       const int convert_fid = cat_converter->GetConvertFid(fid);
       write_func(convert_fid, fid, convert_value);
     }
@@ -345,14 +358,19 @@ class CTRProvider {
   }
 
   template <bool IS_TRAIN>
-  double HandleOneCatConverter(int fid, double fval, int fold_id,
+  double HandleOneCatConverter(int fid, double fval, const std::vector<int>& fold_ids,
     const CTRProvider::CatConverter* cat_converter) const {
-    double label_sum = 0.0f, total_count = 0.0f, all_fold_total_count = 0.0f;
-    GetCTRStatForOneCatValue<IS_TRAIN>(fid, fval, fold_id, &label_sum, &total_count, &all_fold_total_count);
-    if (IS_TRAIN) {
-      return cat_converter->CalcValue(label_sum, total_count, all_fold_total_count, fold_prior_[fold_id]);
-    } else {
-      return cat_converter->CalcValue(label_sum, total_count, all_fold_total_count);
+    std::vector<double> label_sum(num_ctr_partitions_, 0.0f);
+    std::vector<double> total_count(num_ctr_partitions_, 0.0f);
+    std::vector<double> all_fold_total_count(num_ctr_partitions_, 0.0f);
+    GetCTRStatForOneCatValue<IS_TRAIN>(fid, fval, fold_ids, &label_sum, &total_count, &all_fold_total_count);
+    double result = 0.0f;
+    for (int i = 0; i < num_ctr_partitions_; ++i) {
+      if (IS_TRAIN) {
+        result += cat_converter->CalcValue(label_sum[i], total_count[i], all_fold_total_count[i], fold_prior_[i][fold_ids[i]]);
+      } else {
+        result += cat_converter->CalcValue(label_sum[i], total_count[i], all_fold_total_count[i]);
+      }
     }
   }
 
@@ -447,9 +465,9 @@ class CTRProvider {
   template <bool ACCUMULATE_FROM_FILE>
   void ProcessOneLineInner(const std::vector<std::pair<int, double>>& one_line,
     double label, int line_idx, std::vector<bool>* is_feature_processed_ptr,
-    std::unordered_map<int, std::vector<std::unordered_map<int, int>>>* count_info_ptr,
-    std::unordered_map<int, std::vector<std::unordered_map<int, label_t>>>* label_info_ptr,
-    std::vector<label_t>* label_sum_ptr, std::vector<int>* num_data_ptr, const int fold_id);
+    std::unordered_map<int, std::vector<std::vector<std::unordered_map<int, int>>>>* count_info_ptr,
+    std::unordered_map<int, std::vector<std::vector<std::unordered_map<int, label_t>>>>* label_info_ptr,
+    std::vector<std::vector<label_t>>* label_sum_ptr, std::vector<std::vector<int>>* num_data_ptr, const std::vector<int>& fold_ids);
 
   // sync up ctr values by gathering statistics from all machines in distributed scenario
   void SyncCTRStat(std::vector<std::unordered_map<int, label_t>>* fold_label_sum_ptr,
@@ -491,6 +509,21 @@ class CTRProvider {
     }
   }
 
+  inline void AddCountAndLabel(std::vector<std::vector<std::unordered_map<int, int>>>* count_map,
+    std::vector<std::vector<std::unordered_map<int, label_t>>>* label_map,
+    const int cat_value, const int count_value, const label_t label_value,
+    const std::vector<int>& fold_ids) {
+    for (int i = 0; i < num_ctr_partitions_; ++i) {
+      if (count_map->at(i).at(fold_ids[i]).count(cat_value) == 0) {
+        count_map->at(i).at(fold_ids[i])[cat_value] = count_value;
+        label_map->at(i).at(fold_ids[i])[cat_value] = label_value;
+      } else {
+        count_map->at(i).at(fold_ids[i])[cat_value] += count_value;
+        label_map->at(i).at(fold_ids[i])[cat_value] += label_value;
+      }
+    }
+  }
+
   // parameter configuration
   Config config_;
 
@@ -500,9 +533,9 @@ class CTRProvider {
   std::vector<int> categorical_features_;
 
   // maps training data index to fold index
-  std::vector<int> training_data_fold_id_;
+  std::vector<std::vector<int>> training_data_fold_id_;
   // prior used by per fold
-  std::vector<double> fold_prior_;
+  std::vector<std::vector<double>> fold_prior_;
   // weight of the prior in ctr calculation
   double prior_weight_;
   // record whether a feature is categorical in the original data
@@ -517,21 +550,21 @@ class CTRProvider {
   int num_threads_;
 
   // the accumulated count information for ctr
-  std::unordered_map<int, std::vector<std::unordered_map<int, int>>> count_info_;
+  std::unordered_map<int, std::vector<std::vector<std::unordered_map<int, int>>>> count_info_;
   // the accumulated label sum information for ctr
-  std::unordered_map<int, std::vector<std::unordered_map<int, label_t>>> label_info_;
+  std::unordered_map<int, std::vector<std::vector<std::unordered_map<int, label_t>>>> label_info_;
   // the accumulated count information for ctr per thread
-  std::vector<std::unordered_map<int, std::vector<std::unordered_map<int, int>>>> thread_count_info_;
+  std::vector<std::unordered_map<int, std::vector<std::vector<std::unordered_map<int, int>>>>> thread_count_info_;
   // the accumulated label sum information for ctr per thread
-  std::vector<std::unordered_map<int, std::vector<std::unordered_map<int, label_t>>>> thread_label_info_;
+  std::vector<std::unordered_map<int, std::vector<std::vector<std::unordered_map<int, label_t>>>>> thread_label_info_;
   // the accumulated label sum per fold
-  std::vector<label_t> fold_label_sum_;
+  std::vector<std::vector<label_t>> fold_label_sum_;
   // the accumulated label sum per thread per fold
-  std::vector<std::vector<label_t>> thread_fold_label_sum_;
+  std::vector<std::vector<std::vector<label_t>>> thread_fold_label_sum_;
   // the accumulated number of data per fold per thread
-  std::vector<std::vector<data_size_t>> thread_fold_num_data_;
+  std::vector<std::vector<std::vector<data_size_t>>> thread_fold_num_data_;
   // number of data per fold
-  std::vector<data_size_t> fold_num_data_;
+  std::vector<std::vector<data_size_t>> fold_num_data_;
   // categorical value converters
   std::vector<std::unique_ptr<CatConverter>> cat_converters_;
   // whether the old categorical handling method is used
@@ -552,6 +585,8 @@ class CTRProvider {
   std::vector<bool> tmp_is_feature_processed_;
   // mark whether the ctr statistics is accumulated from file
   bool accumulated_from_file_;
+  // number of partitions to calculate ctr and count
+  int num_ctr_partitions_;
 };
 
 class CTRParser : public Parser {

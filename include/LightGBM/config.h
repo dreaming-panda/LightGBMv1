@@ -1033,6 +1033,8 @@ struct Config {
   // desc = (sum_label + prior * prior_weight) / (count + prior_weight)
   double prior_weight = 1.0f;
 
+  int num_ctr_partitions = 4;
+
   #pragma endregion
 
   #pragma endregion
