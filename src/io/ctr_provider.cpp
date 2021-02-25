@@ -48,9 +48,9 @@ CTRProvider::CTRProvider(const std::string model_string) {
         label_info_[cat_fid][i][0][cat_value] = label_sum;
         count_info_[cat_fid][i][0][cat_value] = total_count;
       }
+      str_stream.clear();
+      CHECK_EQ(str_stream.get(), '@');
     }
-    str_stream.clear();
-    CHECK_EQ(str_stream.get(), '@');
   }
   std::sort(categorical_features_.begin(), categorical_features_.end());
   str_stream.clear();
@@ -267,11 +267,11 @@ std::string CTRProvider::DumpModelInfo() const {
       // only the information of the full training dataset is kept
       // information per fold is discarded
       for (int i = 0; i < num_ctr_partitions_; ++i) {
-        for (const auto& pair : label_info_.at(i).at(cat_fid).back()) {
-          str_buf << " " << pair.first << ":" << pair.second << ":" << count_info_.at(i).at(cat_fid).back().at(pair.first);
+        for (const auto& pair : label_info_.at(cat_fid).at(i).back()) {
+          str_buf << " " << pair.first << ":" << pair.second << ":" << count_info_.at(cat_fid).at(i).back().at(pair.first);
         }
+        str_buf << "@";
       }
-      str_buf << "@";
     }
     for (const auto& cat_converter : cat_converters_) {
       str_buf << cat_converter->DumpToString() << " ";
@@ -470,6 +470,7 @@ void CTRProvider::PrepareCTRStatVectors() {
   if (cat_converters_.size() > 0) {
     // prepare to accumulate ctr statistics
     fold_label_sum_.resize(num_ctr_partitions_);
+    fold_num_data_.resize(num_ctr_partitions_);
     for (int i = 0; i < num_ctr_partitions_; ++i) {
       fold_label_sum_[i].resize(config_.num_ctr_folds + 1, 0.0f);
       fold_num_data_[i].resize(config_.num_ctr_folds + 1, 0);
@@ -490,8 +491,12 @@ void CTRProvider::PrepareCTRStatVectors() {
     }
     for (const int fid : categorical_features_) {
       if (fid < num_original_features_) {
-        count_info_[fid].resize(config_.num_ctr_folds + 1);
-        label_info_[fid].resize(config_.num_ctr_folds + 1);
+        count_info_[fid].resize(num_ctr_partitions_);
+        label_info_[fid].resize(num_ctr_partitions_);
+        for (int i = 0; i < num_ctr_partitions_; ++i) {
+          count_info_[fid][i].resize(config_.num_ctr_folds + 1);
+          label_info_[fid][i].resize(config_.num_ctr_folds + 1);
+        }
         if (!accumulated_from_file_) {
           for (int thread_id = 0; thread_id < num_threads_; ++thread_id) {
             thread_count_info_[thread_id][fid].resize(num_ctr_partitions_);
@@ -1041,7 +1046,7 @@ void CTRProvider::AccumulateOneLineStat(const char* buffer, const size_t size, c
   training_data_fold_id_.emplace_back(num_ctr_partitions_);
   for (int i = 0; i < num_ctr_partitions_; ++i) {
     const int fold_id = tmp_fold_distribution_(tmp_mt_generator_);
-    training_data_fold_id_.back().emplace_back(fold_id);
+    training_data_fold_id_.back()[i] = fold_id;
   }
   ++num_data_;
   ProcessOneLine(tmp_oneline_features_, label, row_idx, &tmp_is_feature_processed_, training_data_fold_id_.back());

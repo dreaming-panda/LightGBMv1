@@ -303,7 +303,6 @@ class CTRProvider {
     const std::function<void(int convert_fid, int fid, double convert_value)>& write_func,
     const std::function<void(int fid)>& post_process_func) const;
 
-  template <bool IS_TRAIN>
   inline void GetCTRStatForOneCatValue(int fid, double fval, const std::vector<int>& fold_ids,
     std::vector<double>* out_label_sum, std::vector<double>* out_total_count,
     std::vector<double>* out_all_fold_total_count) const {
@@ -317,60 +316,89 @@ class CTRProvider {
     }
     const int int_fval = static_cast<int>(fval);
     for (int i = 0; i < num_ctr_partitions_; ++i) {
-      const auto& fold_label_info = IS_TRAIN ?
-        label_info_.at(fid)[i].at(fold_ids[i]) : label_info_.at(fid)[i].back();
-      const auto& fold_count_info = IS_TRAIN ?
-        count_info_.at(fid)[i].at(fold_ids[i]) : count_info_.at(fid)[i].back();
+      const auto& fold_label_info =
+        label_info_.at(fid)[i].at(fold_ids[i]);
+      const auto& fold_count_info =
+        count_info_.at(fid)[i].at(fold_ids[i]);
       if (fold_count_info.count(int_fval) > 0) {
         out_label_sum_ref[i] = fold_label_info.at(int_fval);
         out_total_count_ref[i] = fold_count_info.at(int_fval);
       }
-      if (IS_TRAIN) {
-        const auto& all_fold_count_info = count_info_.at(fid)[i].back();
-        if (all_fold_count_info.count(int_fval) > 0) {
-          out_all_fold_total_count_ref[i] = all_fold_count_info.at(int_fval);
-        }
-      } else {
-        out_all_fold_total_count_ref[i] = out_total_count_ref[i];
+      const auto& all_fold_count_info = count_info_.at(fid)[i].back();
+      if (all_fold_count_info.count(int_fval) > 0) {
+        out_all_fold_total_count_ref[i] = all_fold_count_info.at(int_fval);
       }
     }
+  }
+
+  inline void GetCTRStatForOneCatValue(int fid, double fval, double* out_label_sum,
+    double* out_total_count, double* out_all_fold_total_count) const {
+    auto& out_label_sum_ref = *out_label_sum;
+    auto& out_total_count_ref = *out_total_count;
+    auto& out_all_fold_total_count_ref = *out_all_fold_total_count;
+    out_label_sum_ref = 0.0f;
+    out_total_count_ref = 0.0f;
+    out_all_fold_total_count_ref = 0.0f;
+    const int int_fval = static_cast<int>(fval);
+    const auto& fold_label_info = label_info_.at(fid)[0].back();
+    const auto& fold_count_info = count_info_.at(fid)[0].back();
+    if (fold_count_info.count(int_fval) > 0) {
+      out_label_sum_ref = fold_label_info.at(int_fval);
+      out_total_count_ref = fold_count_info.at(int_fval);
+    }
+    out_all_fold_total_count_ref = out_total_count_ref;
   }
 
   template <bool IS_TRAIN>
   void IterateOverCatConvertersInner(int fid, double fval, const std::vector<int>& fold_ids,
     const std::function<void(int convert_fid, int fid, double convert_value)>& write_func,
     const std::function<void(int fid)>& post_process_func) const {
-    std::vector<double> label_sum(num_ctr_partitions_, 0.0f);
-    std::vector<double> total_count(num_ctr_partitions_, 0.0f);
-    std::vector<double> all_fold_total_count(num_ctr_partitions_, 0.0f);
-    GetCTRStatForOneCatValue<IS_TRAIN>(fid, fval, fold_ids, &label_sum, &total_count, &all_fold_total_count);
-    for (const auto& cat_converter : cat_converters_) {
-      double convert_value = 0.0f;
-      for (int i = 0; i < num_ctr_partitions_; ++i) {
-        convert_value += IS_TRAIN ?
-          cat_converter->CalcValue(label_sum[i], total_count[i], all_fold_total_count[i], fold_prior_[i][fold_ids[i]]) :
-          cat_converter->CalcValue(label_sum[i], total_count[i], all_fold_total_count[i]);
+    if (IS_TRAIN) {
+      std::vector<double> label_sum(num_ctr_partitions_, 0.0f);
+      std::vector<double> total_count(num_ctr_partitions_, 0.0f);
+      std::vector<double> all_fold_total_count(num_ctr_partitions_, 0.0f);
+      GetCTRStatForOneCatValue(fid, fval, fold_ids, &label_sum, &total_count, &all_fold_total_count);
+      for (const auto& cat_converter : cat_converters_) {
+        double convert_value = 0.0f;
+        for (int i = 0; i < num_ctr_partitions_; ++i) {
+          convert_value += 
+            cat_converter->CalcValue(label_sum[i], total_count[i], all_fold_total_count[i], fold_prior_[i][fold_ids[i]]);
+        }
+        convert_value /= num_ctr_partitions_;
+        const int convert_fid = cat_converter->GetConvertFid(fid);
+        write_func(convert_fid, fid, convert_value);
       }
-      const int convert_fid = cat_converter->GetConvertFid(fid);
-      write_func(convert_fid, fid, convert_value);
+      post_process_func(fid);
+    } else {
+      double label_sum = 0.0f, total_count = 0.0f, all_fold_total_count = 0.0f;
+      GetCTRStatForOneCatValue(fid, fval, &label_sum, &total_count, &all_fold_total_count);
+      for (const auto& cat_converter : cat_converters_) {
+        const double convert_value = cat_converter->CalcValue(label_sum, total_count, all_fold_total_count);
+        const int convert_fid = cat_converter->GetConvertFid(fid);
+        write_func(convert_fid, fid, convert_value);
+      }
+      post_process_func(fid);
     }
-    post_process_func(fid);
   }
 
   template <bool IS_TRAIN>
   double HandleOneCatConverter(int fid, double fval, const std::vector<int>& fold_ids,
     const CTRProvider::CatConverter* cat_converter) const {
-    std::vector<double> label_sum(num_ctr_partitions_, 0.0f);
-    std::vector<double> total_count(num_ctr_partitions_, 0.0f);
-    std::vector<double> all_fold_total_count(num_ctr_partitions_, 0.0f);
-    GetCTRStatForOneCatValue<IS_TRAIN>(fid, fval, fold_ids, &label_sum, &total_count, &all_fold_total_count);
-    double result = 0.0f;
-    for (int i = 0; i < num_ctr_partitions_; ++i) {
-      if (IS_TRAIN) {
-        result += cat_converter->CalcValue(label_sum[i], total_count[i], all_fold_total_count[i], fold_prior_[i][fold_ids[i]]);
-      } else {
-        result += cat_converter->CalcValue(label_sum[i], total_count[i], all_fold_total_count[i]);
+    if (IS_TRAIN) {
+      std::vector<double> label_sum(num_ctr_partitions_, 0.0f);
+      std::vector<double> total_count(num_ctr_partitions_, 0.0f);
+      std::vector<double> all_fold_total_count(num_ctr_partitions_, 0.0f);
+      GetCTRStatForOneCatValue(fid, fval, fold_ids, &label_sum, &total_count, &all_fold_total_count);
+      double result = 0.0f;
+      for (int i = 0; i < num_ctr_partitions_; ++i) {
+        result += cat_converter->CalcValue(label_sum[i], total_count[i], all_fold_total_count[i], fold_prior_[i][fold_ids[i]]);   
       }
+      result /= num_ctr_partitions_;
+      return result;
+    } else {
+      double label_sum = 0.0f, total_count = 0.0f, all_fold_total_count = 0.0f;
+      GetCTRStatForOneCatValue(fid, fval, &label_sum, &total_count, &all_fold_total_count);
+      return cat_converter->CalcValue(label_sum, total_count, all_fold_total_count);
     }
   }
 
