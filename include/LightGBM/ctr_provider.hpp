@@ -10,6 +10,8 @@
 #include <LightGBM/utils/text_reader.h>
 #include <LightGBM/utils/threading.h>
 #include <LightGBM/parser_base.h>
+#include <LightGBM/bin.h>
+#include <LightGBM/tree.h>
 
 #include <algorithm>
 #include <memory>
@@ -468,6 +470,8 @@ class CTRProvider {
 
   void AccumulateOneLineStat(const char* buffer, const size_t size, const data_size_t row_idx);
 
+  void CreateCatShadowFeatureSet(const std::vector<const BinMapper*>& feature_bin_mappers);
+
  private:
   void SetConfig(const Config* config);
 
@@ -615,6 +619,12 @@ class CTRProvider {
   bool accumulated_from_file_;
   // number of partitions to calculate ctr and count
   int num_ctr_partitions_;
+  // stores the shadow ctr feature with partition id's > 0
+  std::unique_ptr<CatShadowFeatureSet> cat_shadow_feature_set_ = nullptr;
+  // raw categorical values
+  std::vector<std::vector<int>> raw_cat_values_;
+  // caategorical feature index order
+  std::vector<int> cat_feature_order_;
 };
 
 class CTRParser : public Parser {
@@ -718,6 +728,39 @@ class CTR_CSC_RowIterator: public CSC_RowIterator {
 
   int cur_row_idx_ = -1;
   std::pair<int, double> cached_pair_ = std::make_pair(-1, 0.0f);
+};
+
+class CatShadowFeatureSet {
+ public:
+  CatShadowFeatureSet(const int num_ctr_partitions, const int num_data,
+    const std::vector<int>& categorical_features,
+    const std::vector<const BinMapper*>& cat_feature_bin_mappers);
+
+  void PushData(const int cat_feature_index, const double value,
+                const int partition_id, const data_size_t row_idx,
+                const int thread_id);
+
+  void FinishLoad();
+
+  BinIterator* GetShadowIterator(const int real_cat_feature_index, const int partition_id) const;
+
+  void InitBoostingInfo(const int num_classes);
+
+  void Boosting(const std::function<void(const double* pred_score,
+    score_t* gradients, score_t* hessians)>& boosting_func);
+
+  void AddPredictionToScore(const Tree* tree);
+
+ private:
+  std::vector<std::vector<std::unique_ptr<Bin>>> cat_feature_shadow_bins_;
+  std::unordered_map<int, size_t> cat_feature_map_;
+  const std::vector<const BinMapper*> cat_feature_bin_mappers_;
+  const int num_ctr_partitions_;
+  std::vector<std::vector<double>> partition_pred_scores_;
+  std::vector<std::vector<score_t>> partition_gradients_;
+  std::vector<std::vector<score_t>> partition_hessians_;
+  const int num_data_;
+  int num_classes_;
 };
 
 }  // namespace LightGBM

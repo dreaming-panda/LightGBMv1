@@ -79,6 +79,12 @@ CTRProvider::CTRProvider(Config* config,
   for (int32_t i = 0; i < nmat; ++i) {
     num_data_ += nrow[i];
   }
+  raw_cat_values_.resize(num_data_);
+  const size_t num_categorical_features = categorical_features_.size();
+  #pragma omp parallel for schedule(static) num_threads(num_threads_)
+  for (data_size_t i = 0; i < num_data_; ++i) {
+    raw_cat_values_[i].resize(num_categorical_features, 0);
+  }
   std::vector<std::mt19937> mt_generators;
   for (int thread_id = 0; thread_id < num_threads_; ++thread_id) {
     mt_generators.emplace_back(config_.seed + thread_id);
@@ -125,6 +131,11 @@ CTRProvider::CTRProvider(Config* config,
   num_original_features_ = ncol;
   ParseMetaInfo(nullptr, config);
   num_data_ = nrow;
+  const size_t num_categorical_features = categorical_features_.size();
+  #pragma omp parallel for schedule(static) num_threads(num_threads_)
+  for (data_size_t i = 0; i < num_data_; ++i) {
+    raw_cat_values_[i].resize(num_categorical_features, 0);
+  }
   training_data_fold_id_.resize(num_data_);
   #pragma omp parallel for schedule(static) num_threads(num_threads_)
   for (int i = 0; i < num_data_; ++i) {
@@ -174,6 +185,11 @@ CTRProvider::CTRProvider(Config* config,
   num_original_features_ = ncol;
   ParseMetaInfo(nullptr, config);
   num_data_ = nrow;
+  const size_t num_categorical_features = categorical_features_.size();
+  #pragma omp parallel for schedule(static) num_threads(num_threads_)
+  for (data_size_t i = 0; i < num_data_; ++i) {
+    raw_cat_values_[i].resize(num_categorical_features, 0);
+  }
   training_data_fold_id_.resize(num_data_);
   #pragma omp parallel for schedule(static) num_threads(num_threads_)
   for (int i = 0; i < num_data_; ++i) {
@@ -449,6 +465,10 @@ int CTRProvider::ParseMetaInfo(const char* filename, Config* config) {
         fid, num_original_features_);
     }
   }
+  cat_feature_order_.clear();
+  for (int i = 0; i < static_cast<int>(categorical_features_.size()); ++i) {
+    cat_feature_order_.push_back(i);
+  }
   std::sort(categorical_features_.begin(), categorical_features_.end());
   is_categorical_feature_.clear();
 
@@ -623,7 +643,7 @@ void CTRProvider::ProcessOneLine(const std::vector<std::pair<int, double>>& one_
 
 template <bool ACCUMULATE_FROM_FILE>
 void CTRProvider::ProcessOneLineInner(const std::vector<std::pair<int, double>>& one_line,
-  double label, int /*line_idx*/,
+  double label, int line_idx,
   std::vector<bool>* is_feature_processed_ptr,
   std::unordered_map<int, std::vector<std::vector<std::unordered_map<int, int>>>>* count_info_ptr,
   std::unordered_map<int, std::vector<std::vector<std::unordered_map<int, label_t>>>>* label_info_ptr,
@@ -641,6 +661,9 @@ void CTRProvider::ProcessOneLineInner(const std::vector<std::pair<int, double>>&
   for (int i = 0; i < num_ctr_partitions_; ++i) {
     ++num_data[i][fold_ids[i]];
   }
+  if (ACCUMULATE_FROM_FILE) {
+    raw_cat_values_.emplace_back(categorical_features_.size(), 0);
+  }
   for (const auto& pair : one_line) {
     const int fid = pair.first;
     if (ACCUMULATE_FROM_FILE) {
@@ -651,6 +674,7 @@ void CTRProvider::ProcessOneLineInner(const std::vector<std::pair<int, double>>&
     if (is_categorical_feature_[fid]) {
       is_feature_processed[fid] = true;
       const int value = static_cast<int>(pair.second);
+      raw_cat_values_[line_idx][cat_feature_order_[pair.first]] = value;
       AddCountAndLabel(&count_info[fid], &label_info[fid], value, 1, static_cast<label_t>(label), fold_ids);
     }
   }
@@ -1018,6 +1042,10 @@ void CTRProvider::InitFromParser(Config* config_from_loader, Parser* parser, con
   for (const int fid : categorical_features_from_loader_ref) {
     categorical_features_.push_back(fid);
   }
+  cat_feature_order_.clear();
+  for (int i = 0; i < static_cast<int>(categorical_features_.size()); ++i) {
+    cat_feature_order_.push_back(i);
+  }
   std::sort(categorical_features_.begin(), categorical_features_.end());
   PrepareCTRStatVectors();
   tmp_parser_.reset(parser);
@@ -1066,6 +1094,121 @@ void CTRProvider::ExpandNumFeatureWhileAccumulate(const int new_largest_fid) {
       }
     }
   }
+}
+
+CatShadowFeatureSet::CatShadowFeatureSet(const int num_ctr_partitions, const int num_data,
+                                         const std::vector<int>& categorical_features,
+                                         const std::vector<const BinMapper*>& cat_feature_bin_mappers):
+cat_feature_bin_mappers_(cat_feature_bin_mappers),
+num_ctr_partitions_(num_ctr_partitions), num_data_(num_data) {
+  cat_feature_shadow_bins_.clear();
+  cat_feature_map_.clear();
+  for (size_t i = 0; i < categorical_features.size(); ++i) {
+    const int cat_feature_index = categorical_features[i];
+    cat_feature_map_[cat_feature_index] = i;
+    const BinMapper* bin_mapper = cat_feature_bin_mappers[i];
+    const int offset = bin_mapper->GetMostFreqBin() == 0 ? 0 : 1;
+    cat_feature_shadow_bins_.emplace_back(num_ctr_partitions - 1, nullptr);
+    if (bin_mapper->sparse_rate() >= kSparseThreshold) {
+      for (int j = 0; j < num_ctr_partitions - 1; ++j) {
+        cat_feature_shadow_bins_[i][j].reset(
+          Bin::CreateSparseBin(num_data, bin_mapper->num_bin() + offset));
+      }
+    } else {
+      for (int j = 0; j < num_ctr_partitions - 1; ++j) {
+        cat_feature_shadow_bins_[i][j].reset(
+          Bin::CreateDenseBin(num_data, bin_mapper->num_bin() + offset));
+      }
+    }
+  }
+}
+
+void CatShadowFeatureSet::PushData(const int cat_feature_index, const double value,
+                                   const int partition_id, const data_size_t row_idx,
+                                   const int thread_id) {
+  const size_t cat_idx = cat_feature_map_[cat_feature_index];
+  const BinMapper* bin_mapper = cat_feature_bin_mappers_[cat_idx];
+  uint32_t bin = bin_mapper->ValueToBin(value);
+  if (bin == bin_mapper->GetMostFreqBin()) {
+    return;
+  }
+  if (bin_mapper->GetMostFreqBin() > 0) {
+    bin += 1;
+  }
+  cat_feature_shadow_bins_[cat_idx][partition_id - 1]->Push(thread_id, row_idx, bin);
+}
+
+void CatShadowFeatureSet::FinishLoad() {
+  for (size_t i = 0; i < cat_feature_bin_mappers_.size(); ++i) {
+    for (int j = 0; j < num_ctr_partitions_ - 1; ++j) {
+      cat_feature_shadow_bins_[i][j]->FinishLoad();
+    }
+  }
+}
+
+BinIterator* CatShadowFeatureSet::GetShadowIterator(const int real_cat_feature_index,
+                                                    const int partition_id) const {
+  size_t cat_idx = cat_feature_map_.at(real_cat_feature_index);
+  const BinMapper* bin_mapper = cat_feature_bin_mappers_[cat_idx];
+  const uint32_t min_bin = 1;
+  const int num_bin = bin_mapper->num_bin();
+  const uint32_t max_bin = bin_mapper->GetMostFreqBin() == 0 ?
+    static_cast<uint32_t>(num_bin - 1) : static_cast<uint32_t>(num_bin);
+  const uint32_t most_freq_bin = bin_mapper->GetMostFreqBin();
+  return cat_feature_shadow_bins_[cat_idx][partition_id - 1]->GetIterator(
+    min_bin, max_bin, most_freq_bin);
+}
+
+// TODO(shiyu1994): add init score
+void CatShadowFeatureSet::InitBoostingInfo(const int num_classes) {
+  num_classes_ = num_classes;
+  partition_gradients_.resize(num_ctr_partitions_ - 1);
+  partition_hessians_.resize(num_ctr_partitions_ - 1);
+  partition_pred_scores_.resize(num_ctr_partitions_ - 1);
+  const int num_threads = OMP_NUM_THREADS();
+  const int total_size = num_data_ * num_classes_;
+  #pragma omp parallel for schedule(static) num_threads(num_threads)
+  for (int i = 0; i < num_ctr_partitions_ - 1; ++i) {
+    partition_gradients_[i].resize(total_size, 0.0f);
+    partition_hessians_[i].resize(total_size, 0.0f);
+    partition_pred_scores_[i].resize(total_size, 0.0f);
+  }
+}
+
+void CatShadowFeatureSet::Boosting(const std::function<void(const double* pred_score,
+    score_t* gradients, score_t* hessians)>& boosting_func) {
+  for (int i = 0; i < num_ctr_partitions_ - 1; ++i) {
+    boosting_func(partition_pred_scores_[i].data(), partition_gradients_[i].data(), partition_hessians_[i].data());
+  }
+}
+
+
+
+void CTRProvider::CreateCatShadowFeatureSet(
+  const std::vector<const BinMapper*>& feature_bin_mappers) {
+  std::vector<const BinMapper*> cat_bin_mappers;
+  for (int cat_feature_index : categorical_features_) {
+    for (auto& cat_converter : cat_converters_) {
+      cat_bin_mappers.push_back(feature_bin_mappers[cat_converter->GetConvertFid(cat_feature_index)]);
+    }
+  }
+  cat_shadow_feature_set_.reset(new CatShadowFeatureSet(
+    num_ctr_partitions_, num_data_, categorical_features_, cat_bin_mappers));
+  Threading::For<data_size_t>(
+    0, num_data_, 1024, [this] (int thread_id, data_size_t start, data_size_t end) {
+      for (int i = start; i < end; ++i) {
+        for (int j = 0; j < static_cast<int>(categorical_features_.size()); ++i) {
+          const int value = raw_cat_values_[i][j];
+          for (int k = 1; k < num_ctr_partitions_; ++k) {
+            const int fold_id = training_data_fold_id_[i][k];
+            cat_shadow_feature_set_->PushData(j, value, k, i, thread_id);
+          }
+        }
+      }
+  });
+  cat_shadow_feature_set_->FinishProcess();
+  raw_cat_values_.clear();
+  raw_cat_values_.shrink_to_fit();
 }
 
 }  // namespace LightGBM
