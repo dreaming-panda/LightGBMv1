@@ -5,6 +5,7 @@
 #include <LightGBM/tree_learner.h>
 
 #include "cuda_tree_learner.h"
+#include "feature_histogram.hpp"
 #include "gpu_tree_learner.h"
 #include "linear_tree_learner.h"
 #include "parallel_tree_learner.h"
@@ -50,6 +51,24 @@ TreeLearner* TreeLearner::CreateTreeLearner(const std::string& learner_type, con
     }
   }
   return nullptr;
+}
+
+template <>
+double TreeLearner::CalcLeafOutputValue<true>(const Config* config, double sum_gradients,
+                                double sum_hessians) {
+  return FeatureHistogram::CalculateSplittedLeafOutput<true, false, false>(
+    sum_gradients, sum_hessians, config->lambda_l1, config->lambda_l2,
+    config->max_delta_step, config->path_smooth, 0, 0.0f
+  );
+}
+
+template <>
+double TreeLearner::CalcLeafOutputValue<false>(const Config* config, double sum_gradients,
+                                double sum_hessians) {
+  return FeatureHistogram::CalculateSplittedLeafOutput<false, false, false>(
+    sum_gradients, sum_hessians, config->lambda_l1, config->lambda_l2,
+    config->max_delta_step, config->path_smooth, 0, 0.0f
+  );
 }
 
 }  // namespace LightGBM

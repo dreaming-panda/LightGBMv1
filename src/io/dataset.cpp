@@ -1472,4 +1472,17 @@ void Dataset::AddFeaturesFrom(Dataset* other) {
   }
 }
 
+CatShadowFeatureSet* Dataset::GetCatShadowFeatureSet(const int num_classes) const {
+  std::vector<const BinMapper*> feature_bin_mappers;
+  for (int feature_index = 0; feature_index < num_total_features_; ++feature_index) {
+    const int inner_feature_index = InnerFeatureIndex(feature_index);
+    if (inner_feature_index >= 0) {
+      feature_bin_mappers.push_back(FeatureBinMapper(inner_feature_index));
+    } else {
+      feature_bin_mappers.push_back(nullptr);
+    }
+  }
+  return ctr_provider_->CreateCatShadowFeatureSet(num_classes, feature_bin_mappers);
+}
+
 }  // namespace LightGBM

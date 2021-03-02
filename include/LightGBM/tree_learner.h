@@ -104,6 +104,10 @@ class TreeLearner {
   static TreeLearner* CreateTreeLearner(const std::string& learner_type,
                                         const std::string& device_type,
                                         const Config* config);
+
+  template <bool USE_L1>
+  static double CalcLeafOutputValue(const Config* config, double sum_gradients,
+                                    double sum_hessians);
 };
 
 }  // namespace LightGBM

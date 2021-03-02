@@ -110,6 +110,24 @@ int Tree::SplitCategorical(int leaf, int feature, int real_feature, const uint32
     score[(data_idx)] += static_cast<double>(leaf_value_[~node]);             \
   }\
 
+#define PredictionFunWithIters(niter, iters, start_pos, decision_fun, iter_idx, \
+                      data_idx, gradient, hessian)                            \
+  for (int i = 0; i < (niter); ++i) {                                         \
+    if (iter[i] != nullptr) {                                                 \
+      iter[i]->Reset((start_pos));                                            \
+    }                                                                         \
+  }                                                                           \
+  for (data_size_t i = start; i < end; ++i) {                                 \
+    int node = 0;                                                             \
+    while (node >= 0) {                                                       \
+      node = decision_fun(iter[(iter_idx)]->Get((data_idx)), node,            \
+                          default_bins[node], max_bins[node]);                \
+    }                                                                         \
+    pred_leaf_index[data_idx] = ~node;                                        \
+    sum_gradients[~node] += (gradient);                                       \
+    sum_hessians[~node] += (hessian);                                         \
+  }\
+
 
 #define PredictionFunLinear(niter, fidx_in_iter, start_pos, decision_fun,     \
                             iter_idx, data_idx)                               \
@@ -307,7 +325,73 @@ void Tree::AddPredictionToScore(const Dataset* data,
   }
 }
 
+void Tree::AddPredictionToScore(const std::vector<int>& pred_leaf_index,
+                            data_size_t num_data, double* score,
+                            const std::vector<double>& leaf_pred_value) const {
+  Threading::For<data_size_t>(0, num_data, 1024, [score, &leaf_pred_value, &pred_leaf_index]
+    (int, data_size_t start, data_size_t end) {
+    for (int i = start; i < end; ++i) {
+      score[i] += leaf_pred_value[pred_leaf_index[i]];
+    }
+  });
+}
+
+void Tree::AccumulateGradients(std::vector<std::unique_ptr<BinIterator>>& iter,
+                            const std::vector<const BinMapper*>& bin_mappers,
+                            data_size_t num_data, std::vector<int>& pred_leaf_index,
+                            const score_t* gradients, const score_t* hessians,
+                            std::vector<double>& leaf_sum_gradients,
+                            std::vector<double>& leaf_sum_hessians) const {
+  std::vector<uint32_t> default_bins(num_leaves_ - 1), max_bins(num_leaves_ - 1);
+  const int num_threads = OMP_NUM_THREADS();
+  std::vector<std::vector<double>> thread_leaf_sum_gradients(num_threads);
+  std::vector<std::vector<double>> thread_leaf_sum_hessians(num_threads);
+  for (int thread_id = 0; thread_id < num_threads; ++thread_id) {
+    thread_leaf_sum_gradients[thread_id].resize(num_leaves_, 0.0f);
+    thread_leaf_sum_hessians[thread_id].resize(num_leaves_, 0.0f);
+  }
+  for (int node = 0; node < num_leaves_ - 1; ++node) {
+    const int split_feature_index = split_feature_[node];
+    const BinMapper* bin_mapper = bin_mappers[split_feature_index];
+    // since feature is used in tree, bin_mapper must not be nullptr
+    CHECK_NE(bin_mapper, nullptr);
+    const uint32_t most_freq_bin = bin_mapper->GetMostFreqBin();
+    default_bins[node] = most_freq_bin;
+    max_bins[node] = static_cast<uint32_t>(bin_mapper->num_bin() - static_cast<int>(most_freq_bin == 0));
+  }
+
+  Threading::For<data_size_t>(0, num_data, 512,
+    [this, &default_bins, &pred_leaf_index, &max_bins, &iter, &leaf_sum_gradients, &leaf_sum_hessians,
+      &thread_leaf_sum_gradients, &thread_leaf_sum_hessians, gradients, hessians]
+    (int thread_id, data_size_t start, data_size_t end) {
+      std::vector<double>& sum_gradients = thread_leaf_sum_gradients[thread_id];
+      std::vector<double>& sum_hessians = thread_leaf_sum_hessians[thread_id];
+      PredictionFunWithIters(static_cast<int>(iter.size()), iter, start,
+        DecisionInner, split_feature_[node], i, gradients[i], hessians[i]);
+  });
+
+  for (int i = 0; i < num_leaves_; ++i) {
+    leaf_sum_gradients[i] = 0.0f;
+    leaf_sum_hessians[i] = 0.0f;
+    for (int thread_id = 0; thread_id < num_threads; ++thread_id) {
+      leaf_sum_gradients[i] += thread_leaf_sum_gradients[thread_id][i];
+      leaf_sum_hessians[i] += thread_leaf_sum_hessians[thread_id][i];
+    }
+  }
+}
+
+void Tree::UpdateForCTREnsemble(const std::vector<std::vector<double>>& leaf_preds_from_other_partitions) {
+  const int num_extra_partitions = static_cast<int>(leaf_preds_from_other_partitions.size());
+  for (int leaf_index = 0; leaf_index < num_leaves_; ++leaf_index) {
+    for (int i = 0; i < num_extra_partitions; ++i) {
+      leaf_value_[leaf_index] += leaf_preds_from_other_partitions[i][leaf_index];
+    }
+    leaf_value_[leaf_index] /= (num_extra_partitions + 1);
+  }
+}
+
 #undef PredictionFun
+#undef PredictionFunWithIters
 #undef PredictionFunLinear
 
 double Tree::GetUpperBoundValue() const {

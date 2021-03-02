@@ -439,6 +439,20 @@ class GBDT : public GBDTBase {
   virtual void UpdateScore(const Tree* tree, const int cur_tree_id);
 
   /*!
+  * \brief updating score after tree was trained
+  * \param tree Trained tree of this iteration
+  * \param cur_tree_id Current tree for multiclass training
+  */
+  virtual void UpdateTrainScore(const Tree* tree, const int cur_tree_id);
+
+  /*!
+  * \brief updating score after tree was trained
+  * \param tree Trained tree of this iteration
+  * \param cur_tree_id Current tree for multiclass training
+  */
+  virtual void UpdateValidScore(const Tree* tree, const int cur_tree_id);
+
+  /*!
   * \brief eval results for one metric
 
   */
@@ -535,7 +549,8 @@ class GBDT : public GBDTBase {
   std::vector<Random> bagging_rands_;
   ParallelPartitionRunner<data_size_t, false> bagging_runner_;
   Json forced_splits_json_;
-  std::unique_ptr<const CTRProvider> ctr_provider_;
+  std::unique_ptr<const CTRProvider> ctr_provider_ = nullptr;
+  std::unique_ptr<CatShadowFeatureSet> cat_shadow_feature_set_ = nullptr;
   bool linear_tree_;
 };
 

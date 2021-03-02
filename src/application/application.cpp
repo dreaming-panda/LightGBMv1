@@ -111,10 +111,10 @@ void Application::LoadData() {
   if (config_.is_data_based_parallel) {
     // load data for parallel training
     train_data_.reset(dataset_loader.LoadFromFile(config_.data.c_str(),
-                                                  Network::rank(), Network::num_machines(), ctr_provider.get()));
+                                                  Network::rank(), Network::num_machines(), ctr_provider.release()));
   } else {
     // load data for single machine
-    train_data_.reset(dataset_loader.LoadFromFile(config_.data.c_str(), 0, 1, ctr_provider.get()));
+    train_data_.reset(dataset_loader.LoadFromFile(config_.data.c_str(), 0, 1, ctr_provider.release()));
   }
   // need save binary file
   if (config_.save_binary) {
@@ -237,7 +237,7 @@ void Application::Predict() {
     if (!config_.cat_converters.empty()) {
       ctr_provider.reset(CTRProvider::CreateCTRProvider(&config_));
     }
-    train_data_.reset(dataset_loader.LoadFromFile(config_.data.c_str(), 0, 1, ctr_provider.get()));
+    train_data_.reset(dataset_loader.LoadFromFile(config_.data.c_str(), 0, 1, ctr_provider.release()));
     train_metric_.clear();
     objective_fun_.reset(ObjectiveFunction::CreateObjectiveFunction(config_.objective,
                                                                     config_));

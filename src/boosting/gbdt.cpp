@@ -67,6 +67,16 @@ void GBDT::Init(const Config* config, const Dataset* train_data, const Objective
 
   if (train_data_->ctr_provider() != nullptr) {
     ctr_provider_.reset(CTRProvider::RecoverFromModelString(train_data_->ctr_provider()->DumpModelInfo()));
+    std::vector<const BinMapper*> bin_mappers;
+    for (int feature_index = 0; feature_index < train_data_->num_total_features(); ++feature_index) {
+      const int inner_feature_index = train_data_->InnerFeatureIndex(feature_index);
+      if (inner_feature_index >= 0) {
+        bin_mappers.push_back(train_data_->FeatureBinMapper(inner_feature_index));
+      } else {
+        bin_mappers.push_back(nullptr);
+      }
+    }
+    cat_shadow_feature_set_.reset(train_data_->ctr_provider()->CreateCatShadowFeatureSet(num_class_, bin_mappers));
   }
 
   if (config_->device_type == std::string("cuda")) {
@@ -180,6 +190,11 @@ void GBDT::Boosting() {
   int64_t num_score = 0;
   objective_function_->
     GetGradients(GetTrainingScore(&num_score), gradients_.data(), hessians_.data());
+  if (cat_shadow_feature_set_ != nullptr) {
+    cat_shadow_feature_set_->Boosting([this] (const double* pred_scores, score_t* gradients, score_t* hessians) {
+      objective_function_->GetGradients(pred_scores, gradients, hessians);
+    });
+  }
 }
 
 data_size_t GBDT::BaggingHelper(data_size_t start, data_size_t cnt, data_size_t* buffer) {
@@ -358,6 +373,9 @@ double GBDT::BoostFromAverage(int class_id, bool update_scorer) {
             score_updater->AddScore(init_score, class_id);
           }
         }
+        if (cat_shadow_feature_set_ != nullptr) {
+          cat_shadow_feature_set_->AddInitScore(class_id, init_score);
+        }
         Log::Info("Start training from score %lf", init_score);
         return init_score;
       }
@@ -389,9 +407,11 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
   for (int cur_tree_id = 0; cur_tree_id < num_tree_per_iteration_; ++cur_tree_id) {
     const size_t offset = static_cast<size_t>(cur_tree_id) * num_data_;
     std::unique_ptr<Tree> new_tree(new Tree(2, false, false));
+    auto grad = gradients;
+    auto hess = hessians;
     if (class_need_train_[cur_tree_id] && train_data_->num_features() > 0) {
-      auto grad = gradients + offset;
-      auto hess = hessians + offset;
+      grad = gradients + offset;
+      hess = hessians + offset;
       // need to copy gradients for bagging subset.
       if (is_use_subset_ && bag_data_cnt_ < num_data_) {
         for (int i = 0; i < bag_data_cnt_; ++i) {
@@ -414,7 +434,43 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
       // shrinkage by learning rate
       new_tree->Shrinkage(shrinkage_rate_);
       // update score
-      UpdateScore(new_tree.get(), cur_tree_id);
+      UpdateTrainScore(new_tree.get(), cur_tree_id);
+      if (cat_shadow_feature_set_ != nullptr) {
+        std::vector<const BinMapper*> bin_mappers;
+        std::vector<std::unique_ptr<BinIterator>> bin_iterators;
+        for (int i = 0; i < train_data_->num_total_features(); ++i) {
+          const int inner_feature_index = train_data_->InnerFeatureIndex(i);
+          if (inner_feature_index >= 0) {
+            bin_mappers.push_back(train_data_->FeatureBinMapper(inner_feature_index));
+            bin_iterators.emplace_back(train_data_->FeatureIterator(inner_feature_index));
+          } else {
+            bin_mappers.push_back(nullptr);
+            bin_iterators.push_back(nullptr);
+          }
+        }
+        cat_shadow_feature_set_->AddPredictionToScore(
+          [&new_tree] (std::vector<std::unique_ptr<BinIterator>>& iters,
+                            const std::vector<const BinMapper*>& bin_mappers,
+                            data_size_t num_data, std::vector<int>& pred_leaf_index,
+                            const score_t* gradients, const score_t* hessians,
+                            std::vector<double>& leaf_sum_gradients,
+                            std::vector<double>& leaf_sum_hessians) { new_tree->AccumulateGradients(
+              iters, bin_mappers, num_data, pred_leaf_index, gradients, hessians, leaf_sum_gradients, leaf_sum_hessians); },
+
+          [&new_tree] (const std::vector<int>& pred_leaf_index,
+                            data_size_t num_data, double* score,
+                            const std::vector<double>& leaf_pred_value) {
+                              new_tree->AddPredictionToScore(pred_leaf_index, num_data, score, leaf_pred_value);
+                            },
+
+          [&new_tree] (const std::vector<std::vector<double>>& leaf_preds_from_other_partitions) {
+                        new_tree->UpdateForCTREnsemble(leaf_preds_from_other_partitions); },
+
+          new_tree->num_leaves(),
+
+          train_data_->num_total_features(), bin_iterators, bin_mappers, grad, hess, shrinkage_rate_);
+        UpdateValidScore(new_tree.get(), cur_tree_id);
+      }
       if (std::fabs(init_scores[cur_tree_id]) > kEpsilon) {
         new_tree->AddBias(init_scores[cur_tree_id]);
       }
@@ -508,6 +564,30 @@ void GBDT::UpdateScore(const Tree* tree, const int cur_tree_id) {
   }
 
 
+  // update validation score
+  for (auto& score_updater : valid_score_updater_) {
+    score_updater->AddScore(tree, cur_tree_id);
+  }
+}
+
+void GBDT::UpdateTrainScore(const Tree* tree, const int cur_tree_id) {
+  Common::FunctionTimer fun_timer("GBDT::UpdateScore", global_timer);
+  // update training score
+  if (!is_use_subset_) {
+    train_score_updater_->AddScore(tree_learner_.get(), tree, cur_tree_id);
+
+    // we need to predict out-of-bag scores of data for boosting
+    if (num_data_ - bag_data_cnt_ > 0) {
+      train_score_updater_->AddScore(tree, bag_data_indices_.data() + bag_data_cnt_, num_data_ - bag_data_cnt_, cur_tree_id);
+    }
+
+  } else {
+    train_score_updater_->AddScore(tree, cur_tree_id);
+  }
+}
+
+void GBDT::UpdateValidScore(const Tree* tree, const int cur_tree_id) {
+  Common::FunctionTimer fun_timer("GBDT::UpdateScore", global_timer);
   // update validation score
   for (auto& score_updater : valid_score_updater_) {
     score_updater->AddScore(tree, cur_tree_id);

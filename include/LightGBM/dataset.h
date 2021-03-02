@@ -641,6 +641,8 @@ class Dataset {
     return ctr_provider_.get();
   }
 
+  CatShadowFeatureSet* GetCatShadowFeatureSet(const int num_classes) const;
+
   /*! \brief Get has_raw_ */
   inline bool has_raw() const { return has_raw_; }
 

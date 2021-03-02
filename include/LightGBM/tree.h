@@ -116,6 +116,26 @@ class Tree {
                             data_size_t num_data, double* score) const;
 
   /*!
+  * \brief Adding prediction value of this tree model to scores with provided iterators
+  * \param data The dataset
+  * \param used_data_indices Indices of used data
+  * \param num_data Number of total data
+  * \param score Will add prediction to score
+  */
+  void AddPredictionToScore(const std::vector<int>& pred_leaf_index,
+                            data_size_t num_data, double* score,
+                            const std::vector<double>& leaf_pred_value) const;
+
+  void AccumulateGradients(std::vector<std::unique_ptr<BinIterator>>& iters,
+                            const std::vector<const BinMapper*>& bin_mappers,
+                            data_size_t num_data, std::vector<int>& pred_leaf_index,
+                            const score_t* gradients, const score_t* hessians,
+                            std::vector<double>& leaf_sum_gradients,
+                            std::vector<double>& leaf_sum_hessians) const;
+
+  void UpdateForCTREnsemble(const std::vector<std::vector<double>>& leaf_preds_from_other_partitions);
+
+  /*!
   * \brief Get upper bound leaf value of this tree model
   */
   double GetUpperBoundValue() const;

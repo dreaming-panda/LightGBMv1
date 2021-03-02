@@ -254,10 +254,8 @@ Dataset* DatasetLoader::LoadFromFile(const char* filename, int rank, int num_mac
       if (ctr_provider != nullptr) {
         ctr_provider->InitFromParser(&config_, parser.release(), num_machines, &categorical_features_);
       }
-      Log::Warning("step 0");
       sample_data = SampleTextDataFromFile(filename, dataset->metadata_, rank, num_machines,
         &num_global_data, &used_data_indices, &sampled_indices, ctr_provider);
-      Log::Warning("step 1");
       if (ctr_provider != nullptr) {
         Parser* parser_ptr = ctr_provider->FinishProcess(num_machines, &config_);
         if (ctr_provider->GetNumCatConverters() == 0) {
@@ -267,34 +265,27 @@ Dataset* DatasetLoader::LoadFromFile(const char* filename, int rank, int num_mac
           parser.reset(new CTRParser(parser_ptr, ctr_provider, false));
         }
       }
-      Log::Warning("step 2");
       if (used_data_indices.size() > 0) {
         dataset->num_data_ = static_cast<data_size_t>(used_data_indices.size());
       } else {
         dataset->num_data_ = num_global_data;
       }
-      Log::Warning("step 3");
       CheckSampleSize(sample_data.size(),
                       static_cast<size_t>(dataset->num_data_));
-      Log::Warning("step 4");
       // construct feature bin mappers
       ConstructBinMappersFromTextData(rank, num_machines, sample_data, parser.get(), dataset.get(), sampled_indices);
-      Log::Warning("step 5");
       if (dataset->has_raw()) {
         dataset->ResizeRaw(dataset->num_data_);
       }
-      Log::Warning("step 6");
       // initialize label
       dataset->metadata_.Init(dataset->num_data_, weight_idx_, group_idx_);
       Log::Debug("Making second pass...");
       // extract features
       ExtractFeaturesFromFile(filename, parser.get(), used_data_indices, dataset.get());
-      Log::Warning("step 7");
     }
     if (ctr_provider != nullptr) {
-      dataset->SetCTRProvider(CTRProvider::RecoverFromModelString(ctr_provider->DumpModelInfo()));
+      dataset->SetCTRProvider(ctr_provider);
     }
-    Log::Warning("step 7.5");
   } else {
     // load data from binary file
     is_load_from_binary = true;
@@ -303,7 +294,6 @@ Dataset* DatasetLoader::LoadFromFile(const char* filename, int rank, int num_mac
   }
   // check meta data
   dataset->metadata_.CheckOrPartition(num_global_data, used_data_indices);
-  Log::Warning("step 8");
   // need to check training data
 
   CheckDataset(dataset.get(), is_load_from_binary);

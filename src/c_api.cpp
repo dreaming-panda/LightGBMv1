@@ -911,9 +911,9 @@ int LGBM_DatasetCreateFromFile(const char* filename,
 
   if (reference == nullptr) {
     if (Network::num_machines() == 1) {
-      *out = loader.LoadFromFile(filename, ctr_provider.get());
+      *out = loader.LoadFromFile(filename, ctr_provider.release());
     } else {
-      *out = loader.LoadFromFile(filename, Network::rank(), Network::num_machines(), ctr_provider.get());
+      *out = loader.LoadFromFile(filename, Network::rank(), Network::num_machines(), ctr_provider.release());
     }
   } else {
     *out = loader.LoadFromFileAlignWithOtherDataset(filename,

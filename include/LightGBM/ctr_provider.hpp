@@ -11,7 +11,6 @@
 #include <LightGBM/utils/threading.h>
 #include <LightGBM/parser_base.h>
 #include <LightGBM/bin.h>
-#include <LightGBM/tree.h>
 
 #include <algorithm>
 #include <memory>
@@ -23,6 +22,61 @@
 #include <vector>
 
 namespace LightGBM {
+
+class CatShadowFeatureSet {
+ public:
+  CatShadowFeatureSet(const Config& config,
+    const int num_ctr_partitions, const int num_data,
+    const int num_classes, const std::vector<int>& ctr_features,
+    const std::vector<const BinMapper*>& ctr_feature_bin_mappers);
+
+  void PushData(const int ctr_feature_index, const double value,
+                const int partition_id, const data_size_t row_idx,
+                const int thread_id);
+
+  void FinishLoad();
+
+  void Boosting(const std::function<void(const double* pred_score,
+    score_t* gradients, score_t* hessians)>& boosting_func);
+
+  void AddPredictionToScore(
+    const std::function<void(std::vector<std::unique_ptr<BinIterator>>& iters,
+    const std::vector<const BinMapper*>& bin_mappers,
+    data_size_t num_data, std::vector<int>& pred_leaf_index,
+    const score_t* gradients, const score_t* hessians,
+    std::vector<double>& leaf_sum_gradients,
+    std::vector<double>& leaf_sum_hessians)>& accumulate_gradient_func,
+
+    const std::function<void(const std::vector<int>& pred_leaf_index,
+                            data_size_t num_data, double* score,
+                            const std::vector<double>& leaf_pred_value)>& add_score_func,
+
+    const std::function<void(const std::vector<std::vector<double>>& leaf_preds_from_other_partitions)>& update_ctr_ensemble_func,
+
+    const int num_leaves,
+
+    const int num_features,
+    std::vector<std::unique_ptr<BinIterator>>& feature_iterators,
+    const std::vector<const BinMapper*>& feature_bin_mappers,
+    const score_t* gradients, const score_t* hessians,
+    const double shrinkage_rate);
+
+  void AddInitScore(const int class_id, const double init_score);
+
+ private:
+  const Config& config_;
+  std::vector<std::vector<std::unique_ptr<Bin>>> ctr_feature_shadow_bins_;
+  std::vector<int> ctr_features_;
+  std::unordered_map<int, size_t> ctr_feature_map_;
+  const std::vector<const BinMapper*> ctr_feature_bin_mappers_;
+  const int num_ctr_partitions_;
+  std::vector<std::vector<double>> partition_pred_scores_;
+  std::vector<std::vector<score_t>> partition_gradients_;
+  std::vector<std::vector<score_t>> partition_hessians_;
+  const int num_data_;
+  int num_classes_;
+  std::vector<int> pred_leaf_index_;
+};
 
 // transform categorical features to ctr values before the bin construction process
 class CTRProvider {
@@ -299,7 +353,7 @@ class CTRProvider {
 
   void IterateOverCatConverters(int fid, double fval, int line_idx,
     const std::function<void(int convert_fid, int fid, double convert_value)>& write_func,
-    const std::function<void(int fid)>& post_process_func) const;
+    const std::function<void(int fid)>& post_process_func, const int partition_id) const;
 
   void IterateOverCatConverters(int fid, double fval,
     const std::function<void(int convert_fid, int fid, double convert_value)>& write_func,
@@ -352,21 +406,15 @@ class CTRProvider {
   }
 
   template <bool IS_TRAIN>
-  void IterateOverCatConvertersInner(int fid, double fval, const std::vector<int>& fold_ids,
+  void IterateOverCatConvertersInner(int fid, double fval, const int fold_id,
     const std::function<void(int convert_fid, int fid, double convert_value)>& write_func,
     const std::function<void(int fid)>& post_process_func) const {
     if (IS_TRAIN) {
-      std::vector<double> label_sum(num_ctr_partitions_, 0.0f);
-      std::vector<double> total_count(num_ctr_partitions_, 0.0f);
-      std::vector<double> all_fold_total_count(num_ctr_partitions_, 0.0f);
-      GetCTRStatForOneCatValue(fid, fval, fold_ids, &label_sum, &total_count, &all_fold_total_count);
+      double label_sum = 0.0f, total_count = 0.0f, all_fold_total_count = 0.0f;
+      GetCTRStatForOneCatValue(fid, fval, &label_sum, &total_count, &all_fold_total_count);
       for (const auto& cat_converter : cat_converters_) {
-        double convert_value = 0.0f;
-        for (int i = 0; i < num_ctr_partitions_; ++i) {
-          convert_value += 
-            cat_converter->CalcValue(label_sum[i], total_count[i], all_fold_total_count[i], fold_prior_[i][fold_ids[i]]);
-        }
-        convert_value /= num_ctr_partitions_;
+        const double convert_value = cat_converter->CalcValue(label_sum, total_count,
+          all_fold_total_count, fold_prior_[0][fold_id]);
         const int convert_fid = cat_converter->GetConvertFid(fid);
         write_func(convert_fid, fid, convert_value);
       }
@@ -470,7 +518,8 @@ class CTRProvider {
 
   void AccumulateOneLineStat(const char* buffer, const size_t size, const data_size_t row_idx);
 
-  void CreateCatShadowFeatureSet(const std::vector<const BinMapper*>& feature_bin_mappers);
+  CatShadowFeatureSet* CreateCatShadowFeatureSet(const int num_classes,
+    const std::vector<const BinMapper*>& feature_bin_mappers) const;
 
  private:
   void SetConfig(const Config* config);
@@ -619,12 +668,10 @@ class CTRProvider {
   bool accumulated_from_file_;
   // number of partitions to calculate ctr and count
   int num_ctr_partitions_;
-  // stores the shadow ctr feature with partition id's > 0
-  std::unique_ptr<CatShadowFeatureSet> cat_shadow_feature_set_ = nullptr;
   // raw categorical values
   std::vector<std::vector<int>> raw_cat_values_;
   // caategorical feature index order
-  std::vector<int> cat_feature_order_;
+  std::unordered_map<int, int> cat_feature_order_;
 };
 
 class CTRParser : public Parser {
@@ -728,39 +775,6 @@ class CTR_CSC_RowIterator: public CSC_RowIterator {
 
   int cur_row_idx_ = -1;
   std::pair<int, double> cached_pair_ = std::make_pair(-1, 0.0f);
-};
-
-class CatShadowFeatureSet {
- public:
-  CatShadowFeatureSet(const int num_ctr_partitions, const int num_data,
-    const std::vector<int>& categorical_features,
-    const std::vector<const BinMapper*>& cat_feature_bin_mappers);
-
-  void PushData(const int cat_feature_index, const double value,
-                const int partition_id, const data_size_t row_idx,
-                const int thread_id);
-
-  void FinishLoad();
-
-  BinIterator* GetShadowIterator(const int real_cat_feature_index, const int partition_id) const;
-
-  void InitBoostingInfo(const int num_classes);
-
-  void Boosting(const std::function<void(const double* pred_score,
-    score_t* gradients, score_t* hessians)>& boosting_func);
-
-  void AddPredictionToScore(const Tree* tree);
-
- private:
-  std::vector<std::vector<std::unique_ptr<Bin>>> cat_feature_shadow_bins_;
-  std::unordered_map<int, size_t> cat_feature_map_;
-  const std::vector<const BinMapper*> cat_feature_bin_mappers_;
-  const int num_ctr_partitions_;
-  std::vector<std::vector<double>> partition_pred_scores_;
-  std::vector<std::vector<score_t>> partition_gradients_;
-  std::vector<std::vector<score_t>> partition_hessians_;
-  const int num_data_;
-  int num_classes_;
 };
 
 }  // namespace LightGBM
