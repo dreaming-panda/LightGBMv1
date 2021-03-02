@@ -872,7 +872,7 @@ Parser* CTRProvider::FinishProcess(const int num_machines, Config* config_from_l
 void CTRProvider::IterateOverCatConverters(int fid, double fval, int line_idx,
     const std::function<void(int convert_fid, int fid, double convert_value)>& write_func,
     const std::function<void(int fid)>& post_process, const int partition_id) const {
-  const int fold_id = training_data_fold_id_[line_idx][0];
+  const int fold_id = training_data_fold_id_[line_idx][partition_id];
   IterateOverCatConvertersInner<true>(fid, fval, fold_id, write_func, post_process);
 }
 
