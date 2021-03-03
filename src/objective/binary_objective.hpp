@@ -144,63 +144,6 @@ class BinaryLogloss: public ObjectiveFunction {
       grad_scale, hess_scale);
   }
 
-  /*void DiscretizeGradients(score_t* gradients, score_t* hessians,
-    int_score_t* int_gradients, int_score_t* int_hessians,
-    double* grad_scale, double* hess_scale) const override {
-    double max_gradient = std::fabs(gradients[0]);
-    double max_hessian = std::fabs(hessians[0]);
-    int num_threads = OMP_NUM_THREADS();
-    std::vector<double> thread_max_gradient(num_threads, max_gradient);
-    std::vector<double> thread_max_hessian(num_threads, max_hessian);
-    std::vector<double> thread_min_gradient(num_threads, max_gradient);
-    std::vector<double> thread_min_hessian(num_threads, max_hessian);
-    Threading::For<data_size_t>(0, num_data_, 1024,
-      [gradients, hessians, &thread_max_gradient, &thread_max_hessian,
-        &thread_min_gradient, &thread_min_hessian]
-      (int, data_size_t start, data_size_t end) {
-        int thread_id = omp_get_thread_num();
-        for (data_size_t i = start; i < end; ++i) {
-          double fabs_grad = std::fabs(gradients[i]);
-          double fabs_hess = std::fabs(hessians[i]);
-          if (fabs_grad > thread_max_gradient[thread_id]) {
-            thread_max_gradient[thread_id] = fabs_grad;
-          }
-          if (fabs_hess > thread_max_hessian[thread_id]) {
-            thread_max_hessian[thread_id] = fabs_hess;
-          }
-          if (fabs_grad < thread_min_gradient[thread_id]) {
-            thread_min_gradient[thread_id] = fabs_grad;
-          }
-          if (fabs_hess < thread_min_hessian[thread_id]) {
-            thread_min_hessian[thread_id] = fabs_hess;
-          }
-        }});
-    max_gradient = thread_max_gradient[0];
-    max_hessian = thread_max_hessian[0];
-    double min_gradient = thread_min_gradient[0];
-    double min_hessian = thread_min_hessian[0];
-    for (int thread_id = 1; thread_id < num_threads; ++thread_id) {
-      if (max_gradient < thread_max_gradient[thread_id]) {
-        max_gradient = thread_max_gradient[thread_id];
-      }
-      if (max_hessian < thread_max_hessian[thread_id]) {
-        max_hessian = thread_max_hessian[thread_id];
-      }
-    }
-    Log::Warning("max_gradient = %f, max_hessian = %f", max_gradient, max_hessian);
-    Log::Warning("min_gradient = %f, min_hessian = %f", min_gradient, min_hessian);
-    *grad_scale = max_gradient / static_cast<double>(kIntGradBins / 2);
-    *hess_scale = max_hessian / static_cast<double>(kIntGradBins / 2);
-    Log::Warning("grad_scale = %.20f, hess_scale = %.20f", *grad_scale, *hess_scale);
-    const double g_inverse_scale = 1.0f / (*grad_scale);
-    const double h_inverse_scale = 1.0f / (*hess_scale);
-    #pragma omp parallel for schedule(static)
-    for (data_size_t i = 0; i < num_data_; ++i) {
-      int_gradients[i] = static_cast<int_score_t>(gradients[i] * g_inverse_scale);
-      int_hessians[i] = static_cast<int_score_t>(hessians[i] * h_inverse_scale);
-    }
-  }*/
-
   void DiscretizeGradients(score_t* gradients, score_t* hessians,
     int_score_t* int_gradients, int_score_t* int_hessians,
     double* grad_scale, double* hess_scale) const override {
@@ -248,7 +191,7 @@ class BinaryLogloss: public ObjectiveFunction {
     Log::Warning("max_gradient = %f, max_hessian = %f", max_gradient, max_hessian);
     Log::Warning("min_gradient = %f, min_hessian = %f", min_gradient, min_hessian);
     *grad_scale = max_gradient / static_cast<double>(kIntGradBins / 2);
-    *hess_scale = max_hessian / static_cast<double>(kIntGradBins / 2);
+    *hess_scale = max_hessian / static_cast<double>(kIntGradBins);
     Log::Warning("grad_scale = %.20f, hess_scale = %.20f", *grad_scale, *hess_scale);
     const double g_inverse_scale = 1.0f / (*grad_scale);
     const double h_inverse_scale = 1.0f / (*hess_scale);

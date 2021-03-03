@@ -120,7 +120,7 @@ class RankingObjective : public ObjectiveFunction {
     Log::Warning("max_gradient = %f, max_hessian = %f", max_gradient, max_hessian);
     Log::Warning("min_gradient = %f, min_hessian = %f", min_gradient, min_hessian);
     *grad_scale = max_gradient / static_cast<double>(kIntGradBins / 2);
-    *hess_scale = max_hessian / static_cast<double>(kIntGradBins / 2);
+    *hess_scale = max_hessian / static_cast<double>(kIntGradBins);
     Log::Warning("grad_scale = %.20f, hess_scale = %.20f", *grad_scale, *hess_scale);
     const double g_inverse_scale = 1.0f / (*grad_scale);
     const double h_inverse_scale = 1.0f / (*hess_scale);
