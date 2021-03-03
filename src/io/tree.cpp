@@ -360,7 +360,7 @@ void Tree::AccumulateGradients(std::vector<std::unique_ptr<BinIterator>>& iter,
     max_bins[node] = static_cast<uint32_t>(bin_mapper->num_bin() - static_cast<int>(most_freq_bin == 0));
   }
 
-  Threading::For<data_size_t>(0, num_data, 512,
+  Threading::For<data_size_t>(0, num_data, 1000000000,
     [this, &default_bins, &pred_leaf_index, &max_bins, &iter, &leaf_sum_gradients, &leaf_sum_hessians,
       &thread_leaf_sum_gradients, &thread_leaf_sum_hessians, gradients, hessians]
     (int thread_id, data_size_t start, data_size_t end) {

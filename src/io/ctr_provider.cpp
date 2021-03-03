@@ -1128,7 +1128,10 @@ num_ctr_partitions_(num_ctr_partitions), num_data_(num_data) {
         }
       }
     }
-    pred_leaf_index_.resize(num_data_, 0);
+    pred_leaf_index_.resize(num_ctr_partitions_ - 1);
+    for (int i = 0; i < num_ctr_partitions_ - 1; ++i) {
+      pred_leaf_index_[i].resize(num_data_, 0);
+    }
   }
 
   num_classes_ = num_classes;
@@ -1230,7 +1233,7 @@ void CatShadowFeatureSet::AddPredictionToScore(
     leaf_sum_gradients[i].resize(num_leaves, 0.0f);
     leaf_sum_hessians[i].resize(num_leaves, 0.0f);
     accumulate_gradient_func(bin_iterators, feature_bin_mappers, num_data_,
-      pred_leaf_index_, gradients, hessians,
+      pred_leaf_index_[i], partition_gradients_[i].data(), partition_hessians_[i].data(),
       leaf_sum_gradients[i], leaf_sum_hessians[i]);
     for (int j = 0; j < num_features; ++j) {
       if (!is_ctr[j]) {
@@ -1251,7 +1254,7 @@ void CatShadowFeatureSet::AddPredictionToScore(
       );
       partition_leaf_pred[i].push_back(leaf_pred_value * shrinkage_rate);
     }
-    add_score_func(pred_leaf_index_, num_data_, partition_pred_scores_[i].data(), partition_leaf_pred[i]);
+    add_score_func(pred_leaf_index_[i], num_data_, partition_pred_scores_[i].data(), partition_leaf_pred[i]);
   }
   update_ctr_ensemble_func(partition_leaf_pred);
 }
@@ -1271,7 +1274,7 @@ CatShadowFeatureSet* CTRProvider::CreateCatShadowFeatureSet(
   CatShadowFeatureSet* cat_shadow_feature_set = new CatShadowFeatureSet(config_,
     num_ctr_partitions_, num_data_, num_classes, ctr_features, ctr_bin_mappers);
   Threading::For<data_size_t>(
-    0, num_data_, 1024, [this, cat_shadow_feature_set]
+    0, num_data_, num_data_, [this, cat_shadow_feature_set]
       (int thread_id, data_size_t start, data_size_t end) {
       for (data_size_t i = start; i < end; ++i) {
         for (int j = 0; j < static_cast<int>(categorical_features_.size()); ++j) {

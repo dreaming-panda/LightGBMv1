@@ -75,7 +75,7 @@ class CatShadowFeatureSet {
   std::vector<std::vector<score_t>> partition_hessians_;
   const int num_data_;
   int num_classes_;
-  std::vector<int> pred_leaf_index_;
+  std::vector<std::vector<int>> pred_leaf_index_;
 };
 
 // transform categorical features to ctr values before the bin construction process
