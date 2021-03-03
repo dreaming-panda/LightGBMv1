@@ -681,7 +681,7 @@ void CTRProvider::ProcessOneLineInner(const std::vector<std::pair<int, double>>&
   }
   // pad the missing values with zeros
   for (const int fid : categorical_features_) {
-    if (!is_feature_processed[fid]) {
+    if (!is_feature_processed[fid] && fid < num_original_features_) {
       AddCountAndLabel(&count_info[fid], &label_info[fid], 0, 1, static_cast<label_t>(label), fold_ids);
     }
   }
@@ -873,13 +873,13 @@ void CTRProvider::IterateOverCatConverters(int fid, double fval, int line_idx,
     const std::function<void(int convert_fid, int fid, double convert_value)>& write_func,
     const std::function<void(int fid)>& post_process, const int partition_id) const {
   const int fold_id = training_data_fold_id_[line_idx][partition_id];
-  IterateOverCatConvertersInner<true>(fid, fval, fold_id, write_func, post_process);
+  IterateOverCatConvertersInner<true>(fid, fval, partition_id, fold_id, write_func, post_process);
 }
 
 void CTRProvider::IterateOverCatConverters(int fid, double fval,
     const std::function<void(int convert_fid, int fid, double convert_value)>& write_func,
     const std::function<void(int fid)>& post_process) const {
-  IterateOverCatConvertersInner<false>(fid, fval, -1, write_func, post_process);
+  IterateOverCatConvertersInner<false>(fid, fval, -1, -1, write_func, post_process);
 }
 
 void CTRProvider::ConvertCatToCTR(std::vector<double>* features, int line_idx) const {
@@ -1167,6 +1167,7 @@ void CatShadowFeatureSet::PushData(const int ctr_feature_index, const double val
 }
 
 void CatShadowFeatureSet::FinishLoad() {
+  #pragma omp parallel for schedule(dynamic)
   for (size_t i = 0; i < ctr_feature_shadow_bins_.size(); ++i) {
     for (int j = 0; j < num_ctr_partitions_ - 1; ++j) {
       if (ctr_feature_shadow_bins_[i][j] != nullptr) {
@@ -1189,7 +1190,8 @@ void CatShadowFeatureSet::AddPredictionToScore(
     data_size_t num_data, std::vector<int>& pred_leaf_index,
     const score_t* gradients, const score_t* hessians,
     std::vector<double>& leaf_sum_gradients,
-    std::vector<double>& leaf_sum_hessians)>& accumulate_gradient_func,
+    std::vector<double>& leaf_sum_hessians,
+    std::vector<int>& leaf_num_data)>& accumulate_gradient_func,
 
     const std::function<void(const std::vector<int>& pred_leaf_index,
                             data_size_t num_data, double* score,
@@ -1210,6 +1212,7 @@ void CatShadowFeatureSet::AddPredictionToScore(
   }
   std::vector<std::vector<double>> leaf_sum_gradients(num_ctr_partitions_ - 1);
   std::vector<std::vector<double>> leaf_sum_hessians(num_ctr_partitions_ - 1);
+  std::vector<std::vector<int>> leaf_num_data(num_ctr_partitions_ - 1);
   for (int i = 0; i < num_ctr_partitions_ - 1; ++i) {
     std::vector<std::unique_ptr<BinIterator>> bin_iterators;
     for (int j = 0; j < num_features; ++j) {
@@ -1232,9 +1235,10 @@ void CatShadowFeatureSet::AddPredictionToScore(
     }
     leaf_sum_gradients[i].resize(num_leaves, 0.0f);
     leaf_sum_hessians[i].resize(num_leaves, 0.0f);
+    leaf_num_data[i].resize(num_leaves, 0);
     accumulate_gradient_func(bin_iterators, feature_bin_mappers, num_data_,
       pred_leaf_index_[i], partition_gradients_[i].data(), partition_hessians_[i].data(),
-      leaf_sum_gradients[i], leaf_sum_hessians[i]);
+      leaf_sum_gradients[i], leaf_sum_hessians[i], leaf_num_data[i]);
     for (int j = 0; j < num_features; ++j) {
       if (!is_ctr[j]) {
         feature_iterators[j].reset(bin_iterators[j].release());
@@ -1247,12 +1251,14 @@ void CatShadowFeatureSet::AddPredictionToScore(
     for (int j = 0; j < num_leaves; ++j) {
       const double sum_gradients = leaf_sum_gradients[i][j];
       const double sum_hessians = leaf_sum_hessians[i][j];
-      const double leaf_pred_value = config_.lambda_l1 > 0 ? TreeLearner::CalcLeafOutputValue<true>(
-        &config_, sum_gradients, sum_hessians
-      ) : TreeLearner::CalcLeafOutputValue<false>(
-        &config_, sum_gradients, sum_hessians
-      );
-      partition_leaf_pred[i].push_back(leaf_pred_value * shrinkage_rate);
+      if (leaf_num_data[i][j] > 0) {
+        const double leaf_pred_value = config_.lambda_l1 > 0 ? TreeLearner::CalcLeafOutputValue<true>(
+          &config_, sum_gradients, sum_hessians
+        ) : TreeLearner::CalcLeafOutputValue<false>(
+          &config_, sum_gradients, sum_hessians
+        );
+        partition_leaf_pred[i].push_back(leaf_pred_value * shrinkage_rate);
+      }
     }
     add_score_func(pred_leaf_index_[i], num_data_, partition_pred_scores_[i].data(), partition_leaf_pred[i]);
   }

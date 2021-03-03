@@ -454,8 +454,9 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
                             data_size_t num_data, std::vector<int>& pred_leaf_index,
                             const score_t* gradients, const score_t* hessians,
                             std::vector<double>& leaf_sum_gradients,
-                            std::vector<double>& leaf_sum_hessians) { new_tree->AccumulateGradients(
-              iters, bin_mappers, num_data, pred_leaf_index, gradients, hessians, leaf_sum_gradients, leaf_sum_hessians); },
+                            std::vector<double>& leaf_sum_hessians,
+                            std::vector<int>& leaf_num_data) { new_tree->AccumulateGradients(
+              iters, bin_mappers, num_data, pred_leaf_index, gradients, hessians, leaf_sum_gradients, leaf_sum_hessians, leaf_num_data); },
 
           [&new_tree] (const std::vector<int>& pred_leaf_index,
                             data_size_t num_data, double* score,
@@ -469,8 +470,8 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
           new_tree->num_leaves(),
 
           train_data_->num_total_features(), bin_iterators, bin_mappers, grad, hess, shrinkage_rate_);
-        UpdateValidScore(new_tree.get(), cur_tree_id);
       }
+      UpdateValidScore(new_tree.get(), cur_tree_id);
       if (std::fabs(init_scores[cur_tree_id]) > kEpsilon) {
         new_tree->AddBias(init_scores[cur_tree_id]);
       }

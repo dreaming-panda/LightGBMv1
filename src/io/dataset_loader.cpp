@@ -188,7 +188,6 @@ Dataset* DatasetLoader::LoadFromFile(const char* filename, int rank, int num_mac
                  "Please use an additional query file or pre-partition the data");
     }
   }
-  Log::Warning(filename);
   auto dataset = std::unique_ptr<Dataset>(new Dataset());
   if (store_raw_) {
     dataset->SetHasRaw(true);

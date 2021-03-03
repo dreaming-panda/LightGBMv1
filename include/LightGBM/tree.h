@@ -131,7 +131,8 @@ class Tree {
                             data_size_t num_data, std::vector<int>& pred_leaf_index,
                             const score_t* gradients, const score_t* hessians,
                             std::vector<double>& leaf_sum_gradients,
-                            std::vector<double>& leaf_sum_hessians) const;
+                            std::vector<double>& leaf_sum_hessians,
+                            std::vector<int>& leaf_num_data) const;
 
   void UpdateForCTREnsemble(const std::vector<std::vector<double>>& leaf_preds_from_other_partitions);
 

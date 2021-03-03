@@ -126,6 +126,7 @@ int Tree::SplitCategorical(int leaf, int feature, int real_feature, const uint32
     pred_leaf_index[data_idx] = ~node;                                        \
     sum_gradients[~node] += (gradient);                                       \
     sum_hessians[~node] += (hessian);                                         \
+    ++num_data_vec[~node];                                                    \
   }\
 
 
@@ -341,14 +342,17 @@ void Tree::AccumulateGradients(std::vector<std::unique_ptr<BinIterator>>& iter,
                             data_size_t num_data, std::vector<int>& pred_leaf_index,
                             const score_t* gradients, const score_t* hessians,
                             std::vector<double>& leaf_sum_gradients,
-                            std::vector<double>& leaf_sum_hessians) const {
+                            std::vector<double>& leaf_sum_hessians,
+                            std::vector<int>& leaf_num_data) const {
   std::vector<uint32_t> default_bins(num_leaves_ - 1), max_bins(num_leaves_ - 1);
   const int num_threads = OMP_NUM_THREADS();
   std::vector<std::vector<double>> thread_leaf_sum_gradients(num_threads);
   std::vector<std::vector<double>> thread_leaf_sum_hessians(num_threads);
+  std::vector<std::vector<int>> thread_leaf_num_data(num_threads);
   for (int thread_id = 0; thread_id < num_threads; ++thread_id) {
     thread_leaf_sum_gradients[thread_id].resize(num_leaves_, 0.0f);
     thread_leaf_sum_hessians[thread_id].resize(num_leaves_, 0.0f);
+    thread_leaf_num_data[thread_id].resize(num_leaves_, 0);
   }
   for (int node = 0; node < num_leaves_ - 1; ++node) {
     const int split_feature_index = split_feature_[node];
@@ -361,11 +365,12 @@ void Tree::AccumulateGradients(std::vector<std::unique_ptr<BinIterator>>& iter,
   }
 
   Threading::For<data_size_t>(0, num_data, 1000000000,
-    [this, &default_bins, &pred_leaf_index, &max_bins, &iter, &leaf_sum_gradients, &leaf_sum_hessians,
-      &thread_leaf_sum_gradients, &thread_leaf_sum_hessians, gradients, hessians]
+    [this, &default_bins, &pred_leaf_index, &max_bins, &iter,// &leaf_sum_gradients, &leaf_sum_hessians, &leaf_num_data,
+      &thread_leaf_sum_gradients, &thread_leaf_sum_hessians, &thread_leaf_num_data, gradients, hessians]
     (int thread_id, data_size_t start, data_size_t end) {
       std::vector<double>& sum_gradients = thread_leaf_sum_gradients[thread_id];
       std::vector<double>& sum_hessians = thread_leaf_sum_hessians[thread_id];
+      std::vector<int>& num_data_vec = thread_leaf_num_data[thread_id];
       PredictionFunWithIters(static_cast<int>(iter.size()), iter, start,
         DecisionInner, split_feature_[node], i, gradients[i], hessians[i]);
   });
@@ -373,9 +378,11 @@ void Tree::AccumulateGradients(std::vector<std::unique_ptr<BinIterator>>& iter,
   for (int i = 0; i < num_leaves_; ++i) {
     leaf_sum_gradients[i] = 0.0f;
     leaf_sum_hessians[i] = 0.0f;
+    leaf_num_data[i] = 0;
     for (int thread_id = 0; thread_id < num_threads; ++thread_id) {
       leaf_sum_gradients[i] += thread_leaf_sum_gradients[thread_id][i];
       leaf_sum_hessians[i] += thread_leaf_sum_hessians[thread_id][i];
+      leaf_num_data[i] += thread_leaf_num_data[thread_id][i];
     }
   }
 }
