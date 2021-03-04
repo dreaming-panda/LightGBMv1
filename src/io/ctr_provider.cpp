@@ -1185,7 +1185,7 @@ void CatShadowFeatureSet::Boosting(const std::function<void(const double* pred_s
 }
 
 void CatShadowFeatureSet::AddPredictionToScore(
-  const std::function<void(std::vector<std::unique_ptr<BinIterator>>& iters,
+  const std::function<void(std::vector<std::vector<std::unique_ptr<BinIterator>>>& iters,
     const std::vector<const BinMapper*>& bin_mappers,
     data_size_t num_data, std::vector<int>& pred_leaf_index,
     const score_t* gradients, const score_t* hessians,
@@ -1193,16 +1193,17 @@ void CatShadowFeatureSet::AddPredictionToScore(
     std::vector<double>& leaf_sum_hessians,
     std::vector<int>& leaf_num_data)>& accumulate_gradient_func,
 
-    const std::function<void(const std::vector<int>& pred_leaf_index,
+    const std::function<void(const std::vector<int>& pred_leaf_index, const int partition_id,
                             data_size_t num_data, double* score,
-                            const std::vector<double>& leaf_pred_value)>& add_score_func,
+                            const std::vector<std::unordered_map<int, double>>& leaf_pred_value)>& add_score_func,
 
-  const std::function<void(const std::vector<std::vector<double>>& leaf_preds_from_other_partitions)>& update_ctr_ensemble_func,
+  const std::function<void(const std::vector<std::unordered_map<int, double>>& leaf_preds_from_other_partitions,
+    const int num_ctr_partitions)>& update_ctr_ensemble_func,
 
   const int num_leaves,
 
   const int num_features,
-  std::vector<std::unique_ptr<BinIterator>>& feature_iterators,
+  const std::function<BinIterator*(const int)>& get_iter_func,
   const std::vector<const BinMapper*>& feature_bin_mappers,
   const score_t* gradients, const score_t* hessians,
   const double shrinkage_rate) {
@@ -1213,8 +1214,9 @@ void CatShadowFeatureSet::AddPredictionToScore(
   std::vector<std::vector<double>> leaf_sum_gradients(num_ctr_partitions_ - 1);
   std::vector<std::vector<double>> leaf_sum_hessians(num_ctr_partitions_ - 1);
   std::vector<std::vector<int>> leaf_num_data(num_ctr_partitions_ - 1);
+  const int num_threads = OMP_NUM_THREADS();
   for (int i = 0; i < num_ctr_partitions_ - 1; ++i) {
-    std::vector<std::unique_ptr<BinIterator>> bin_iterators;
+    std::vector<std::vector<std::unique_ptr<BinIterator>>> bin_iterators(num_threads);
     for (int j = 0; j < num_features; ++j) {
       if (is_ctr[j]) {
         const BinMapper* bin_mapper = ctr_feature_bin_mappers_[ctr_feature_map_[j]];
@@ -1224,13 +1226,19 @@ void CatShadowFeatureSet::AddPredictionToScore(
           uint32_t most_freq_bin = bin_mapper->GetMostFreqBin();
           const uint32_t max_bin = most_freq_bin == 0 ? static_cast<uint32_t>(bin_mapper->num_bin()) - 1 :
             static_cast<uint32_t>(bin_mapper->num_bin());
-          bin_iterators.emplace_back(ctr_feature_shadow_bins_[ctr_feature_map_[j]][i]->GetIterator(
-            min_bin, max_bin, most_freq_bin));
+          for (int k = 0; k < num_threads; ++k) {
+            bin_iterators[k].emplace_back(ctr_feature_shadow_bins_[ctr_feature_map_[j]][i]->GetIterator(
+              min_bin, max_bin, most_freq_bin));
+          }
         } else {
-          bin_iterators.emplace_back(nullptr);
+          for (int k = 0; k < num_threads; ++k) {
+            bin_iterators[k].emplace_back(nullptr);
+          }
         }
       } else {
-        bin_iterators.emplace_back(feature_iterators[j].release());
+        for (int k = 0; k < num_threads; ++k) {
+          bin_iterators[k].emplace_back(get_iter_func(j));
+        }
       }
     }
     leaf_sum_gradients[i].resize(num_leaves, 0.0f);
@@ -1239,14 +1247,9 @@ void CatShadowFeatureSet::AddPredictionToScore(
     accumulate_gradient_func(bin_iterators, feature_bin_mappers, num_data_,
       pred_leaf_index_[i], partition_gradients_[i].data(), partition_hessians_[i].data(),
       leaf_sum_gradients[i], leaf_sum_hessians[i], leaf_num_data[i]);
-    for (int j = 0; j < num_features; ++j) {
-      if (!is_ctr[j]) {
-        feature_iterators[j].reset(bin_iterators[j].release());
-      }
-    }
   }
 
-  std::vector<std::vector<double>> partition_leaf_pred(num_ctr_partitions_ - 1);
+  std::vector<std::unordered_map<int, double>> partition_leaf_pred(num_leaves);
   for (int i = 0; i < num_ctr_partitions_ - 1; ++i) {
     for (int j = 0; j < num_leaves; ++j) {
       const double sum_gradients = leaf_sum_gradients[i][j];
@@ -1257,12 +1260,12 @@ void CatShadowFeatureSet::AddPredictionToScore(
         ) : TreeLearner::CalcLeafOutputValue<false>(
           &config_, sum_gradients, sum_hessians
         );
-        partition_leaf_pred[i].push_back(leaf_pred_value * shrinkage_rate);
+        partition_leaf_pred[j][i] = (leaf_pred_value * shrinkage_rate);
       }
     }
-    add_score_func(pred_leaf_index_[i], num_data_, partition_pred_scores_[i].data(), partition_leaf_pred[i]);
+    add_score_func(pred_leaf_index_[i], i + 1, num_data_, partition_pred_scores_[i].data(), partition_leaf_pred);
   }
-  update_ctr_ensemble_func(partition_leaf_pred);
+  update_ctr_ensemble_func(partition_leaf_pred, num_ctr_partitions_);
 }
 
 CatShadowFeatureSet* CTRProvider::CreateCatShadowFeatureSet(
@@ -1280,7 +1283,7 @@ CatShadowFeatureSet* CTRProvider::CreateCatShadowFeatureSet(
   CatShadowFeatureSet* cat_shadow_feature_set = new CatShadowFeatureSet(config_,
     num_ctr_partitions_, num_data_, num_classes, ctr_features, ctr_bin_mappers);
   Threading::For<data_size_t>(
-    0, num_data_, num_data_, [this, cat_shadow_feature_set]
+    0, num_data_, 1024, [this, cat_shadow_feature_set]
       (int thread_id, data_size_t start, data_size_t end) {
       for (data_size_t i = start; i < end; ++i) {
         for (int j = 0; j < static_cast<int>(categorical_features_.size()); ++j) {

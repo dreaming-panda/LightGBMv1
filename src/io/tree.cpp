@@ -113,14 +113,14 @@ int Tree::SplitCategorical(int leaf, int feature, int real_feature, const uint32
 #define PredictionFunWithIters(niter, iters, start_pos, decision_fun, iter_idx, \
                       data_idx, gradient, hessian)                            \
   for (int i = 0; i < (niter); ++i) {                                         \
-    if (iter[i] != nullptr) {                                                 \
-      iter[i]->Reset((start_pos));                                            \
+    if (iters[i] != nullptr) {                                                 \
+      iters[i]->Reset((start_pos));                                            \
     }                                                                         \
   }                                                                           \
   for (data_size_t i = start; i < end; ++i) {                                 \
     int node = 0;                                                             \
     while (node >= 0) {                                                       \
-      node = decision_fun(iter[(iter_idx)]->Get((data_idx)), node,            \
+      node = decision_fun(iters[(iter_idx)]->Get((data_idx)), node,            \
                           default_bins[node], max_bins[node]);                \
     }                                                                         \
     pred_leaf_index[data_idx] = ~node;                                        \
@@ -326,18 +326,18 @@ void Tree::AddPredictionToScore(const Dataset* data,
   }
 }
 
-void Tree::AddPredictionToScore(const std::vector<int>& pred_leaf_index,
+void Tree::AddPredictionToScore(const std::vector<int>& pred_leaf_index, const int partition_id,
                             data_size_t num_data, double* score,
-                            const std::vector<double>& leaf_pred_value) const {
-  Threading::For<data_size_t>(0, num_data, 1024, [score, &leaf_pred_value, &pred_leaf_index]
+                            const std::vector<std::unordered_map<int, double>>& leaf_pred_value) const {
+  Threading::For<data_size_t>(0, num_data, 1024, [score, &leaf_pred_value, &pred_leaf_index, partition_id]
     (int, data_size_t start, data_size_t end) {
     for (int i = start; i < end; ++i) {
-      score[i] += leaf_pred_value[pred_leaf_index[i]];
+      score[i] += leaf_pred_value[pred_leaf_index[i]].at(partition_id - 1);
     }
   });
 }
 
-void Tree::AccumulateGradients(std::vector<std::unique_ptr<BinIterator>>& iter,
+void Tree::AccumulateGradients(std::vector<std::vector<std::unique_ptr<BinIterator>>>& iter,
                             const std::vector<const BinMapper*>& bin_mappers,
                             data_size_t num_data, std::vector<int>& pred_leaf_index,
                             const score_t* gradients, const score_t* hessians,
@@ -364,14 +364,14 @@ void Tree::AccumulateGradients(std::vector<std::unique_ptr<BinIterator>>& iter,
     max_bins[node] = static_cast<uint32_t>(bin_mapper->num_bin() - static_cast<int>(most_freq_bin == 0));
   }
 
-  Threading::For<data_size_t>(0, num_data, 1000000000,
+  Threading::For<data_size_t>(0, num_data, 1024,
     [this, &default_bins, &pred_leaf_index, &max_bins, &iter,// &leaf_sum_gradients, &leaf_sum_hessians, &leaf_num_data,
       &thread_leaf_sum_gradients, &thread_leaf_sum_hessians, &thread_leaf_num_data, gradients, hessians]
     (int thread_id, data_size_t start, data_size_t end) {
       std::vector<double>& sum_gradients = thread_leaf_sum_gradients[thread_id];
       std::vector<double>& sum_hessians = thread_leaf_sum_hessians[thread_id];
       std::vector<int>& num_data_vec = thread_leaf_num_data[thread_id];
-      PredictionFunWithIters(static_cast<int>(iter.size()), iter, start,
+      PredictionFunWithIters(static_cast<int>(iter[thread_id].size()), iter[thread_id], start,
         DecisionInner, split_feature_[node], i, gradients[i], hessians[i]);
   });
 
@@ -387,13 +387,18 @@ void Tree::AccumulateGradients(std::vector<std::unique_ptr<BinIterator>>& iter,
   }
 }
 
-void Tree::UpdateForCTREnsemble(const std::vector<std::vector<double>>& leaf_preds_from_other_partitions) {
-  const int num_extra_partitions = static_cast<int>(leaf_preds_from_other_partitions.size());
+void Tree::UpdateForCTREnsemble(const std::vector<std::unordered_map<int, double>>& leaf_preds_from_other_partitions,
+  const int num_ctr_partitions) {
   for (int leaf_index = 0; leaf_index < num_leaves_; ++leaf_index) {
-    for (int i = 0; i < num_extra_partitions; ++i) {
-      leaf_value_[leaf_index] += leaf_preds_from_other_partitions[i][leaf_index];
+    const auto& pred_value_map = leaf_preds_from_other_partitions[leaf_index];
+    int count = 1;
+    for (int i = 1; i < num_ctr_partitions; ++i) {
+      if (pred_value_map.count(i - 1) > 0) {
+        leaf_value_[leaf_index] += pred_value_map.at(i - 1);
+        ++count;
+      }
     }
-    leaf_value_[leaf_index] /= (num_extra_partitions + 1);
+    leaf_value_[leaf_index] /= count;
   }
 }
 

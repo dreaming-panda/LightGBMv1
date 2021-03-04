@@ -449,7 +449,7 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
           }
         }
         cat_shadow_feature_set_->AddPredictionToScore(
-          [&new_tree] (std::vector<std::unique_ptr<BinIterator>>& iters,
+          [&new_tree] (std::vector<std::vector<std::unique_ptr<BinIterator>>>& iters,
                             const std::vector<const BinMapper*>& bin_mappers,
                             data_size_t num_data, std::vector<int>& pred_leaf_index,
                             const score_t* gradients, const score_t* hessians,
@@ -458,18 +458,30 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
                             std::vector<int>& leaf_num_data) { new_tree->AccumulateGradients(
               iters, bin_mappers, num_data, pred_leaf_index, gradients, hessians, leaf_sum_gradients, leaf_sum_hessians, leaf_num_data); },
 
-          [&new_tree] (const std::vector<int>& pred_leaf_index,
+          [&new_tree] (const std::vector<int>& pred_leaf_index, const int partition_id,
                             data_size_t num_data, double* score,
-                            const std::vector<double>& leaf_pred_value) {
-                              new_tree->AddPredictionToScore(pred_leaf_index, num_data, score, leaf_pred_value);
+                            const std::vector<std::unordered_map<int, double>>& leaf_pred_value) {
+                              new_tree->AddPredictionToScore(pred_leaf_index, partition_id, num_data, score, leaf_pred_value);
                             },
 
-          [&new_tree] (const std::vector<std::vector<double>>& leaf_preds_from_other_partitions) {
-                        new_tree->UpdateForCTREnsemble(leaf_preds_from_other_partitions); },
+          [&new_tree] (const std::vector<std::unordered_map<int, double>>& leaf_preds_from_other_partitions,
+            const int num_ctr_partitions) {
+                        new_tree->UpdateForCTREnsemble(leaf_preds_from_other_partitions, num_ctr_partitions); },
 
           new_tree->num_leaves(),
 
-          train_data_->num_total_features(), bin_iterators, bin_mappers, grad, hess, shrinkage_rate_);
+          train_data_->num_total_features(),
+
+          [this] (const int feature_index) {
+            const int inner_feature_index = train_data_->InnerFeatureIndex(feature_index);
+            BinIterator* ret = nullptr;
+            if (inner_feature_index >= 0) {
+              ret = train_data_->FeatureIterator(inner_feature_index);
+            }
+            return ret;
+          },
+
+          bin_mappers, grad, hess, shrinkage_rate_);
       }
       UpdateValidScore(new_tree.get(), cur_tree_id);
       if (std::fabs(init_scores[cur_tree_id]) > kEpsilon) {

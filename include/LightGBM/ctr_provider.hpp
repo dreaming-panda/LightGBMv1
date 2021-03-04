@@ -40,7 +40,7 @@ class CatShadowFeatureSet {
     score_t* gradients, score_t* hessians)>& boosting_func);
 
   void AddPredictionToScore(
-    const std::function<void(std::vector<std::unique_ptr<BinIterator>>& iters,
+    const std::function<void(std::vector<std::vector<std::unique_ptr<BinIterator>>>& iters,
     const std::vector<const BinMapper*>& bin_mappers,
     data_size_t num_data, std::vector<int>& pred_leaf_index,
     const score_t* gradients, const score_t* hessians,
@@ -48,16 +48,17 @@ class CatShadowFeatureSet {
     std::vector<double>& leaf_sum_hessians,
     std::vector<int>& leaf_num_data)>& accumulate_gradient_func,
 
-    const std::function<void(const std::vector<int>& pred_leaf_index,
+    const std::function<void(const std::vector<int>& pred_leaf_index, const int partition_id,
                             data_size_t num_data, double* score,
-                            const std::vector<double>& leaf_pred_value)>& add_score_func,
+                            const std::vector<std::unordered_map<int, double>>& leaf_pred_value)>& add_score_func,
 
-    const std::function<void(const std::vector<std::vector<double>>& leaf_preds_from_other_partitions)>& update_ctr_ensemble_func,
+    const std::function<void(const std::vector<std::unordered_map<int, double>>& leaf_preds_from_other_partitions,
+      const int num_ctr_partitions)>& update_ctr_ensemble_func,
 
     const int num_leaves,
 
     const int num_features,
-    std::vector<std::unique_ptr<BinIterator>>& feature_iterators,
+    const std::function<BinIterator*(const int)>& get_iter_func,
     const std::vector<const BinMapper*>& feature_bin_mappers,
     const score_t* gradients, const score_t* hessians,
     const double shrinkage_rate);
