@@ -140,7 +140,7 @@ class BinaryLogloss: public ObjectiveFunction {
       return;
     }
     GetGradients(score, gradients, hessians);
-    ClipAndDiscretizeGradients(gradients, hessians, int_gradients, int_hessians,
+    DiscretizeGradients(gradients, hessians, int_gradients, int_hessians,
       grad_scale, hess_scale);
   }
 
@@ -182,8 +182,10 @@ class BinaryLogloss: public ObjectiveFunction {
     const double std_gradient = std::sqrt(sum_sq_gradients / num_data_ - mean_gradient * mean_gradient);
     const double gradient_upper_bound = mean_gradient + 3 * std_gradient;
     const double gradient_lower_bound = mean_gradient - 3 * std_gradient;
-    max_gradient_abs = std::min(max_gradient_abs, std::fabs(gradient_upper_bound));
-    max_gradient_abs = std::min(max_gradient_abs, std::fabs(gradient_lower_bound));
+    Log::Warning("gradient_upper_bound = %f, gradient_lower_bound = %f", gradient_upper_bound, gradient_lower_bound);
+    Log::Warning("std_gradient = %f", std_gradient);
+    const double gradient_bound = std::max(std::fabs(gradient_upper_bound), std::fabs(gradient_lower_bound));
+    max_gradient_abs = std::min(max_gradient_abs, gradient_bound);
 
     Log::Warning("max_gradient_abs = %f, max_hessian_abs = %f", max_gradient_abs, max_hessian_abs);
     *grad_scale = max_gradient_abs / static_cast<double>(kIntGradBins / 2);
@@ -206,6 +208,7 @@ class BinaryLogloss: public ObjectiveFunction {
       const int thread_id = omp_get_thread_num();
       score_t gradient = gradients[i];
       if (std::fabs(gradient) > max_gradient_abs) {
+        Log::Warning("clipping @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
         gradient = gradient >= 0 ? max_gradient_abs : -max_gradient_abs;
       }
       const score_t hessian = hessians[i];
