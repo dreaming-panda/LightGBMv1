@@ -62,7 +62,7 @@ class DatasetLoader {
     const Parser* parser, Dataset* dataset, const std::vector<data_size_t>& sampled_indices);
 
   /*! \brief Extract local features from memory */
-  void ExtractFeaturesFromMemory(std::vector<std::string>* text_data, const Parser* parser, Dataset* dataset);
+  void ExtractFeaturesFromMemory(std::vector<std::string>* text_data, const Parser* parser, Dataset* dataset, const bool is_valid);
 
   /*! \brief Extract local features from file */
   void ExtractFeaturesFromFile(const char* filename, const Parser* parser, const std::vector<data_size_t>& used_data_indices, Dataset* dataset);

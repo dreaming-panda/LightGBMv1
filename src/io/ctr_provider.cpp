@@ -7,6 +7,8 @@
 
 #include <set>
 
+#include <fstream>
+
 namespace LightGBM {
 
 CTRProvider::CTRProvider(Config* config) {
@@ -764,6 +766,12 @@ Parser* CTRProvider::FinishProcess(const int num_machines, Config* config_from_l
       }
     }
   }
+  std::ofstream fout("train_fold_id.txt");
+  for (int i = 0; i < num_data_; ++i) {
+    const int fold_id = training_data_fold_id_[i];
+    fout << fold_id << "\n";
+  }
+  fout.close();
   if (tmp_parser_ != nullptr) {
     return tmp_parser_.release();
   } else {

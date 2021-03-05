@@ -244,7 +244,7 @@ Dataset* DatasetLoader::LoadFromFile(const char* filename, int rank, int num_mac
       // initialize label
       dataset->metadata_.Init(dataset->num_data_, weight_idx_, group_idx_);
       // extract features
-      ExtractFeaturesFromMemory(&text_data, parser.get(), dataset.get());
+      ExtractFeaturesFromMemory(&text_data, parser.get(), dataset.get(), false);
       text_data.clear();
     } else {
       // sample data from file
@@ -336,7 +336,7 @@ Dataset* DatasetLoader::LoadFromFileAlignWithOtherDataset(const char* filename, 
         dataset->ResizeRaw(dataset->num_data_);
       }
       // extract features
-      ExtractFeaturesFromMemory(&text_data, parser.get(), dataset.get());
+      ExtractFeaturesFromMemory(&text_data, parser.get(), dataset.get(), true);
       text_data.clear();
     } else {
       TextReader<data_size_t> text_reader(filename, config_.header);
@@ -1319,7 +1319,7 @@ void DatasetLoader::ConstructBinMappersFromTextData(int rank, int num_machines,
 }
 
 /*! \brief Extract local features from memory */
-void DatasetLoader::ExtractFeaturesFromMemory(std::vector<std::string>* text_data, const Parser* parser, Dataset* dataset) {
+void DatasetLoader::ExtractFeaturesFromMemory(std::vector<std::string>* text_data, const Parser* parser, Dataset* dataset, const bool is_valid) {
   std::vector<std::pair<int, double>> oneline_features;
   double tmp_label = 0.0f;
   auto& ref_text_data = *text_data;
@@ -1327,13 +1327,24 @@ void DatasetLoader::ExtractFeaturesFromMemory(std::vector<std::string>* text_dat
   if (predict_fun_ == nullptr) {
     OMP_INIT_EX();
     // if doesn't need to prediction with initial model
-    #pragma omp parallel for schedule(static) private(oneline_features) firstprivate(tmp_label, feature_row)
+    //#pragma omp parallel for schedule(static) private(oneline_features) firstprivate(tmp_label, feature_row)
+    std::ofstream fout;
+    if (!is_valid) {
+      fout.open("train_ctr.txt");
+    } else {
+      fout.open("test_ctr.txt");
+    }
     for (data_size_t i = 0; i < dataset->num_data_; ++i) {
       OMP_LOOP_EX_BEGIN();
       const int tid = omp_get_thread_num();
       oneline_features.clear();
       // parser
       parser->ParseOneLine(ref_text_data[i].c_str(), &oneline_features, &tmp_label, i);
+      fout << tmp_label << " ";
+      for (int i = 0; i < oneline_features.size(); ++i) {
+        fout << oneline_features[i].first << ":" << std::setprecision(20) << oneline_features[i].second << " ";
+      }
+      fout << "\n";
       // set label
       dataset->metadata_.SetLabelAt(i, static_cast<label_t>(tmp_label));
       // free processed line:
@@ -1373,6 +1384,7 @@ void DatasetLoader::ExtractFeaturesFromMemory(std::vector<std::string>* text_dat
       dataset->FinishOneRow(tid, i, is_feature_added);
       OMP_LOOP_EX_END();
     }
+    fout.close();
     OMP_THROW_EX();
   } else {
     OMP_INIT_EX();
