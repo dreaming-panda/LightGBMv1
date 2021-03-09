@@ -93,16 +93,40 @@ class ObjectiveFunction {
 
   virtual std::string ToString() const = 0;
 
-  void DumpGradientToFile(const score_t* gradients, const score_t* hessians, const int iter,
-    const int num_data, const int num_class) const {
+  template <typename SCORE_T>
+  void DumpGradientToFile(const SCORE_T* gradients, const SCORE_T* hessians, const int iter,
+    const int num_data, const int num_class, const std::string suffix, const double grad_scale,
+    const double hess_scale, const bool is_int) const {
+    static std::vector<int> sample_indices;
+    if (sample_indices.size() == 0) {
+      std::mt19937 eng;
+      std::uniform_real_distribution<double> dist;
+      for (int i = 0; i < num_data; ++i) {
+        const double prob = dist(eng);
+        if (prob <= 0.1f) {
+          sample_indices.emplace_back(i);
+        }
+      }
+    }
     std::vector<char> buffer(100);
     Common::Int32ToStr(iter, buffer.data());
-    std::ofstream fout(std::string("gradient_" + std::string(buffer.data()) + std::string(".csv")));
+    std::ofstream fout(std::string("gradient_" + std::string(buffer.data()) + "_" + suffix + std::string(".csv")));
     fout << "gradient,hessian" << std::endl;
-    for (int i = 0; i < num_class; ++i) {
-      const int base = i * num_data;
-      for (int j = 0; j < num_data; ++j) {
-        fout << gradients[base + j] << "," << hessians[base + j] << std::endl;
+    if (!is_int) {
+      for (int i = 0; i < num_class; ++i) {
+        const int base = i * num_data;
+        for (int j = 0; j < static_cast<int>(sample_indices.size()); ++j) {
+          const int index = sample_indices[j];
+          fout << gradients[base + index] << "," << hessians[base + index] << std::endl;
+        }
+      }
+    } else {
+      for (int i = 0; i < num_class; ++i) {
+        const int base = i * num_data;
+        for (int j = 0; j < static_cast<int>(sample_indices.size()); ++j) {
+          const int index = sample_indices[j];
+          fout << gradients[base + index] * grad_scale << "," << hessians[base + index] * hess_scale << std::endl;
+        }
       }
     }
   }
