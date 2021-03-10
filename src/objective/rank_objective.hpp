@@ -67,10 +67,18 @@ class RankingObjective : public ObjectiveFunction {
   void GetIntGradients(const double* score,
     score_t* gradients, score_t* hessians,
     int_score_t* int_gradients, int_score_t* int_hessians,
-    double* grad_scale, double* hess_scale) const override {
+    double* grad_scale, double* hess_scale) override {
     GetGradients(score, gradients, hessians);
-    NonUniformDiscretizeGradients(gradients, hessians, int_gradients, int_hessians,
+    DiscretizeGradients(gradients, hessians, int_gradients, int_hessians,
       grad_scale, hess_scale);
+  }
+
+  virtual void GetIntGradients(const double* score,
+    score_t* gradients, score_t* hessians,
+    int_score_t* int_gradients, int_score_t* int_hessians,
+    std::vector<double>* grad_quantile, std::vector<double>* hess_quantile) override {
+    GetGradients(score, gradients, hessians);
+    UniformDiscretizeGradients(gradients, hessians, int_gradients, int_hessians, grad_quantile, hess_quantile, num_data_);
   }
 
   
@@ -437,6 +445,11 @@ class LambdarankNDCG : public RankingObjective {
     }
     // construct sigmoid table to speed up sigmoid transform
     ConstructSigmoidTable();
+    const int num_threads = OMP_NUM_THREADS();
+    for (int thread_id = 0; thread_id < num_threads; ++thread_id) {
+      rand_generators_.emplace_back(thread_id);
+    }
+    uniform_dists_.resize(num_threads);
   }
 
   inline void GetGradientsForOneQuery(data_size_t query_id, data_size_t cnt,

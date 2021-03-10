@@ -39,7 +39,7 @@ class LIGHTGBM_EXPORT Boosting {
   virtual void Init(
     const Config* config,
     const Dataset* train_data,
-    const ObjectiveFunction* objective_function,
+    ObjectiveFunction* objective_function,
     const std::vector<const Metric*>& training_metrics) = 0;
 
   /*!
@@ -54,7 +54,7 @@ class LIGHTGBM_EXPORT Boosting {
   */
   virtual void ShuffleModels(int start_iter, int end_iter) = 0;
 
-  virtual void ResetTrainingData(const Dataset* train_data, const ObjectiveFunction* objective_function,
+  virtual void ResetTrainingData(const Dataset* train_data, ObjectiveFunction* objective_function,
                                  const std::vector<const Metric*>& training_metrics) = 0;
 
   virtual void ResetConfig(const Config* config) = 0;

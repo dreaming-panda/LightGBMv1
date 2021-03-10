@@ -191,6 +191,11 @@ class MultiValBinWrapper {
     hess_scale = h_scale;
   }
 
+  void SetGradQuantile(const std::vector<double>& g_quantile, const std::vector<double>& h_quantile) {
+    grad_quantile = g_quantile;
+    hess_quantile = h_quantile;
+  }
+
  private:
   bool is_use_subcol_ = false;
   bool is_use_subrow_ = false;
@@ -218,6 +223,7 @@ class MultiValBinWrapper {
   const size_t kHistIntBufferEntrySize = 2 * sizeof(int_hist_t);
 
   double grad_scale, hess_scale;
+  std::vector<double> grad_quantile, hess_quantile;
 };
 
 struct TrainingShareStates {
@@ -312,9 +318,21 @@ struct TrainingShareStates {
     hess_scale_ = hess_scale;
   }
 
+  void SetGradQuantile(const std::vector<double>& grad_quantile, const std::vector<double>& hess_quantile) {
+    if (multi_val_bin_wrapper_ != nullptr) {
+      multi_val_bin_wrapper_->SetGradQuantile(grad_quantile, hess_quantile);
+    }
+    grad_quantile_ = grad_quantile;
+    hess_quantile_ = hess_quantile;
+  }
+
   double grad_scale() const { return grad_scale_; }
 
   double hess_scale() const { return hess_scale_; }
+
+  std::vector<double> grad_quantile() const { return grad_quantile_; }
+
+  std::vector<double> hess_quantile() const { return hess_quantile_; }
 
  private:
   std::vector<uint32_t> feature_hist_offsets_;
@@ -327,6 +345,8 @@ struct TrainingShareStates {
   std::vector<int> group_bin_boundaries_;
   double grad_scale_;
   double hess_scale_;
+  std::vector<double> grad_quantile_;
+  std::vector<double> hess_quantile_;
 };
 
 }  // namespace LightGBM

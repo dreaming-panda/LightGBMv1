@@ -52,7 +52,7 @@ class GBDT : public GBDTBase {
   * \param training_metrics Training metrics
   */
   void Init(const Config* gbdt_config, const Dataset* train_data,
-            const ObjectiveFunction* objective_function,
+            ObjectiveFunction* objective_function,
             const std::vector<const Metric*>& training_metrics) override;
 
   /*!
@@ -111,7 +111,7 @@ class GBDT : public GBDTBase {
   * \param objective_function Training objective function
   * \param training_metrics Training metrics
   */
-  void ResetTrainingData(const Dataset* train_data, const ObjectiveFunction* objective_function,
+  void ResetTrainingData(const Dataset* train_data, ObjectiveFunction* objective_function,
                          const std::vector<const Metric*>& training_metrics) override;
 
   /*!
@@ -457,7 +457,7 @@ class GBDT : public GBDTBase {
   /*! \brief Tree learner, will use this class to learn trees */
   std::unique_ptr<TreeLearner> tree_learner_;
   /*! \brief Objective function */
-  const ObjectiveFunction* objective_function_;
+  ObjectiveFunction* objective_function_;
   /*! \brief Store and update training data's score */
   std::unique_ptr<ScoreUpdater> train_score_updater_;
   /*! \brief Metrics for training data */
@@ -497,6 +497,8 @@ class GBDT : public GBDTBase {
   std::vector<int_score_t, Common::AlignmentAllocator<int_score_t, kAlignedSize>> int_hessians_;
   double grad_scale_;
   double hess_scale_;
+  std::vector<double> grad_quantile_;
+  std::vector<double> hess_quantile_;
 #endif
 
   /*! \brief Store the indices of in-bag data */

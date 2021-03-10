@@ -30,7 +30,7 @@ class RF : public GBDT {
 
   ~RF() {}
 
-  void Init(const Config* config, const Dataset* train_data, const ObjectiveFunction* objective_function,
+  void Init(const Config* config, const Dataset* train_data, ObjectiveFunction* objective_function,
     const std::vector<const Metric*>& training_metrics) override {
     CHECK(config->bagging_freq > 0 && config->bagging_fraction < 1.0f && config->bagging_fraction > 0.0f);
     CHECK(config->feature_fraction <= 1.0f && config->feature_fraction > 0.0f);
@@ -62,7 +62,7 @@ class RF : public GBDT {
     shrinkage_rate_ = 1.0f;
   }
 
-  void ResetTrainingData(const Dataset* train_data, const ObjectiveFunction* objective_function,
+  void ResetTrainingData(const Dataset* train_data, ObjectiveFunction* objective_function,
     const std::vector<const Metric*>& training_metrics) override {
     GBDT::ResetTrainingData(train_data, objective_function, training_metrics);
     if (iter_ + num_init_iteration_ > 0) {

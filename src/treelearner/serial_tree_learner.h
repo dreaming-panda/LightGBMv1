@@ -76,7 +76,8 @@ class SerialTreeLearner: public TreeLearner {
 
   Tree* Train(const score_t* gradients, const score_t *hessians,
     const int_score_t* int_gradients, const int_score_t* int_hessians,
-    const double grad_scale, const double hess_scale) override;
+    const double grad_scale, const double hess_scale,
+    const std::vector<double>& grad_quantile, const std::vector<double>& hess_quantile) override;
 
   Tree* FitByExistingTree(const Tree* old_tree, const score_t* gradients, const score_t* hessians) const override;
 

@@ -97,6 +97,12 @@ class BinaryLogloss: public ObjectiveFunction {
       }
     }
     label_weights_[1] *= scale_pos_weight_;
+
+    const int num_threads = OMP_NUM_THREADS();
+    for (int thread_id = 0; thread_id < num_threads; ++thread_id) {
+      rand_generators_.emplace_back(thread_id);
+    }
+    uniform_dists_.resize(num_threads);
   }
 
   void GetGradients(const double* score, score_t* gradients, score_t* hessians) const override {
@@ -135,13 +141,24 @@ class BinaryLogloss: public ObjectiveFunction {
   void GetIntGradients(const double* score,
     score_t* gradients, score_t* hessians,
     int_score_t* int_gradients, int_score_t* int_hessians,
-    double* grad_scale, double* hess_scale) const override {
+    double* grad_scale, double* hess_scale) override {
     if (!need_train_) {
       return;
     }
     GetGradients(score, gradients, hessians);
     DiscretizeGradients(gradients, hessians, int_gradients, int_hessians,
       grad_scale, hess_scale);
+  }
+
+  virtual void GetIntGradients(const double* score,
+    score_t* gradients, score_t* hessians,
+    int_score_t* int_gradients, int_score_t* int_hessians,
+    std::vector<double>* grad_quantile, std::vector<double>* hess_quantile) override {
+    if (!need_train_) {
+      return;
+    }
+    GetGradients(score, gradients, hessians);
+    UniformDiscretizeGradients(gradients, hessians, int_gradients, int_hessians, grad_quantile, hess_quantile, num_data_);
   }
 
   void ClipAndDiscretizeGradients(score_t* gradients, score_t* hessians,
@@ -411,6 +428,7 @@ class BinaryLogloss: public ObjectiveFunction {
     for (int i = 0; i < OMP_NUM_THREADS(); ++i) {
       dist.push_back(std::uniform_real_distribution<double>(0.0f, 1.0f));
     }
+    const int quantile_threshold = 2;
     #pragma omp parallel for schedule(static)
     for (data_size_t i = 0; i < num_data_; ++i) {
       const int thread_id = omp_get_thread_num();
@@ -418,16 +436,16 @@ class BinaryLogloss: public ObjectiveFunction {
       const score_t hessian = hessians[i];
       const int_score_t int_grad = static_cast<int_score_t>(std::lround(gradient * g_inverse_scale));
       const int_score_t int_hess = static_cast<int_score_t>(std::lround(hessian * h_inverse_scale));
-      const score_t gradient_low = std::abs(int_grad) >= 2 ? int_grad * gs : 0.0f;
-      const score_t gradient_high = std::abs(int_grad) >= 2 ?
+      const score_t gradient_low = std::abs(int_grad) >= quantile_threshold ? int_grad * gs : 0.0f;
+      const score_t gradient_high = std::abs(int_grad) >= quantile_threshold ?
         (gradient >= 0.0f ? (int_grad + 1) * gs : (int_grad - 1) * gs) :
-        (gradient >= 0.0f ? 2 * gs : -2 * gs);
+        (gradient >= 0.0f ? quantile_threshold * gs : -quantile_threshold * gs);
       const score_t hessian_low = int_hess * hs;
       const score_t hessian_high = (int_hess + 1) * hs;
       const score_t gradient_bias = (gradient - gradient_low) / (gradient_high - gradient_low);
       const score_t hessian_bias = (hessian - hessian_low) / (hessian_high - hessian_low);
       if (dist[thread_id](mt_generators[thread_id]) > gradient_bias) {
-        int_gradients[i] = std::abs(int_grad) >= 2 ? int_grad : 0;
+        int_gradients[i] = std::abs(int_grad) >= quantile_threshold ? int_grad : 0;
       } else {
         if (gradient < 0.0f) {
           CHECK(int_grad <= 0);

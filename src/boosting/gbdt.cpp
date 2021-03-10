@@ -43,7 +43,7 @@ GBDT::GBDT()
 GBDT::~GBDT() {
 }
 
-void GBDT::Init(const Config* config, const Dataset* train_data, const ObjectiveFunction* objective_function,
+void GBDT::Init(const Config* config, const Dataset* train_data, ObjectiveFunction* objective_function,
                 const std::vector<const Metric*>& training_metrics) {
   CHECK_NOTNULL(train_data);
   train_data_ = train_data;
@@ -170,9 +170,12 @@ void GBDT::Boosting() {
   int64_t num_score = 0;
   //objective_function_->
   //  GetGradients(GetTrainingScore(&num_score), gradients_.data(), hessians_.data());
+  //objective_function_->
+  //  GetIntGradients(GetTrainingScore(&num_score), gradients_.data(), hessians_.data(),
+  //    int_gradients_.data(), int_hessians_.data(), &grad_scale_, &hess_scale_);
   objective_function_->
     GetIntGradients(GetTrainingScore(&num_score), gradients_.data(), hessians_.data(),
-      int_gradients_.data(), int_hessians_.data(), &grad_scale_, &hess_scale_);
+      int_gradients_.data(), int_hessians_.data(), &grad_quantile_, &hess_quantile_);
 }
 
 data_size_t GBDT::BaggingHelper(data_size_t start, data_size_t cnt, data_size_t* buffer) {
@@ -390,7 +393,7 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
         int_grad = int_gradients_.data() + offset;
         int_hess = int_hessians_.data() + offset;
       }
-      new_tree.reset(tree_learner_->Train(grad, hess, int_grad, int_hess, grad_scale_, hess_scale_));
+      new_tree.reset(tree_learner_->Train(grad, hess, int_grad, int_hess, grad_scale_, hess_scale_, grad_quantile_, hess_quantile_));
     }
 
     if (new_tree->num_leaves() > 1) {
@@ -673,7 +676,7 @@ double GBDT::GetLowerBoundValue() const {
   return min_value;
 }
 
-void GBDT::ResetTrainingData(const Dataset* train_data, const ObjectiveFunction* objective_function,
+void GBDT::ResetTrainingData(const Dataset* train_data, ObjectiveFunction* objective_function,
                              const std::vector<const Metric*>& training_metrics) {
   if (train_data != train_data_ && !train_data_->CheckAlign(*train_data)) {
     Log::Fatal("Cannot reset training data, since new training data has different bin mappers");

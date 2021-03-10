@@ -33,7 +33,7 @@ class GOSS: public GBDT {
   ~GOSS() {
   }
 
-  void Init(const Config* config, const Dataset* train_data, const ObjectiveFunction* objective_function,
+  void Init(const Config* config, const Dataset* train_data, ObjectiveFunction* objective_function,
             const std::vector<const Metric*>& training_metrics) override {
     GBDT::Init(config, train_data, objective_function, training_metrics);
     ResetGoss();
@@ -45,7 +45,7 @@ class GOSS: public GBDT {
     }
   }
 
-  void ResetTrainingData(const Dataset* train_data, const ObjectiveFunction* objective_function,
+  void ResetTrainingData(const Dataset* train_data, ObjectiveFunction* objective_function,
                          const std::vector<const Metric*>& training_metrics) override {
     GBDT::ResetTrainingData(train_data, objective_function, training_metrics);
     ResetGoss();
