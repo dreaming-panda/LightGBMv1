@@ -1205,7 +1205,7 @@ void CatShadowFeatureSet::AddPredictionToScore(
   const int num_features,
   const std::function<BinIterator*(const int)>& get_iter_func,
   const std::vector<const BinMapper*>& feature_bin_mappers,
-  const score_t* gradients, const score_t* hessians,
+  const score_t* /*gradients*/, const score_t* /*hessians*/,
   const double shrinkage_rate) {
   std::vector<bool> is_ctr(num_features, false);
   for (const int ctr_feature_index : ctr_features_) {

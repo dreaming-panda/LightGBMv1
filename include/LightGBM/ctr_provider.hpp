@@ -91,10 +91,10 @@ class CTRProvider {
     virtual ~CatConverter() {}
 
     virtual double CalcValue(const double sum_label, const double sum_count,
-      const double all_fold_sum_count, const double prior) const = 0;
+      const double all_fold_sum_count, const double num_data, const double prior) const = 0;
 
     virtual double CalcValue(const double sum_label, const double sum_count,
-      const double all_fold_sum_count) const = 0;
+     const double all_fold_sum_count, const double num_data) const = 0;
 
     virtual std::string DumpToString() const = 0;
 
@@ -156,12 +156,12 @@ class CTRProvider {
    public:
     explicit CTRConverter(const double prior): prior_(prior) {}
     inline double CalcValue(const double sum_label, const double sum_count,
-      const double /*all_fold_sum_count*/) const override {
+      const double /*all_fold_sum_count*/, const double /*num_data*/) const override {
       return (sum_label + prior_ * prior_weight_) / (sum_count + prior_weight_);
     }
 
     inline double CalcValue(const double sum_label, const double sum_count,
-      const double /*all_fold_sum_count*/, const double /*prior*/) const override {
+      const double /*all_fold_sum_count*/, const double /*num_data*/, const double /*prior*/) const override {
       return (sum_label + prior_ * prior_weight_) / (sum_count + prior_weight_);
     }
 
@@ -192,13 +192,13 @@ class CTRProvider {
 
    private:
     inline double CalcValue(const double /*sum_label*/, const double /*sum_count*/,
-      const double all_fold_sum_count) const override {
-      return all_fold_sum_count;
+      const double all_fold_sum_count, const double num_data) const override {
+      return (all_fold_sum_count / num_data);
     }
 
-    inline double CalcValue(const double /*sum_label*/, const double /*sum_count*/,
-      const double all_fold_sum_count, const double /*prior*/) const override {
-      return all_fold_sum_count;
+    inline double CalcValue(const double /*sum_label*/, const double sum_count,
+      const double /*all_fold_sum_count*/, const double num_data, const double /*prior*/) const override {
+      return (sum_count / num_data);
     }
 
     std::string Name() const override {
@@ -223,7 +223,7 @@ class CTRProvider {
     }
 
     inline double CalcValue(const double sum_label, const double sum_count,
-      const double /*all_fold_sum_count*/) const override {
+      const double /*all_fold_sum_count*/, const double /*num_data*/) const override {
       if (!prior_set_) {
         Log::Fatal("CTRConverterLabelMean is not ready since the prior value is not set.");
       }
@@ -231,7 +231,7 @@ class CTRProvider {
     }
 
     inline double CalcValue(const double sum_label, const double sum_count,
-      const double /*all_fold_sum_count*/, const double prior) const override {
+      const double /*all_fold_sum_count*/, const double /*num_data*/, const double prior) const override {
       if (!prior_set_) {
         Log::Fatal("CTRConverterLabelMean is not ready since the prior value is not set.");
       }
@@ -421,10 +421,11 @@ class CTRProvider {
     const std::function<void(int fid)>& post_process_func) const {
     if (IS_TRAIN) {
       double label_sum = 0.0f, total_count = 0.0f, all_fold_total_count = 0.0f;
-      GetCTRStatForOneCatValue<IS_TRAIN>(fid, fval, partition_id, fold_id, &label_sum, &total_count, &all_fold_total_count);
+      GetCTRStatForOneCatValue<IS_TRAIN>(fid, fval, partition_id, fold_id, &label_sum,
+        &total_count, &all_fold_total_count);
       for (const auto& cat_converter : cat_converters_) {
         const double convert_value = cat_converter->CalcValue(label_sum, total_count,
-          all_fold_total_count, fold_prior_[partition_id][fold_id]);
+          all_fold_total_count, static_cast<double>(fold_num_data_[partition_id][fold_id]), fold_prior_[partition_id][fold_id]);
         const int convert_fid = cat_converter->GetConvertFid(fid);
         write_func(convert_fid, fid, convert_value);
       }
@@ -433,7 +434,8 @@ class CTRProvider {
       double label_sum = 0.0f, total_count = 0.0f, all_fold_total_count = 0.0f;
       GetCTRStatForOneCatValue<IS_TRAIN>(fid, fval, -1, -1, &label_sum, &total_count, &all_fold_total_count);
       for (const auto& cat_converter : cat_converters_) {
-        const double convert_value = cat_converter->CalcValue(label_sum, total_count, all_fold_total_count);
+        const double convert_value = cat_converter->CalcValue(label_sum, total_count,
+          all_fold_total_count, static_cast<double>(num_data_));
         const int convert_fid = cat_converter->GetConvertFid(fid);
         write_func(convert_fid, fid, convert_value);
       }
@@ -451,14 +453,15 @@ class CTRProvider {
       GetCTRStatForOneCatValue(fid, fval, fold_ids, &label_sum, &total_count, &all_fold_total_count);
       double result = 0.0f;
       for (int i = 0; i < num_ctr_partitions_; ++i) {
-        result += cat_converter->CalcValue(label_sum[i], total_count[i], all_fold_total_count[i], fold_prior_[i][fold_ids[i]]);   
+        result += cat_converter->CalcValue(label_sum[i], total_count[i], all_fold_total_count[i],
+          static_cast<double>(fold_num_data_[i][fold_ids[i]]), fold_prior_[i][fold_ids[i]]);
       }
       result /= num_ctr_partitions_;
       return result;
     } else {
       double label_sum = 0.0f, total_count = 0.0f, all_fold_total_count = 0.0f;
       GetCTRStatForOneCatValue<false>(fid, fval, -1, -1, &label_sum, &total_count, &all_fold_total_count);
-      return cat_converter->CalcValue(label_sum, total_count, all_fold_total_count);
+      return cat_converter->CalcValue(label_sum, total_count, all_fold_total_count, static_cast<double>(num_data_));
     }
   }
 
