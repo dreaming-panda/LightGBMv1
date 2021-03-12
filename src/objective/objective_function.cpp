@@ -282,7 +282,7 @@ void InnerQuantize(const score_t value, int_score_t* out_value_int, double scale
     }
   } else {
     size_t i_lower = i_found - 1;
-    CHECK_GE(i_lower, 1);
+    CHECK_GE(i_lower, 0);
     while (scaled_value < int_values[i_lower]) {
       CHECK_GT(i_lower, 0);
       --i_lower;
