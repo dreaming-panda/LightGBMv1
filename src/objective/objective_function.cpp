@@ -272,13 +272,13 @@ void InnerQuantize(const score_t value, int_score_t* out_value_int, double scale
     }
     //CHECK_LT(i_found, int_values.size() - 2);
     CHECK_LE(scaled_value, int_values[i_upper]);
-    CHECK_GE(scaled_value, int_values[i_found]);
-    const double prob = (scaled_value - static_cast<double>(int_values[i_found])) /
-      static_cast<double>(int_values[i_upper] - int_values[i_found]);
+    CHECK_GE(scaled_value, int_values[i_upper - 1]);
+    const double prob = (scaled_value - static_cast<double>(int_values[i_upper - 1])) /
+      static_cast<double>(int_values[i_upper] - int_values[i_upper - 1]);
     if (rand_val <= prob) {
       *out_value_int = int_values[i_upper];
     } else {
-      *out_value_int = int_values[i_found];
+      *out_value_int = int_values[i_upper - 1];
     }
   } else {
     int i_lower = static_cast<int>(i_found) - 1;
@@ -289,11 +289,11 @@ void InnerQuantize(const score_t value, int_score_t* out_value_int, double scale
     }
     //CHECK_GT(i_found, 0);
     CHECK_GE(scaled_value, int_values[i_lower]);
-    CHECK_LE(scaled_value, int_values[i_found + 1]);
+    CHECK_LE(scaled_value, int_values[i_lower + 1]);
     const double prob = (scaled_value - static_cast<double>(int_values[i_lower])) /
-      static_cast<double>(int_values[i_found + 1] - int_values[i_lower]);
+      static_cast<double>(int_values[i_lower + 1] - int_values[i_lower]);
     if (rand_val <= prob) {
-      *out_value_int = int_values[i_found + 1];
+      *out_value_int = int_values[i_lower + 1];
     } else {
       *out_value_int = int_values[i_lower];
     }
