@@ -175,7 +175,7 @@ void GBDT::Boosting() {
   //    int_gradients_.data(), int_hessians_.data(), &grad_scale_, &hess_scale_);
   objective_function_->
     GetIntGradients(GetTrainingScore(&num_score), gradients_.data(), hessians_.data(),
-      int_gradients_.data(), int_hessians_.data(), &grad_quantile_, &hess_quantile_);
+      int_gradients_.data(), int_hessians_.data(), &grad_scale_, &hess_scale_);
 }
 
 data_size_t GBDT::BaggingHelper(data_size_t start, data_size_t cnt, data_size_t* buffer) {
@@ -393,7 +393,7 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
         int_grad = int_gradients_.data() + offset;
         int_hess = int_hessians_.data() + offset;
       }
-      new_tree.reset(tree_learner_->Train(grad, hess, int_grad, int_hess, grad_scale_, hess_scale_, grad_quantile_, hess_quantile_));
+      new_tree.reset(tree_learner_->Train(grad, hess, int_grad, int_hess, grad_scale_, hess_scale_));
     }
 
     if (new_tree->num_leaves() > 1) {

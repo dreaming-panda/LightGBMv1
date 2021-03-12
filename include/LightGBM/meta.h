@@ -42,7 +42,7 @@ typedef float score_t;
 
 typedef int8_t int_score_t;
 typedef int32_t int_hist_t;
-#define kIntGradBins 250
+#define kIntGradBins 4
 
 /*! \brief Type of metadata, include weight and label */
 #ifdef LABEL_T_USE_DOUBLE

@@ -56,11 +56,6 @@ class ObjectiveFunction {
     int_score_t* /*int_gradients*/, int_score_t* /*int_hessians*/,
     double* /*grad_scale*/, double* /*hess_scale*/) {}
 
-  virtual void GetIntGradients(const double* /*score*/,
-    score_t* /*gradients*/, score_t* /*hessians*/,
-    int_score_t* /*int_gradients*/, int_score_t* /*int_hessians*/,
-    std::vector<double>* /*grad_quantile*/, std::vector<double>* /*hess_quantile*/) {}
-
   virtual void DiscretizeGradients(score_t* /*gradients*/, score_t* /*hessians*/,
     int_score_t* /*int_gradients*/, int_score_t* /*int_hessians*/,
     double* /*grad_scale*/, double* /*hess_scale*/) const {}
@@ -159,11 +154,13 @@ class ObjectiveFunction {
   void GetQuantile(const score_t* gradients, const score_t* hessians,
     const int num_quantiles, const data_size_t num_data);
 
-  void Quantize(const score_t gradient, const score_t hessian, int_score_t* grad_int, int_score_t* hess_int, const int thread_id);
+  void Quantize(const score_t gradient, const score_t hessian,
+    int_score_t* grad_int, int_score_t* hess_int, const int thread_id,
+    double grad_scale_inverse, double hess_scale_inverse);
 
   void UniformDiscretizeGradients(score_t* gradients, score_t* hessians,
     int_score_t* int_gradients, int_score_t* int_hessians,
-    std::vector<double>* grad_quantiles, std::vector<double>* hess_quantiles, data_size_t num_data);
+    data_size_t num_data, double* grad_scale, double* hess_scale);
 
   std::vector<std::mt19937> rand_generators_;
   std::vector<std::uniform_real_distribution<double>> uniform_dists_;

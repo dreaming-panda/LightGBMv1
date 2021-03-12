@@ -140,8 +140,8 @@ void ObjectiveFunction::GetQuantile(const score_t* gradients, const score_t* hes
   const double hess_pre_scale = (max_hessian) / num_pre_quantiles;
   std::vector<std::vector<int>> thread_grad_cnt(num_threads), thread_hess_cnt(num_threads);
   for (int thread_id = 0; thread_id < num_threads; ++thread_id) {
-    thread_grad_cnt[thread_id].resize(num_pre_quantiles, 0);
-    thread_hess_cnt[thread_id].resize(num_pre_quantiles, 0);
+    thread_grad_cnt[thread_id].resize(num_pre_quantiles + 1, 0);
+    thread_hess_cnt[thread_id].resize(num_pre_quantiles + 1, 0);
   }
   int neg_grad_cnt = 0;
   #pragma omp parallel for schedule(static) num_threads(num_threads) reduction(+:neg_grad_cnt)
@@ -151,7 +151,7 @@ void ObjectiveFunction::GetQuantile(const score_t* gradients, const score_t* hes
     }
   }
   const int pos_grad_cnt = num_data - neg_grad_cnt;
-  std::vector<int> grad_cnt(num_pre_quantiles, 0), hess_cnt(num_pre_quantiles, 0);
+  std::vector<int> grad_cnt(num_pre_quantiles + 1, 0), hess_cnt(num_pre_quantiles + 1, 0);
   Threading::For<data_size_t>(0, num_data, 512,
     [gradients, hessians, grad_pre_scale, hess_pre_scale, max_gradient, min_gradient, max_hessian,
       &thread_grad_cnt, &thread_hess_cnt]
@@ -166,7 +166,7 @@ void ObjectiveFunction::GetQuantile(const score_t* gradients, const score_t* hes
       }
     });
   #pragma omp paralell for schedule(static)
-  for (int i = 0; i < num_pre_quantiles; ++i) {
+  for (int i = 0; i < num_pre_quantiles + 1; ++i) {
     for (int thread_id = 0; thread_id < num_threads; ++thread_id) {
       grad_cnt[i] += thread_grad_cnt[thread_id][i];
       hess_cnt[i] += thread_hess_cnt[thread_id][i];
@@ -186,7 +186,10 @@ void ObjectiveFunction::GetQuantile(const score_t* gradients, const score_t* hes
   int cur_int_grad = -num_quantiles / 2;
   for (int i = 0; i < zero_grad_quantile; ++i) {
     cur_data_cnt += grad_cnt[i];
-    if (cur_data_cnt >= num_data_neg_grad_quantile || i == zero_grad_quantile) {
+    if (cur_data_cnt == neg_grad_cnt) {
+      break;
+    }
+    if (cur_data_cnt >= num_data_neg_grad_quantile || i == zero_grad_quantile - 1) {
       grad_quantiles_.emplace_back(min_gradient + i * grad_pre_scale);
       cur_data_cnt = 0;
       ++cur_int_grad;
@@ -200,21 +203,24 @@ void ObjectiveFunction::GetQuantile(const score_t* gradients, const score_t* hes
   grad_int_map_.emplace_back(0);
   cur_data_cnt = 0;
   cur_int_grad = 0;
-  for (int i = zero_grad_quantile; i < num_pre_quantiles; ++i) {
+  for (int i = zero_grad_quantile; i < num_pre_quantiles + 1; ++i) {
     cur_data_cnt += grad_cnt[i];
+    if (cur_data_cnt == pos_grad_cnt) { 
+      break;
+    }
     if (cur_data_cnt >= num_data_pos_grad_quantile) {
       grad_quantiles_.emplace_back(min_gradient + i * grad_pre_scale);
       ++cur_int_grad;
       grad_int_map_.emplace_back(cur_int_grad);
       cur_data_cnt = 0;
-      if (static_cast<int>(grad_quantiles_.size()) == num_quantiles - 1) {
+      if (static_cast<int>(grad_quantiles_.size()) == num_quantiles) {
         break;
       }
     }
   }
   grad_int_map_.emplace_back(num_quantiles / 2);
   grad_quantiles_.emplace_back(max_gradient);
-  CHECK(grad_int_map_.size() == static_cast<size_t>(num_quantiles) + 1);
+  //CHECK(grad_int_map_.size() == static_cast<size_t>(num_quantiles) + 1);
 
 
   hess_quantiles_.clear();
@@ -224,8 +230,11 @@ void ObjectiveFunction::GetQuantile(const score_t* gradients, const score_t* hes
   cur_data_cnt = 0;
   int all_data_cnt = 0;
   int cur_int_hess = 0;
-  for (int i = 0; i < num_pre_quantiles; ++i) {
+  for (int i = 0; i < num_pre_quantiles + 1; ++i) {
     cur_data_cnt += hess_cnt[i];
+    if (cur_data_cnt == num_data) {
+      break;
+    }
     all_data_cnt += hess_cnt[i];
     if (cur_data_cnt >= num_data_per_quantile || all_data_cnt == num_data) {
       hess_quantiles_.emplace_back(i * hess_pre_scale);
@@ -239,36 +248,77 @@ void ObjectiveFunction::GetQuantile(const score_t* gradients, const score_t* hes
   }
   hess_quantiles_.emplace_back(max_hessian);
   hess_int_map_.emplace_back(num_quantiles);
-  CHECK(hess_int_map_.size() == static_cast<size_t>(num_quantiles) + 1);
+  //CHECK(hess_int_map_.size() == static_cast<size_t>(num_quantiles) + 1);
+}
+
+void InnerQuantize(const score_t value, int_score_t* out_value_int, double scale_inverse,
+  const std::vector<int>& int_values, size_t i_found, const double rand_val) {
+  const double scaled_value = value * scale_inverse;
+  if (scaled_value >= static_cast<double>(int_values[i_found]) &&
+    scaled_value <= static_cast<double>(int_values[i_found + 1])) {
+    const double prob = (scaled_value - static_cast<double>(int_values[i_found])) /
+      static_cast<double>(int_values[i_found + 1] - int_values[i_found]);
+    if (rand_val <= prob) {
+      *out_value_int = int_values[i_found + 1];
+    } else {
+      *out_value_int = int_values[i_found];
+    }
+  } else if (scaled_value > static_cast<double>(int_values[i_found + 1])) {
+    size_t i_upper = i_found + 2;
+    CHECK_LE(i_upper, int_values.size() - 1);
+    while (scaled_value > static_cast<double>(int_values[i_upper])) {
+      CHECK_LT(i_upper, int_values.size() - 1);
+      ++i_upper;
+    }
+    //CHECK_LT(i_found, int_values.size() - 2);
+    CHECK_LE(scaled_value, int_values[i_upper]);
+    CHECK_GE(scaled_value, int_values[i_found]);
+    const double prob = (scaled_value - static_cast<double>(int_values[i_found])) /
+      static_cast<double>(int_values[i_upper] - int_values[i_found]);
+    if (rand_val <= prob) {
+      *out_value_int = int_values[i_upper];
+    } else {
+      *out_value_int = int_values[i_found];
+    }
+  } else {
+    size_t i_lower = i_found - 1;
+    CHECK_GE(i_lower, 1);
+    while (scaled_value < int_values[i_lower]) {
+      CHECK_GT(i_lower, 0);
+      --i_lower;
+    }
+    //CHECK_GT(i_found, 0);
+    CHECK_GE(scaled_value, int_values[i_lower]);
+    CHECK_LE(scaled_value, int_values[i_found + 1]);
+    const double prob = (scaled_value - static_cast<double>(int_values[i_lower])) /
+      static_cast<double>(int_values[i_found + 1] - int_values[i_lower]);
+    if (rand_val <= prob) {
+      *out_value_int = int_values[i_found + 1];
+    } else {
+      *out_value_int = int_values[i_lower];
+    }
+  }
 }
 
 void ObjectiveFunction::Quantize(const score_t gradient, const score_t hessian,
-  int_score_t* grad_int, int_score_t* hess_int, const int thread_id) {
+  int_score_t* grad_int, int_score_t* hess_int, const int thread_id,
+  double grad_scale_inverse, double hess_scale_inverse) {
   auto& engine = rand_generators_[thread_id];
   auto& dist = uniform_dists_[thread_id];
   bool grad_found = false, hess_found = false;
+  const double rand_val = dist(engine);
   for (int i = 0; i < static_cast<int>(grad_quantiles_.size()) - 1; ++i) {
-    if (grad_quantiles_[i] <= gradient && grad_quantiles_[i + 1] > gradient) {
-      const double rand_val = dist(engine);
-      const double prob = (gradient - grad_quantiles_[i]) / (grad_quantiles_[i + 1] - grad_quantiles_[i]);
-      if (rand_val <= prob) {
-        *grad_int = grad_int_map_[i + 1];
-      } else {
-        *grad_int = grad_int_map_[i];
-      }
+    if (grad_quantiles_[i] <= gradient && grad_quantiles_[i + 1] >= gradient) {
+      InnerQuantize(gradient, grad_int, grad_scale_inverse, grad_int_map_, i, rand_val);
       grad_found = true;
+      break;
     }
   }
   for (int i = 0; i < static_cast<int>(hess_quantiles_.size()) - 1; ++i) {
-    if (hess_quantiles_[i] <= hessian && hess_quantiles_[i + 1] > hessian) {
-      const double rand_val = dist(engine);
-      const double prob = (hessian - hess_quantiles_[i]) / (hess_quantiles_[i + 1] - hess_quantiles_[i]);
-      if (rand_val <= prob) {
-        *hess_int = hess_int_map_[i + 1];
-      } else {
-        *hess_int = hess_int_map_[i];
-      }
+    if (hess_quantiles_[i] <= hessian && hess_quantiles_[i + 1] >= hessian) {
+      InnerQuantize(hessian, hess_int, hess_scale_inverse, hess_int_map_, i, rand_val);
       hess_found = true;
+      break;
     }
   }
   CHECK(hess_found && grad_found);
@@ -276,14 +326,31 @@ void ObjectiveFunction::Quantize(const score_t gradient, const score_t hessian,
 
 void ObjectiveFunction::UniformDiscretizeGradients(score_t* gradients, score_t* hessians,
     int_score_t* int_gradients, int_score_t* int_hessians,
-    std::vector<double>* grad_quantiles, std::vector<double>* hess_quantiles, data_size_t num_data) {
+    data_size_t num_data, double* grad_scale, double* hess_scale) {
   GetQuantile(gradients, hessians, kIntGradBins, num_data);
-  *grad_quantiles = grad_quantiles_;
-  *hess_quantiles = hess_quantiles_;
-  Threading::For<data_size_t>(0, num_data, 512, [this, gradients, hessians, int_gradients, int_hessians]
+  double grad_scale_inverse = 1.0f / (grad_quantiles_[1] - grad_quantiles_[0]);
+  double hess_scale_inverse = 1.0f / (hess_quantiles_[1] - hess_quantiles_[0]);
+  *grad_scale = (grad_quantiles_[1] - grad_quantiles_[0]);
+  *hess_scale = (hess_quantiles_[1] - hess_quantiles_[0]);
+  for (size_t i = 1; i < grad_quantiles_.size() - 1; ++i) {
+    const double scale = (grad_quantiles_[i + 1] - grad_quantiles_[i]);
+    if (scale > *grad_scale) {
+      *grad_scale = scale;
+      grad_scale_inverse = 1.0f / scale;
+    }
+  }
+  for (size_t i = 1; i < hess_quantiles_.size() - 1; ++i) {
+    const double scale = (hess_quantiles_[i + 1] - hess_quantiles_[i]);
+    if (scale > *hess_scale) {
+      *hess_scale = scale;
+      hess_scale_inverse = 1.0f / scale;
+    }
+  }
+  Threading::For<data_size_t>(0, num_data, 512,
+    [this, gradients, hessians, int_gradients, int_hessians, grad_scale_inverse, hess_scale_inverse]
     (int thread_id, data_size_t start, data_size_t end) {
     for (data_size_t i = start; i < end; ++i) {
-      Quantize(gradients[i], hessians[i], int_gradients + i, int_hessians + i, thread_id);
+      Quantize(gradients[i], hessians[i], int_gradients + i, int_hessians + i, thread_id, grad_scale_inverse, hess_scale_inverse);
     }
   });
 }

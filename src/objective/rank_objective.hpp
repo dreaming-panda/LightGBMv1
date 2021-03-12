@@ -69,18 +69,9 @@ class RankingObjective : public ObjectiveFunction {
     int_score_t* int_gradients, int_score_t* int_hessians,
     double* grad_scale, double* hess_scale) override {
     GetGradients(score, gradients, hessians);
-    DiscretizeGradients(gradients, hessians, int_gradients, int_hessians,
+    UniformDiscretizeGradients(gradients, hessians, int_gradients, int_hessians, num_data_,
       grad_scale, hess_scale);
   }
-
-  virtual void GetIntGradients(const double* score,
-    score_t* gradients, score_t* hessians,
-    int_score_t* int_gradients, int_score_t* int_hessians,
-    std::vector<double>* grad_quantile, std::vector<double>* hess_quantile) override {
-    GetGradients(score, gradients, hessians);
-    UniformDiscretizeGradients(gradients, hessians, int_gradients, int_hessians, grad_quantile, hess_quantile, num_data_);
-  }
-
   
   void ClipAndDiscretizeGradients(score_t* gradients, score_t* hessians,
     int_score_t* int_gradients, int_score_t* int_hessians,
