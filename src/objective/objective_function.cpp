@@ -94,7 +94,7 @@ ObjectiveFunction* ObjectiveFunction::CreateObjectiveFunction(const std::string&
   return nullptr;
 }
 
-void ObjectiveFunction::GetQuantile(const score_t* gradients, const score_t* hessians,
+bool ObjectiveFunction::GetQuantile(const score_t* gradients, const score_t* hessians,
     const int num_quantiles, const data_size_t num_data) {
   const int num_threads = OMP_NUM_THREADS();
   std::vector<score_t> thread_max_gradient(num_threads, gradients[0]), thread_min_gradient(num_threads, gradients[0]);
@@ -249,6 +249,19 @@ void ObjectiveFunction::GetQuantile(const score_t* gradients, const score_t* hes
   hess_quantiles_.emplace_back(max_hessian);
   hess_int_map_.emplace_back(num_quantiles);
   //CHECK(hess_int_map_.size() == static_cast<size_t>(num_quantiles) + 1);
+  double max_length = 0.0f;
+  size_t max_pos = 0;
+  for (int i = 0; i < static_cast<int>(grad_quantiles_.size()) - 1; ++i) {
+    const double length = grad_quantiles_[i + 1] - grad_quantiles_[i];
+    if (length > max_length) {
+      max_pos = i;
+    }
+  }
+  if (max_pos == 0 || static_cast<int>(max_pos) == static_cast<int>(grad_quantiles_.size()) - 1) {
+    return false;
+  } else {
+    return true;
+  }
 }
 
 void InnerQuantize(const score_t value, int_score_t* out_value_int, double scale_inverse,
@@ -327,7 +340,7 @@ void ObjectiveFunction::Quantize(const score_t gradient, const score_t hessian,
 void ObjectiveFunction::UniformDiscretizeGradients(score_t* gradients, score_t* hessians,
     int_score_t* int_gradients, int_score_t* int_hessians,
     data_size_t num_data, double* grad_scale, double* hess_scale) {
-  GetQuantile(gradients, hessians, kIntGradBins, num_data);
+  bool use_non_uniform_quantile = GetQuantile(gradients, hessians, kIntGradBins, num_data);
   double grad_scale_inverse = 1.0f / (grad_quantiles_[1] - grad_quantiles_[0]);
   double hess_scale_inverse = 1.0f / (hess_quantiles_[1] - hess_quantiles_[0]);
   *grad_scale = (grad_quantiles_[1] - grad_quantiles_[0]);

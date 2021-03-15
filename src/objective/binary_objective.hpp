@@ -148,7 +148,7 @@ class BinaryLogloss: public ObjectiveFunction {
     GetGradients(score, gradients, hessians);
     //DiscretizeGradients(gradients, hessians, int_gradients, int_hessians,
     //  grad_scale, hess_scale);
-    UniformDiscretizeGradients(gradients, hessians, int_gradients, int_hessians, num_data_,
+    DiscretizeGradients(gradients, hessians, int_gradients, int_hessians,
       grad_scale, hess_scale);
   }
 
@@ -260,7 +260,7 @@ class BinaryLogloss: public ObjectiveFunction {
     std::vector<double> thread_min_gradient(num_threads, max_gradient);
     std::vector<double> thread_min_hessian(num_threads, max_hessian);
     static int iter = 0;
-    DumpGradientToFile(gradients, hessians, iter, num_data_, 1, "no_clip", 0.0f, 0.0f, false);
+    //DumpGradientToFile(gradients, hessians, iter, num_data_, 1, "no_clip", 0.0f, 0.0f, false);
     Threading::For<data_size_t>(0, num_data_, 1024,
       [gradients, hessians, &thread_max_gradient, &thread_max_hessian,
         &thread_min_gradient, &thread_min_hessian]
@@ -347,7 +347,7 @@ class BinaryLogloss: public ObjectiveFunction {
         int_hessians[i] = int_hess + 1;
       }
     }
-    DumpGradientToFile(int_gradients, int_hessians, iter, num_data_, 1, "no_clip_discretized", *grad_scale, *hess_scale, true);
+    //DumpGradientToFile(int_gradients, int_hessians, iter, num_data_, 1, "no_clip_discretized", *grad_scale, *hess_scale, true);
     ++iter;
   }
 

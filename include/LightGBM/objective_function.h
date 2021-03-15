@@ -151,7 +151,7 @@ class ObjectiveFunction {
   LIGHTGBM_EXPORT static ObjectiveFunction* CreateObjectiveFunction(const std::string& str);
 
  protected:
-  void GetQuantile(const score_t* gradients, const score_t* hessians,
+  bool GetQuantile(const score_t* gradients, const score_t* hessians,
     const int num_quantiles, const data_size_t num_data);
 
   void Quantize(const score_t gradient, const score_t hessian,
