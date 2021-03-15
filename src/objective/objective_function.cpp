@@ -264,7 +264,12 @@ bool ObjectiveFunction::GetQuantile(const score_t* gradients, const score_t* hes
   if (max_pos == 0 || static_cast<int>(max_pos) == static_cast<int>(grad_quantiles_.size()) - 1) {
     return false;
   } else {
-    return true;
+    const int num_quantiles = static_cast<int>(grad_quantiles_.size());
+    if (std::fabs(std::fabs(grad_quantiles_[num_quantiles - 1]) - std::fabs(grad_quantiles_[1])) >= 0.05) {
+      return false;
+    } else {
+      return true;
+    }
   }
 }
 
