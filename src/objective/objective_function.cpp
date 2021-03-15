@@ -383,7 +383,7 @@ void ObjectiveFunction::UniformDiscretizeGradients(score_t* gradients, score_t* 
       (int thread_id, data_size_t start, data_size_t end) {
         for (data_size_t i = start; i < end; ++i) {
           const score_t hessian = hessians[i];
-          const int low_int_hess = std::lround(hessian * h_inverse_scale);
+          const int low_int_hess = static_cast<int>(hessian * h_inverse_scale);
           const int high_int_hess = low_int_hess + 1;
           const score_t low_hessian = low_int_hess * hess_scale;
           const score_t high_hessian = high_int_hess * hess_scale;
@@ -404,7 +404,7 @@ void ObjectiveFunction::UniformDiscretizeGradients(score_t* gradients, score_t* 
       (int thread_id, data_size_t start, data_size_t end) {
         for (data_size_t i = start; i < end; ++i) {
           const score_t gradient = gradients[i];
-          const int low_int_grad = std::lround(gradient * g_inverse_scale);
+          const int low_int_grad = static_cast<int>(gradient * g_inverse_scale);
           const int high_int_grad = gradient >= 0.0f ? low_int_grad + 1 : low_int_grad - 1;
           const score_t low_gradient = low_int_grad * grad_scale;
           const score_t high_gradient = high_int_grad * grad_scale;
@@ -413,7 +413,7 @@ void ObjectiveFunction::UniformDiscretizeGradients(score_t* gradients, score_t* 
           int_gradients[i] = grad_prob <= rand_val_grad ? high_int_grad : low_int_grad;
 
           const score_t hessian = hessians[i];
-          const int low_int_hess = std::lround(hessian * h_inverse_scale);
+          const int low_int_hess = static_cast<int>(hessian * h_inverse_scale);
           const int high_int_hess = low_int_hess + 1;
           const score_t low_hessian = low_int_hess * hess_scale;
           const score_t high_hessian = high_int_hess * hess_scale;
