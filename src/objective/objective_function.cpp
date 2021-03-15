@@ -323,17 +323,18 @@ void ObjectiveFunction::Quantize(const score_t gradient, const score_t hessian,
   auto& engine = rand_generators_[thread_id];
   auto& dist = uniform_dists_[thread_id];
   bool grad_found = false, hess_found = false;
-  const double rand_val = dist(engine);
+  const double rand_val_grad = dist(engine);
+  const double rand_val_hess = dist(engine);
   for (int i = 0; i < static_cast<int>(grad_quantiles_.size()) - 1; ++i) {
     if (grad_quantiles_[i] <= gradient && grad_quantiles_[i + 1] >= gradient) {
-      InnerQuantize(gradient, grad_int, grad_scale_inverse, grad_int_map_, i, rand_val);
+      InnerQuantize(gradient, grad_int, grad_scale_inverse, grad_int_map_, i, rand_val_grad);
       grad_found = true;
       break;
     }
   }
   for (int i = 0; i < static_cast<int>(hess_quantiles_.size()) - 1; ++i) {
     if (hess_quantiles_[i] <= hessian && hess_quantiles_[i + 1] >= hessian) {
-      InnerQuantize(hessian, hess_int, hess_scale_inverse, hess_int_map_, i, rand_val);
+      InnerQuantize(hessian, hess_int, hess_scale_inverse, hess_int_map_, i, rand_val_hess);
       hess_found = true;
       break;
     }
