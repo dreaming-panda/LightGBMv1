@@ -148,7 +148,7 @@ class BinaryLogloss: public ObjectiveFunction {
     GetGradients(score, gradients, hessians);
     //DiscretizeGradients(gradients, hessians, int_gradients, int_hessians,
     //  grad_scale, hess_scale);
-    DiscretizeGradients(gradients, hessians, int_gradients, int_hessians,
+    UniformDiscretizeGradients(gradients, hessians, int_gradients, int_hessians, num_data_,
       grad_scale, hess_scale);
   }
 
@@ -425,7 +425,7 @@ class BinaryLogloss: public ObjectiveFunction {
       const int thread_id = omp_get_thread_num();
       const score_t gradient = gradients[i];
       const score_t hessian = hessians[i];
-      const int_score_t int_grad = static_cast<int_score_t>(std::lround(gradient * g_inverse_scale));
+      /*const int_score_t int_grad = static_cast<int_score_t>(std::lround(gradient * g_inverse_scale));
       const int_score_t int_hess = static_cast<int_score_t>(std::lround(hessian * h_inverse_scale));
       const score_t gradient_low = std::abs(int_grad) >= quantile_threshold ? int_grad * gs : 0.0f;
       const score_t gradient_high = std::abs(int_grad) >= quantile_threshold ?
@@ -450,7 +450,12 @@ class BinaryLogloss: public ObjectiveFunction {
         int_hessians[i] = int_hess;
       } else {
         int_hessians[i] = int_hess + 1;
-      }
+      }*/
+      const int_score_t int_grad = gradient > 0.0f ? static_cast<int>(gradient * g_inverse_scale + 0.5f) :
+        static_cast<int>(gradient * g_inverse_scale - 0.5f);
+      const int_score_t int_hess = static_cast<int>(hessian * h_inverse_scale + 0.5f);
+      int_gradients[i] = int_grad;
+      int_hessians[i] = int_hess;
     }
     //DumpGradientToFile(int_gradients, int_hessians, iter, num_data_, 1, "non_uniform_discretized", *grad_scale, *hess_scale, true);
     ++iter;

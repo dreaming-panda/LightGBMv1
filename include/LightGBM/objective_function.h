@@ -152,7 +152,9 @@ class ObjectiveFunction {
 
  protected:
   bool GetQuantile(const score_t* gradients, const score_t* hessians,
-    const int num_quantiles, const data_size_t num_data);
+    const int num_quantiles, const data_size_t num_data,
+    score_t* max_gradient, score_t* min_gradient,
+    score_t* max_hessian, score_t* min_hessian);
 
   void Quantize(const score_t gradient, const score_t hessian,
     int_score_t* grad_int, int_score_t* hess_int, const int thread_id,
