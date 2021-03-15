@@ -389,7 +389,7 @@ void ObjectiveFunction::UniformDiscretizeGradients(score_t* gradients, score_t* 
           const score_t high_hessian = high_int_hess * hess_scale;
           const double hess_prob = (hessian - low_hessian) / (high_hessian - low_hessian);
           const double rand_val_hess = uniform_dists_[thread_id](rand_generators_[thread_id]);
-          int_hessians[i] = hess_prob <= rand_val_hess ? high_int_hess : low_int_hess;
+          int_hessians[i] = rand_val_hess <= hess_prob ? high_int_hess : low_int_hess;
         }
       });
   } else {
@@ -410,7 +410,7 @@ void ObjectiveFunction::UniformDiscretizeGradients(score_t* gradients, score_t* 
           const score_t high_gradient = high_int_grad * grad_scale;
           const double grad_prob = (gradient - low_gradient) / (high_gradient - low_gradient);
           const double rand_val_grad = uniform_dists_[thread_id](rand_generators_[thread_id]);
-          int_gradients[i] = grad_prob <= rand_val_grad ? high_int_grad : low_int_grad;
+          int_gradients[i] = rand_val_grad <= grad_prob ? high_int_grad : low_int_grad;
 
           const score_t hessian = hessians[i];
           const int low_int_hess = static_cast<int>(hessian * h_inverse_scale);
@@ -419,7 +419,7 @@ void ObjectiveFunction::UniformDiscretizeGradients(score_t* gradients, score_t* 
           const score_t high_hessian = high_int_hess * hess_scale;
           const double hess_prob = (hessian - low_hessian) / (high_hessian - low_hessian);
           const double rand_val_hess = uniform_dists_[thread_id](rand_generators_[thread_id]);
-          int_hessians[i] = hess_prob <= rand_val_hess ? high_int_hess : low_int_hess;
+          int_hessians[i] = rand_val_hess <= hess_prob ? high_int_hess : low_int_hess;
         }
       });
   }
