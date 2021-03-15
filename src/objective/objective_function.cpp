@@ -261,11 +261,19 @@ bool ObjectiveFunction::GetQuantile(const score_t* gradients, const score_t* hes
       max_pos = i;
     }
   }
-  if (max_pos == 0 || static_cast<int>(max_pos) == static_cast<int>(grad_quantiles_.size()) - 1) {
+  if (grad_quantiles_.size() > 3 && (max_pos == 0 ||
+    static_cast<int>(max_pos) == static_cast<int>(grad_quantiles_.size()) - 1)) {
     return false;
   } else {
     const int num_quantiles = static_cast<int>(grad_quantiles_.size());
-    if (std::fabs(std::fabs(grad_quantiles_[num_quantiles - 1]) - std::fabs(grad_quantiles_[1])) >= 0.05) {
+    for (int i = 0; i < num_quantiles; ++i) {
+      Log::Warning("grad_quantile_[%d] = %f", i, grad_quantiles_[i]);
+    }
+    for (size_t i = 0; i < hess_quantiles_.size(); ++i) {
+      Log::Warning("hess_quantile_[%d] = %f", i, hess_quantiles_[i]);
+    }
+    if (grad_quantiles_.size() > 3 &&
+      std::fabs(std::fabs(grad_quantiles_[num_quantiles - 1]) - std::fabs(grad_quantiles_[1])) >= 0.1) {
       return false;
     } else {
       return true;
