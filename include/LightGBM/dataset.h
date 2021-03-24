@@ -684,6 +684,10 @@ class Dataset {
     data_size_t num_data_in_small_leaf, data_size_t* data_indices_in_small_leaf,
     SMALL_LEAF_INDEX_T* small_leaf_indices) const;
 
+  int group_feature_start(const int group) const {
+    return group_feature_start_[group];
+  }
+
  private:
   std::string data_filename_;
   /*! \brief Store used features */

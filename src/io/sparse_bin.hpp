@@ -195,6 +195,67 @@ class SparseBin : public Bin {
       cur_pos += deltas_[++i_delta];
     }
   }
+
+  template <bool USE_HESSIAN>
+  void ConstructSymmetricTreeHistogramInner(data_size_t num_data_in_small_leaf,
+    const data_size_t* data_indices_in_small_leaf,
+    const int32_t* small_leaf_indices,
+    const score_t* ordered_gradients, const score_t* ordered_hessians,
+    std::vector<hist_t*>& out) const {
+    data_size_t i_delta, cur_pos;
+    const data_size_t start = data_indices_in_small_leaf[0];
+    InitIndex(start, &i_delta, &cur_pos);
+    data_size_t i = start;
+    hist_t* grad = out;
+    hist_cnt_t* cnt = reinterpret_cast<hist_cnt_t*>(out + 1);
+    for (;;) {
+      if (cur_pos < data_indices_in_small_leaf[i]) {
+        cur_pos += deltas_[++i_delta];
+        if (i_delta >= num_vals_) {
+          break;
+        }
+      } else if (cur_pos > data_indices_in_small_leaf[i]) {
+        if (++i >= num_data_in_small_leaf) {
+          break;
+        }
+      } else {
+        const uint32_t ti = static_cast<uint32_t>(vals_[i_delta]) << 1;
+        hist_t* leaf_out = out[small_leaf_indices[i]];
+        leaf_out[ti << 1] += ordered_gradients[i];
+        if (USE_HESSIAN) {
+          leaf_out[(ti << 1) + 1] += ordered_hessians[i]; 
+        } else {
+          leaf_out[(ti << 1) + 1] += 1.0f;
+        }
+        if (++i >= num_data_in_small_leaf) {
+          break;
+        }
+        cur_pos += deltas_[++i_delta];
+        if (i_delta >= num_vals_) {
+          break;
+        }
+      }
+    }
+  }
+
+  void ConstructSymmetricTreeHistogramInner(data_size_t num_data_in_small_leaf,
+    const data_size_t* data_indices_in_small_leaf,
+    const int32_t* small_leaf_indices,
+    const score_t* ordered_gradients, const score_t* ordered_hessians,
+    std::vector<hist_t*>& out) const override {
+    ConstructSymmetricTreeHistogramInner<true>(num_data_in_small_leaf, data_indices_in_small_leaf, small_leaf_indices,
+      ordered_gradients, ordered_hessians, out);
+  }
+
+  void ConstructSymmetricTreeHistogramInner(data_size_t num_data_in_small_leaf,
+    const data_size_t* data_indices_in_small_leaf,
+    const int32_t* small_leaf_indices,
+    const score_t* ordered_gradients,
+    std::vector<hist_t*>& out) const override {
+    ConstructSymmetricTreeHistogramInner<false>(num_data_in_small_leaf, data_indices_in_small_leaf, small_leaf_indices,
+      ordered_gradients, nullptr, out);
+  }
+
 #undef ACC_GH
 
   inline void NextNonzeroFast(data_size_t* i_delta,

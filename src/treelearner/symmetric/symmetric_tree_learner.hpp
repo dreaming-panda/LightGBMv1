@@ -17,7 +17,7 @@ class SymmetricTreeLearner : public SerialTreeLearner {
   
   ~SymmetricTreeLearner();
 
-  void Init();
+  void Init(const Dataset* train_data, bool is_constant_hessian) override;
 
   void ResetTrainingDataInner(const Dataset* train_data,
                               bool is_constant_hessian,
@@ -40,15 +40,41 @@ class SymmetricTreeLearner : public SerialTreeLearner {
 
   void FindBestLevelSplits();
 
-  void SplitLevel();
+  void FindBestLevelSplitsForFeature(const int inner_feature_index, const int thread_id);
+
+  void SplitLevel(Tree* tree);
 
  protected:
-  void PrepareLevelHistograms(const int depth);
+
+  void BeforeTrain() override;
+
+  void PrepareLevelHistograms();
+
+  void SetUpLevelInfo(const int depth);
 
   SymmetricHistogramPool symmetric_histogram_pool_;
   std::vector<FeatureHistogram*> level_feature_histograms_;
   std::vector<int> leaf_ids_in_current_level_;
   SymmetricDataPartition symmetric_data_partition_;
+  std::vector<std::unique_ptr<LeafSplits>> level_leaf_splits_;
+  const int max_depth_;
+  const int max_num_leaves_;
+  const int num_threads_;
+
+  int cur_depth_;
+  int num_leaves_in_cur_level_;
+  std::vector<int8_t> used_features_in_cur_level_;
+  std::vector<std::vector<int>> paired_leaf_indices_in_cur_level_;
+  int best_inner_feature_index_cur_level_;
+  int best_threshold_cur_level_;
+  double best_gain_cur_level_;
+  int best_split_direction_cur_level_;
+  std::vector<int8_t> best_leaf_in_level_should_be_split_;
+  std::vector<int> thread_best_inner_feature_index_cur_level_;
+  std::vector<int> thread_best_threshold_cur_level_;
+  std::vector<double> thread_best_gain_cur_level_;
+  std::vector<int8_t> thread_best_split_direction_cur_level_;
+  std::vector<std::vector<int8_t>> thread_leaf_in_level_should_be_split_;
 };
 
 }  // namespace LightGBM

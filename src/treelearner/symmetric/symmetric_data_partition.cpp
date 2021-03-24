@@ -16,7 +16,7 @@ num_data_(num_data) {
 void SymmetricDataPartition::ConstructLevelHistograms(
   std::vector<FeatureHistogram*>* level_feature_histogram,
   const Dataset* train_data,
-  std::vector<uint8_t> is_feature_group_used,
+  const std::vector<uint8_t>& is_feature_group_used,
   const score_t* gradients, const score_t* hessians) const {
   int num_threads = OMP_NUM_THREADS();
   if (is_col_wise_) {
@@ -27,15 +27,16 @@ void SymmetricDataPartition::ConstructLevelHistograms(
     for (int i = 0; i < num_used_feature_groups; ++i) {
       const int group_index = used_feature_groups[i];
       std::vector<hist_t*> group_hist_ptr;
-      for (size_t i = 0; i < level_feature_histogram->size(); ++i) {
-        FeatureHistogram* feature_histograms = level_feature_histogram->operator[](i);
-        hist_t* hist_ptr = feature_histograms[0].RawData() - 1 +
-           * train_data->FeatureGroupNumBin(group_index) * kHistOffset;
-          group_hist_ptr.emplace_back(hist_ptr);
+      for (size_t j = 0; j < level_feature_histogram->size(); ++j) {
+        FeatureHistogram* feature_histograms = (*level_feature_histogram)[j];
+        hist_t* hist_ptr = feature_histograms[train_data->group_feature_start(group_index)].RawData() - 1;
+        group_hist_ptr.emplace_back(hist_ptr);
       }
       train_data->ConstructSymmetricLevelHistogram(group_index, group_hist_ptr, gradients, hessians,
-        );
+        num_data_in_small_leaf_, data_indices_in_small_leaf_.data(), data_index_to_small_leaf_index_.data());
     }
+  } else {
+    Log::Fatal("symmetric tree with row-wise histogram construction is currently unsupported.");
   }
 }
 
@@ -52,6 +53,8 @@ void SymmetricDataPartition::GetUsedFeatureGroups(
       }
     }
   }
+}
+
 }
 
 } //  namespace LightGBM

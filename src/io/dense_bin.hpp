@@ -170,6 +170,45 @@ class DenseBin : public Bin {
         nullptr, start, end, ordered_gradients, nullptr, out);
   }
 
+  template <bool USE_HESSIAN>
+  void ConstructSymmetricTreeHistogramInner(data_size_t num_data_in_small_leaf,
+    const data_size_t* data_indices_in_small_leaf,
+    const int32_t* small_leaf_indices,
+    const score_t* ordered_gradients, const score_t* ordered_hessians,
+    std::vector<hist_t*>& out) const override {
+    for (data_size_t i = 0; i < num_data_in_small_leaf; ++i) {
+      const data_size_t data_index = data_indices_in_small_leaf[i];
+      const int32_t small_leaf_index = small_leaf_indices[i];
+      const score_t gradient = ordered_gradients[i];
+      const score_t hessian = ordered_hessians[i];
+      const auto bin = data(data_index);
+      if (USE_HESSIAN) {
+        hist[bin << 1] += gradient;
+        hist[(bin << 1) + 1] += hessian;
+      } else {
+        hist[bin << 1] += gradient;
+        hist[(bin << 1) + 1] += 1.0f;
+      }
+    }
+  }
+
+  void ConstructSymmetricTreeHistogram(data_size_t num_data_in_small_leaf,
+    const data_size_t* data_indices_in_small_leaf,
+    const int32_t* small_leaf_indices,
+    const score_t* ordered_gradients,
+    std::vector<hist_t*>& out) const override {
+    ConstructSymmetricTreeHistogramInner<true>(num_data_in_small_leaf,
+      data_indices_in_small_leaf, small_leaf_indices, ordered_gradients, ordered_gradients);
+  }
+
+  void ConstructSymmetricTreeHistogram(data_size_t num_data_in_small_leaf,
+    const data_size_t* data_indices_in_small_leaf,
+    const int32_t* small_leaf_indices,
+    const score_t* ordered_gradients,
+    std::vector<hist_t*>& out) const override {
+    ConstructSymmetricTreeHistogramInner<false>(num_data_in_small_leaf,
+      data_indices_in_small_leaf, small_leaf_indices, ordered_gradients, nullptr);
+  }
 
   template <bool MISS_IS_ZERO, bool MISS_IS_NA, bool MFB_IS_ZERO,
             bool MFB_IS_NA, bool USE_MIN_BIN>
