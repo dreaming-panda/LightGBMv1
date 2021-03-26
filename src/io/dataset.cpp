@@ -1471,7 +1471,7 @@ void Dataset::ConstructSymmetricLevelHistogram(
     const int group_index, const std::vector<hist_t*>& out, score_t* gradients, score_t* hessians,
     data_size_t num_data_in_small_leaf, data_size_t* data_indices_in_small_leaf,
     SMALL_LEAF_INDEX_T* small_leaf_indices) const {
-  feature_groups_[group_index]->bin_data_->ConstructSymmetricLevelHistogram(
+  feature_groups_[group_index]->bin_data_->ConstructSymmetricTreeHistogram(
     num_data_in_small_leaf, data_indices_in_small_leaf, small_leaf_indices, gradients, hessians, out);
 }
 

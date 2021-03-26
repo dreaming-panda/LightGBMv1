@@ -206,8 +206,6 @@ class SparseBin : public Bin {
     const data_size_t start = data_indices_in_small_leaf[0];
     InitIndex(start, &i_delta, &cur_pos);
     data_size_t i = start;
-    hist_t* grad = out;
-    hist_cnt_t* cnt = reinterpret_cast<hist_cnt_t*>(out + 1);
     for (;;) {
       if (cur_pos < data_indices_in_small_leaf[i]) {
         cur_pos += deltas_[++i_delta];
@@ -238,7 +236,7 @@ class SparseBin : public Bin {
     }
   }
 
-  void ConstructSymmetricTreeHistogramInner(data_size_t num_data_in_small_leaf,
+  void ConstructSymmetricTreeHistogram(data_size_t num_data_in_small_leaf,
     const data_size_t* data_indices_in_small_leaf,
     const int32_t* small_leaf_indices,
     const score_t* ordered_gradients, const score_t* ordered_hessians,
@@ -247,7 +245,7 @@ class SparseBin : public Bin {
       ordered_gradients, ordered_hessians, out);
   }
 
-  void ConstructSymmetricTreeHistogramInner(data_size_t num_data_in_small_leaf,
+  void ConstructSymmetricTreeHistogram(data_size_t num_data_in_small_leaf,
     const data_size_t* data_indices_in_small_leaf,
     const int32_t* small_leaf_indices,
     const score_t* ordered_gradients,
