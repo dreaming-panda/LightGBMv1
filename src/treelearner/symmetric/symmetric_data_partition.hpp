@@ -20,6 +20,9 @@ class SymmetricDataPartition {
                                 const Dataset* train_data,
                                 std::vector<uint8_t> is_feature_group_used,
                                 const score_t* gradients, const score_t* hessians) const;
+
+  void Split(const int leaf, const Dataset* train_data, const int inner_feature_index,
+    const int threshold, const int8_t default_left, const int right_leaf);
  private:
   void GetUsedFeatureGroups(const std::vector<uint8_t>& is_feature_used,
                             const Dataset* train_data,
