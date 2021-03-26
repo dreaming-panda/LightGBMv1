@@ -70,13 +70,30 @@ class SymmetricHistogramPool : public HistogramPool {
     std::vector<std::vector<data_size_t>> thread_right_count_;
 };
 
+#define FindBestThreaholdFromLevelHistogramsInner_ARGS
+  parent_sum_gradient,\
+  parent_sum_hessian,\
+  parent_num_data,\
+  parent_output,\
+  min_gain_shift,\
+  level_histogram_ptr,\
+  num_leaves_in_cur_level,\
+  inner_feature_index,\
+  thread_id,\
+  best_inner_feature_index,\
+  best_threshold,\
+  best_gain,\
+  default_left
+
 void SymmetricHistogramPool::FindBestThreaholdFromLevelHistograms(const int inner_feature_index,
   const std::vector<std::vector<int>>& paired_leaf_indices_in_cur_level,
   const std::vector<int>& leaf_indices_in_cur_level,
+  const std::vector<double>& parent_sum_gradient,
+  const std::vector<double>& parent_sum_hessian,
+  const std::vector<data_size_t>& parent_num_data,
+  const std::vector<double>& parent_output,
   int* best_inner_feature_index, int* best_threshold,
-  double* best_gain, int* best_direction,
-  std::vector<int>* thread_leaf_in_level_should_be_split,
-  int8_t* default_left, const int thread_id,
+  double* best_gain, int8_t* default_left, const int thread_id,
   const int num_leaves_in_cur_level) {
   const int num_pairs = static_cast<int>(paired_leaf_indices_in_cur_level.size());
   for (int i = 0; i < num_pairs; ++i) {
@@ -95,6 +112,8 @@ void SymmetricHistogramPool::FindBestThreaholdFromLevelHistograms(const int inne
     }
   }
   std::vector<hist_t*> level_histogram_ptr(num_leaves_in_cur_level, nullptr);
+  std::vector<double> min_gain_shift(num_leaves_in_cur_level, 0.0f);
+  const auto& meta = feature_metas_[inner_feature_index];
   for (int leaf_index_in_level = 0; leaf_index_in_level < num_leaves_in_cur_level; ++leaf_index_in_level) {
     const int leaf_index = leaf_indices_in_cur_level[leaf_index_in_level];
     FeatureHistogram* feature_histogram = nullptr;
@@ -102,8 +121,54 @@ void SymmetricHistogramPool::FindBestThreaholdFromLevelHistograms(const int inne
     level_histogram_ptr[leaf_index_in_level] = feature_histogram->RawData();
     CHECK(get);
   }
-  
-  FindBestThreaholdFromLevelHistogramsInner()
+  const bool use_l1 = meta.config->lambda_l1 > 0.0f;
+  for (int leaf_index_in_level = 0; leaf_index_in_level < num_leaves_in_cur_level; ++leaf_index_in_level) {
+    if (use_l1) {
+      min_gain_shift[leaf_index_in_level] = GetLeafGain<true, false, false>(
+        parent_sum_gradient[leaf_index_in_level],
+        parent_sum_hessian[leaf_index_in_level],
+        meta.config->lambda_l1, meta.config->lambda_l2,
+        meta.config->max_delta_step, meta.config->path_smooth,
+        parent_num_data[leaf_index_in_level],
+        parent_output[leaf_index_in_level]) + meta.config->min_gain_to_split;
+    } else {
+      min_gain_shift[leaf_index_in_level] = GetLeafGain<false, false, false>(
+        parent_sum_gradient[leaf_index_in_level],
+        parent_sum_hessian[leaf_index_in_level],
+        meta.config->lambda_l1, meta.config->lambda_l2,
+        meta.config->max_delta_step, meta.config->path_smooth,
+        parent_num_data[leaf_index_in_level],
+        parent_output[leaf_index_in_level]) + meta.config->min_gain_to_split;
+    }
+  }
+  if (meta.num_bin > 2 && meta.missing_type != MissingType::None) {
+    if (meta.missing_type == MissingType::Zero) {
+      if (use_l1) {
+        FindBestThreaholdFromLevelHistogramsInner<true, true, true, false>(FindBestThreaholdFromLevelHistogramsInner_ARGS);
+        FindBestThreaholdFromLevelHistogramsInner<true, false, true, false>(FindBestThreaholdFromLevelHistogramsInner_ARGS);
+      } else {
+        FindBestThreaholdFromLevelHistogramsInner<false, true, true, false>(FindBestThreaholdFromLevelHistogramsInner_ARGS);
+        FindBestThreaholdFromLevelHistogramsInner<false, false, true, false>(FindBestThreaholdFromLevelHistogramsInner_ARGS);
+      }
+    } else {
+      if (use_l1) {
+        FindBestThreaholdFromLevelHistogramsInner<true, true, false, true>(FindBestThreaholdFromLevelHistogramsInner_ARGS);
+        FindBestThreaholdFromLevelHistogramsInner<true, false, false, true>(FindBestThreaholdFromLevelHistogramsInner_ARGS);
+      } else {
+        FindBestThreaholdFromLevelHistogramsInner<false, true, false, true>(FindBestThreaholdFromLevelHistogramsInner_ARGS);
+        FindBestThreaholdFromLevelHistogramsInner<false, false, false, true>(FindBestThreaholdFromLevelHistogramsInner_ARGS);
+      }
+    }
+  } else {
+    if (use_l1) {
+      FindBestThreaholdFromLevelHistogramsInner<true, true, false, false>(FindBestThreaholdFromLevelHistogramsInner_ARGS);
+    } else {
+      FindBestThreaholdFromLevelHistogramsInner<false, true, false, false>(FindBestThreaholdFromLevelHistogramsInner_ARGS);
+    }
+    if (meta.missing_type == MissingType::NaN) {
+      *default_left = 0;
+    }
+  }
 }
 
 #define GET_GRAD(hist, i) hist[(i) << 1]
@@ -120,6 +185,7 @@ void SymmetricHistogramPool::FindBestThreaholdFromLevelHistogramsInner(
   const int num_leaves_in_cur_level,
   const int inner_feature_index,
   const int thread_id,
+  int* best_inner_feature_index,
   int* best_threshold,
   double* best_gain,
   int8_t* best_default_left) {
@@ -203,6 +269,7 @@ void SymmetricHistogramPool::FindBestThreaholdFromLevelHistogramsInner(
       }
       if (is_valid) {
         if (threshold_gain > *best_gain) {
+          *best_inner_feature_index = inner_feature_index;
           *best_gain = threshold_gain;
           *best_threshold = t - 1 + offset;
           *best_default_left = REVSERSE;
@@ -298,6 +365,7 @@ void SymmetricHistogramPool::FindBestThreaholdFromLevelHistogramsInner(
           }
           if (is_valid) {
             if (threshold_gain > *best_gain) {
+              *best_inner_feature_index = inner_feature_index;
               *best_gain = threshold_gain;
               *best_threshold = t + offset;
               *best_default_left = REVSERSE;

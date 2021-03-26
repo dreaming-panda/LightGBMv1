@@ -53,9 +53,10 @@ class SymmetricTreeLearner : public SerialTreeLearner {
   void SetUpLevelInfo(const int depth);
 
   SymmetricHistogramPool symmetric_histogram_pool_;
+  SymmetricDataPartition symmetric_data_partition_;
+
   std::vector<FeatureHistogram*> level_feature_histograms_;
   std::vector<int> leaf_indices_in_cur_level_;
-  SymmetricDataPartition symmetric_data_partition_;
   std::vector<std::unique_ptr<LeafSplits>> level_leaf_splits_;
   const int max_depth_;
   const int max_num_leaves_;
@@ -69,16 +70,13 @@ class SymmetricTreeLearner : public SerialTreeLearner {
   int best_inner_feature_index_cur_level_;
   int best_threshold_cur_level_;
   double best_gain_cur_level_;
-  int best_split_direction_cur_level_;
-  int8_t best_split_default_left_;
+  int8_t best_split_default_left_cur_level_;
   std::vector<int8_t> best_leaf_in_level_should_be_split_;
 
   std::vector<int> thread_best_inner_feature_index_cur_level_;
   std::vector<int> thread_best_threshold_cur_level_;
   std::vector<double> thread_best_gain_cur_level_;
-  std::vector<int8_t> thread_best_split_direction_cur_level_;
-  std::vector<std::vector<int8_t>> thread_leaf_in_level_should_be_split_;
-  std::vector<int8_t> thread_best_split_default_left_;
+  std::vector<int8_t> thread_best_split_default_left_cur_level_;
 
   std::vector<double> best_level_left_output_;
   std::vector<double> best_level_right_output_;

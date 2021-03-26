@@ -28,7 +28,6 @@ void SymmetricTreeLearner::Init(const Dataset* train_data, bool is_constant_hess
   thread_best_inner_feature_index_cur_level_.resize(num_threads_, -1);
   thread_best_threshold_cur_level_.resize(num_threads_, -1);
   thread_best_gain_cur_level_.resize(num_threads_, kMinScore);
-  thread_best_split_direction_.resize(num_threads_, 0);
   thread_leaf_in_level_should_be_split_.resize(num_threads_, 0);
   #pragma omp parallel for schedule(static) num_threads(num_threads_)
   for (int thread_id = 0; thread_id < num_threads_; ++thread_id) {
