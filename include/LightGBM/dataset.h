@@ -680,9 +680,9 @@ class Dataset {
 
   template <typename SMALL_LEAF_INDEX_T>
   void ConstructSymmetricLevelHistogram(
-    const int group_index, const std::vector<hist_t*>& out, score_t* gradients, score_t* hessians,
-    data_size_t num_data_in_small_leaf, data_size_t* data_indices_in_small_leaf,
-    SMALL_LEAF_INDEX_T* small_leaf_indices) const;
+    const int group_index, const std::vector<hist_t*>& out, const score_t* gradients, const score_t* hessians,
+    data_size_t num_data_in_small_leaf, const data_size_t* data_indices_in_small_leaf,
+    const SMALL_LEAF_INDEX_T* small_leaf_indices) const;
 
   int group_feature_start(const int group) const {
     return group_feature_start_[group];

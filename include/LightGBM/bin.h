@@ -456,6 +456,27 @@ class MultiValBin {
                                          const score_t* ordered_hessians,
                                          hist_t* out) const = 0;
 
+  virtual void ConstructSymmetricTreeHistogram(const data_size_t start,
+                                  const data_size_t end,
+                                  const data_size_t* data_indices,
+                                  const uint32_t* small_leaf_indices,
+                                  const score_t* gradients,
+                                  const score_t* hessians,
+                                  const std::vector<hist_t*>& out) const = 0;
+
+  virtual void ConstructSymmetricTreeHistogram(const data_size_t start,
+                                  const data_size_t end,
+                                  const score_t* gradients,
+                                  const score_t* hessians,
+                                  const std::vector<hist_t*>& out) const = 0;
+
+  virtual void ConstructSymmetricTreeHistogramOrdered(const data_size_t start,
+                                         const data_size_t end,
+                                         const data_size_t* data_indices,
+                                         const score_t* ordered_gradients,
+                                         const score_t* ordered_hessians,
+                                         const std::vector<hist_t*>& out) const = 0;
+
   virtual void FinishLoad() = 0;
 
   virtual bool IsSparse() = 0;

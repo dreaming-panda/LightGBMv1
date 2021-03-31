@@ -1289,7 +1289,7 @@ class HistogramPool {
     inverse_mapper_[slot] = dst_idx;
   }
 
- private:
+ protected:
   std::vector<std::unique_ptr<FeatureHistogram[]>> pool_;
   std::vector<
       std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>>

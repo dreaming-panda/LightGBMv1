@@ -1,9 +1,9 @@
 /*!
- * Copyright (c) 2016 Microsoft Corporation. All rights reserved.
+ * Copyright (c) 2021 Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License. See LICENSE file in the project root for license information.
  */
-#ifndef LIGHTGBM_TREELEARNER_SYMMETRIC_TREE_LEARNER_H_
-#define LIGHTGBM_TREELEARNER_SYMMETRIC_TREE_LEARNER_H_
+#ifndef LIGHTGBM_TREELEARNER_SYMMETRIC_TREE_LEARNER_HPP_
+#define LIGHTGBM_TREELEARNER_SYMMETRIC_TREE_LEARNER_HPP_
 
 #include "symmetric_feature_histogram.hpp"
 #include "../serial_tree_learner.h"
@@ -52,8 +52,8 @@ class SymmetricTreeLearner : public SerialTreeLearner {
 
   void SetUpLevelInfo(const int depth);
 
-  SymmetricHistogramPool symmetric_histogram_pool_;
-  SymmetricDataPartition symmetric_data_partition_;
+  std::unique_ptr<SymmetricHistogramPool> symmetric_histogram_pool_;
+  std::unique_ptr<SymmetricDataPartition> symmetric_data_partition_;
 
   std::vector<FeatureHistogram*> level_feature_histograms_;
   std::vector<int> leaf_indices_in_cur_level_;
@@ -78,18 +78,9 @@ class SymmetricTreeLearner : public SerialTreeLearner {
   std::vector<double> thread_best_gain_cur_level_;
   std::vector<int8_t> thread_best_split_default_left_cur_level_;
 
-  std::vector<double> best_level_left_output_;
-  std::vector<double> best_level_right_output_;
-  std::vector<double> best_level_left_sum_gradient_;
-  std::vector<double> best_level_right_sum_gradient_;
-  std::vector<double> best_level_left_sum_hessian_;
-  std::vector<double> best_level_right_sum_hessian_;
-  std::vector<double> best_level_left_count_;
-  std::vector<double> best_level_right_count_;
-  std::vector<double> best_level_split_gain_;
-
   std::vector<SplitInfo> best_level_split_info_;
 };
 
 }  // namespace LightGBM
-#endif  // LIGHTGBM_TREELEARNER_SYMMETRIC_TREE_LEARNER_H_
+
+#endif  // LIGHTGBM_TREELEARNER_SYMMETRIC_TREE_LEARNER_HPP_
