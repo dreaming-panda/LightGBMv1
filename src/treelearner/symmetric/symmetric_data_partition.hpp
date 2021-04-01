@@ -19,7 +19,8 @@ class SymmetricDataPartition {
   void ConstructLevelHistograms(std::vector<FeatureHistogram*>* level_feature_histogram,
                                 const Dataset* train_data,
                                 const std::vector<int8_t>& is_feature_used,
-                                const score_t* gradients, const score_t* hessians) const;
+                                const score_t* gradients, const score_t* hessians,
+                                TrainingShareStates* share_state) const;
 
   void Split(const Dataset* train_data,
     const int inner_feature_index,
@@ -29,7 +30,19 @@ class SymmetricDataPartition {
 
   void Init();
 
-  int leaf_count(const int leaf_index) { return leaf_count_[leaf_index]; }
+  void SplitInnerLeafIndex(const int parent_real_leaf_index,
+                           const int left_real_leaf_index,
+                           const int right_real_leaf_index);
+
+  int leaf_count(const int leaf_index) { return leaf_count_[inner_leaf_index_[leaf_index]]; }
+
+  int num_leaves() { return num_leaf_in_level_; }
+
+  int GetDataLeafIndex(const data_size_t data_index) {
+    const int inner_leaf_index = data_index_to_leaf_index_[data_index];
+    const int real_leaf_index = real_leaf_index_[inner_leaf_index];
+    return real_leaf_index;
+  }
 
  private:
   void GetUsedFeatureGroups(const std::vector<int8_t>& is_feature_used,
@@ -41,33 +54,33 @@ class SymmetricDataPartition {
   void SplitLevelLeafIndices(
     const Dataset* train_data,
     const int inner_feature_index,
-    const int32_t threshold,
+    const uint32_t threshold,
     const std::vector<int8_t>& leaf_should_be_split,
     const std::vector<SplitInfo>& level_split_info,
-    const int32_t most_freq_bin,
-    const int32_t max_bin,
-    const int32_t zero_bin);
+    const uint32_t most_freq_bin,
+    const uint32_t max_bin,
+    const uint32_t zero_bin);
 
   template <bool MISS_IS_ZERO, bool MISS_IS_NA, bool MFB_IS_ZERO,
             bool MFB_IS_NA, bool DEFAULT_LEFT, bool MOST_FREQ_LEFT>
   void SplitLevelLeafIndicesInner(
     const Dataset* train_data,
     const int inner_feature_index,
-    const int32_t threshold,
+    const uint32_t threshold,
     const std::vector<int8_t>& leaf_should_be_split,
     const std::vector<SplitInfo>& level_split_info,
-    const int32_t most_freq_bin,
-    const int32_t max_bin,
-    const int32_t zero_bin);
+    const uint32_t most_freq_bin,
+    const uint32_t max_bin,
+    const uint32_t zero_bin);
 
   std::vector<uint32_t> ordered_small_leaf_index_;
   std::vector<data_size_t> data_indices_in_small_leaf_;
-  std::vector<uint8_t> is_data_in_small_leaf_;
+  std::vector<int8_t> is_data_in_small_leaf_;
   data_size_t num_data_in_small_leaf_;
   const data_size_t num_data_;
   bool is_col_wise_;
 
-  std::vector<int> data_index_to_leaf_index_;
+  std::vector<uint32_t> data_index_to_leaf_index_;
   std::vector<int> leaf_count_;
   std::vector<std::vector<int>> thread_leaf_count_;
   std::vector<int> small_leaf_positions_;
@@ -79,6 +92,9 @@ class SymmetricDataPartition {
 
   const int num_threads_;
   std::vector<int> thread_data_in_small_leaf_count_;
+  std::vector<int> inner_leaf_index_;
+  std::vector<int> position_to_inner_leaf_index_;
+  std::vector<int> real_leaf_index_;
 
   int num_small_leaf_;
 };

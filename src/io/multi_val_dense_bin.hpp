@@ -219,12 +219,11 @@ class MultiValDenseBin : public MultiValBin {
   virtual void ConstructSymmetricTreeHistogramOrdered(const data_size_t start,
     const data_size_t end,
     const data_size_t* data_indices,
-    const uint32_t* small_leaf_indices,
     const score_t* ordered_gradients,
     const score_t* ordered_hessians,
     const std::vector<hist_t*>& out) const override {
     ConstructSymmetricTreeHistogramInner<true, true, true>(
-      start, end, data_indices, small_leaf_indices, ordered_gradients, ordered_hessians, out);
+      start, end, data_indices, nullptr, ordered_gradients, ordered_hessians, out);
   }
 
   MultiValBin* CreateLike(data_size_t num_data, int num_bin, int num_feature, double,

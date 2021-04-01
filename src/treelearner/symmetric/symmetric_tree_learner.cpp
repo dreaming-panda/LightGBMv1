@@ -3,6 +3,8 @@
  * Licensed under the MIT License. See LICENSE file in the project root for license information.
  */
 
+#include <LightGBM/objective_function.h>
+
 #include "symmetric_tree_learner.hpp"
 
 namespace LightGBM {
@@ -36,10 +38,10 @@ void SymmetricTreeLearner::Init(const Dataset* train_data, bool is_constant_hess
 
   best_level_split_info_.resize(max_num_leaves_);
 
-  level_leaf_splits_.resize(max_num_leaves_, nullptr);
+  level_leaf_splits_.resize(max_num_leaves_);
 }
 
-Tree* SymmetricTreeLearner::Train(const score_t* gradients, const score_t *hessians, bool is_first_tree) {
+Tree* SymmetricTreeLearner::Train(const score_t* gradients, const score_t *hessians, bool /*is_first_tree*/) {
   gradients_ = gradients;
   hessians_ = hessians;
   BeforeTrain();
@@ -50,7 +52,7 @@ Tree* SymmetricTreeLearner::Train(const score_t* gradients, const score_t *hessi
     PrepareLevelHistograms();
     // construct and subtract
     symmetric_data_partition_->ConstructLevelHistograms(&level_feature_histograms_, train_data_,
-      col_sampler_.is_feature_used_bytree(), gradients, hessians);
+      col_sampler_.is_feature_used_bytree(), gradients, hessians, share_state_.get());
     // find best splits
     FindBestLevelSplits();
     SplitLevel(tree.get());
@@ -137,7 +139,8 @@ void SymmetricTreeLearner::FindBestLevelSplitsForFeature(const int inner_feature
         const int leaf_index = leaf_indices_in_cur_level_[i];
         SplitInfo& split_info = best_level_split_info_[i];
         symmetric_histogram_pool_->GetSplitLeafOutput(leaf_index, best_inner_feature_index_cur_level_,
-          best_threshold_cur_level_, best_split_default_left_cur_level_, &split_info.left_output, &split_info.right_output,
+          best_threshold_cur_level_, best_split_default_left_cur_level_, level_leaf_splits_[i],
+          &split_info.left_output, &split_info.right_output,
           &split_info.left_sum_gradient, &split_info.left_sum_hessian, &split_info.right_sum_gradient, &split_info.right_sum_hessian,
           &split_info.left_count, &split_info.right_count, &split_info.gain);
       }
@@ -155,9 +158,9 @@ void SymmetricTreeLearner::SplitLevel(Tree* tree) {
     best_level_split_info_);
   if (best_inner_feature_index_cur_level_ != -1) {
     std::vector<int> old_leaf_indices_in_cur_level = leaf_indices_in_cur_level_;
-    std::vector<std::unique_ptr<LeafSplits>> old_level_leaf_splits_(num_leaves_in_cur_level_, nullptr);
+    std::vector<std::unique_ptr<LeafSplits>> old_level_leaf_splits(num_leaves_in_cur_level_);
     for (int i = 0; i < num_leaves_in_cur_level_; ++i) {
-      old_level_leaf_splits_[i].reset(level_leaf_splits_[i].release());
+      old_level_leaf_splits[i].reset(level_leaf_splits_[i].release());
     }
     int num_leaves_in_next_level = 0;
     for (int leaf_index_in_level = 0; leaf_index_in_level < num_leaves_in_cur_level_; ++leaf_index_in_level) {
@@ -176,6 +179,7 @@ void SymmetricTreeLearner::SplitLevel(Tree* tree) {
           split_info.gain,
           train_data_->FeatureBinMapper(best_inner_feature_index_cur_level_)->missing_type(),
           split_info.default_left);
+        symmetric_data_partition_->SplitInnerLeafIndex(real_leaf_index, real_leaf_index, right_leaf_index);
         const data_size_t left_count = symmetric_data_partition_->leaf_count(real_leaf_index);
         const data_size_t right_count = symmetric_data_partition_->leaf_count(right_leaf_index);
         // correct leaf count in split info, which was originally estimated from sum of hessians
@@ -206,13 +210,73 @@ void SymmetricTreeLearner::SplitLevel(Tree* tree) {
           split_info.right_output);
         leaf_indices_in_cur_level_[num_leaves_in_next_level++] = right_leaf_index;
       } else {
+        // update inner leaf index map of data partition
+        symmetric_data_partition_->SplitInnerLeafIndex(real_leaf_index, -1, -1);
         paired_leaf_indices_in_cur_level_[leaf_index_in_level].resize(1);
         paired_leaf_indices_in_cur_level_[leaf_index_in_level][0] = real_leaf_index;
-        level_leaf_splits_[num_leaves_in_next_level].reset(old_level_leaf_splits_[leaf_index_in_level].release());
+        level_leaf_splits_[num_leaves_in_next_level].reset(old_level_leaf_splits[leaf_index_in_level].release());
         leaf_indices_in_cur_level_[num_leaves_in_next_level++] = real_leaf_index;
       }
     }
   }
+}
+
+void SymmetricTreeLearner::ResetTrainingDataInner(const Dataset* train_data,
+  bool is_constant_hessian,
+  bool reset_multi_val_bin) {
+  train_data_ = train_data;
+  num_data_ = train_data_->num_data();
+  CHECK_EQ(num_features_, train_data_->num_features());
+
+  if (reset_multi_val_bin) {
+    col_sampler_.SetTrainingData(train_data_);
+    GetShareStates(train_data_, is_constant_hessian, false);
+  }
+
+  ordered_gradients_.resize(num_data_, 0.0f);
+  ordered_hessians_.resize(num_data_, 0.0f);
+
+  //TODO(shiyu1994): handle cost efficient (cegb_)
+}
+
+Tree* SymmetricTreeLearner::FitByExistingTree(const Tree* /*old_tree*/,
+  const score_t* /*gradients*/, const score_t* /*hessians*/) const {
+  //TODO(shiyu1994)
+  return nullptr;
+}
+
+Tree* SymmetricTreeLearner::FitByExistingTree(const Tree* /*old_tree*/, const std::vector<int>& /*leaf_pred*/,
+  const score_t* /*gradients*/, const score_t* /*hessians*/) const {
+  // TODO(shiyu1994)
+  return nullptr;
+}
+
+void SymmetricTreeLearner::AddPredictionToScore(const Tree* tree, double* out_score) const {
+  CHECK_LE(tree->num_leaves(), data_partition_->num_leaves());
+  if (tree->num_leaves() <= 1) {
+    return;
+  }
+  Threading::For<data_size_t>(0, num_data_, 512,
+    [this, tree, out_score] (int /*thread_id*/, data_size_t start, data_size_t end) {
+    for (data_size_t i = start; i < end; ++i) {
+      const int real_leaf_index = symmetric_data_partition_->GetDataLeafIndex(i);
+      const double output = static_cast<double>(tree->LeafOutput(real_leaf_index));
+      out_score[i] += output;
+    }
+  });
+}
+
+void SymmetricTreeLearner::RenewTreeOutput(Tree* /*tree*/, const ObjectiveFunction* obj,
+  std::function<double(const label_t*, int)> /*residual_getter*/,
+  data_size_t /*total_num_data*/, const data_size_t* /*bag_indices*/, data_size_t /*bag_cnt*/) const {
+  if (obj != nullptr && obj->IsRenewTreeOutput()) {
+    Log::Fatal("renew output is not supported with symmetric tree yet");
+  }
+}
+
+void SymmetricTreeLearner::SetBaggingData(const Dataset* /*subset*/,
+  const data_size_t* /*used_indices*/, data_size_t /*num_data*/) {
+  Log::Fatal("bagging is not supported with symmetric tree yet");
 }
 
 }  // namespace LightGBM

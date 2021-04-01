@@ -11,47 +11,68 @@ SymmetricDataPartition::SymmetricDataPartition(data_size_t num_data, int max_num
 num_data_(num_data), num_threads_(num_threads) {
   ordered_small_leaf_index_.resize(num_data_, 0);
   data_indices_in_small_leaf_.resize(num_data_, 0);
+  is_data_in_small_leaf_.resize(num_data_, 0);
   num_data_in_small_leaf_ = num_data_;
+
+  // TODO(shiyu1994): support row wise
   is_col_wise_ = true;
 
   data_index_to_leaf_index_.resize(num_data_, 0);
   leaf_count_.resize(max_num_leaves, 0);
   thread_leaf_count_.resize(num_threads_);
+  #pragma omp parallel for schedule(static, 1) num_threads(num_threads_) if (max_num_leaves >= 512)
   for (int thread_id = 0; thread_id < num_threads_; ++thread_id) {
     thread_leaf_count_[thread_id].resize(max_num_leaves, 0);
   }
+  small_leaf_positions_.resize(max_num_leaves, -1);
+  num_leaf_in_level_ = 0;
+
   thread_data_in_small_leaf_count_.resize(num_threads_, 0);
   left_child_index_.resize(max_num_leaves, -1);
   right_child_index_.resize(max_num_leaves, -1);
   left_child_smaller_.resize(max_num_leaves, false);
-  is_data_in_small_leaf_.resize(num_data_, 0);
-  small_leaf_positions_.resize(max_num_leaves, -1);
+  inner_leaf_index_.resize(max_num_leaves, -1);
+  position_to_inner_leaf_index_.resize(max_num_leaves, -1);
+  real_leaf_index_.resize(max_num_leaves, -1);
+  num_small_leaf_ = 0;
 }
 
 void SymmetricDataPartition::Init() {
   num_data_in_small_leaf_ = num_data_;
   num_leaf_in_level_ = 1;
+
+  // TODO(shiyu1994): optimize this
+  // TODO(shiyu1994): what happens when sampling rows
   #pragma omp parallel for schedule(static) num_threads(num_threads_)
   for (data_size_t i = 0; i < num_data_; ++i) {
-    data_index_to_leaf_index_[i] = 0;
-    data_indices_in_small_leaf_[i] = i;
     ordered_small_leaf_index_[i] = 0;
+    data_indices_in_small_leaf_[i] = i;
+    is_data_in_small_leaf_[i] = 1;
+    data_index_to_leaf_index_[i] = 0;
   }
-  num_small_leaf_ = 0;
+  leaf_count_[0] = num_data_;
+  small_leaf_positions_[0] = 0;
+  num_small_leaf_ = 1;
+  inner_leaf_index_[0] = 0;
+  left_child_index_[0] = 0;
+  right_child_index_[0] = -1;
+  position_to_inner_leaf_index_[0] = 0;
+  real_leaf_index_[0] = 0;
+  left_child_index_[0] = true;
 }
 
 void SymmetricDataPartition::ConstructLevelHistograms(
   std::vector<FeatureHistogram*>* level_feature_histogram,
   const Dataset* train_data,
   const std::vector<int8_t>& is_feature_used,
-  const score_t* gradients, const score_t* hessians) const {
-  int num_threads = OMP_NUM_THREADS();
+  const score_t* gradients, const score_t* hessians,
+  TrainingShareStates* share_state) const {
   if (is_col_wise_) {
     std::vector<int> used_feature_groups;
     int used_multi_val_feature_group = -1;
     GetUsedFeatureGroups(is_feature_used, train_data, &used_feature_groups, &used_multi_val_feature_group);
     const int num_used_dense_feature_groups = static_cast<int>(used_feature_groups.size());
-    #pragma omp parallel for schedule(static) num_threads(num_threads)
+    #pragma omp parallel for schedule(static) num_threads(num_threads_)
     for (int i = 0; i < num_used_dense_feature_groups; ++i) {
       const int group_index = used_feature_groups[i];
       std::vector<hist_t*> group_hist_ptr;
@@ -60,8 +81,19 @@ void SymmetricDataPartition::ConstructLevelHistograms(
         hist_t* hist_ptr = feature_histograms[train_data->group_feature_start(group_index)].RawData() - 1;
         group_hist_ptr.emplace_back(hist_ptr);
       }
-      train_data->ConstructSymmetricLevelHistogram<uint32_t>(group_index, group_hist_ptr, gradients, hessians,
+      train_data->ConstructSymmetricLevelHistogram(group_index, group_hist_ptr, gradients, hessians,
         num_data_in_small_leaf_, data_indices_in_small_leaf_.data(), ordered_small_leaf_index_.data());
+    }
+    if (used_multi_val_feature_group != -1) {
+      const int multi_group_start_feature = train_data->group_feature_start(used_multi_val_feature_group);
+      std::vector<hist_t*> group_hist_ptr;
+      for (int j = 0; j < num_small_leaf_; ++j) {
+        FeatureHistogram* feature_histograms = (*level_feature_histogram)[small_leaf_positions_[j]];
+        hist_t* hist_ptr = feature_histograms[multi_group_start_feature].RawData() - 1;
+        group_hist_ptr.emplace_back(hist_ptr);
+      }
+      train_data->ConstructSymmetricLevelHistogramsMultiVal(data_indices_in_small_leaf_.data(),
+        num_data_in_small_leaf_, ordered_small_leaf_index_.data(), gradients, hessians, share_state, group_hist_ptr);
     }
   } else {
     Log::Fatal("symmetric tree with row-wise histogram construction is currently unsupported.");
@@ -77,14 +109,16 @@ void SymmetricDataPartition::GetUsedFeatureGroups(
   for (int feature_index = 0; feature_index < train_data->num_features(); ++feature_index) {
     const int group_index = train_data->Feature2Group(feature_index);
     if (!train_data->IsMultiGroup(group_index)) {
-      if (used_feature_groups_ref.empty() || used_dense_feature_groups->back() != group_index) {
+      if (used_feature_groups_ref.empty() || used_feature_groups_ref.back() != group_index) {
         if (is_feature_used[feature_index]) {
           used_feature_groups_ref.emplace_back(group_index);
         }
       }
     } else {
       // assume that there's only multi value group
-      *used_multi_val_feature_group = group_index;
+      if (is_feature_used[feature_index]) {
+        *used_multi_val_feature_group = group_index;
+      }
     }
   }
 }
@@ -96,7 +130,7 @@ void SymmetricDataPartition::GetUsedFeatureGroups(
   level_split_info,\
   most_freq_bin,\
   max_bin,\
-  zero_bin\
+  zero_bin
 
 void SymmetricDataPartition::Split(const Dataset* train_data, const int inner_feature_index,
     const int threshold, const int8_t default_left,
@@ -107,7 +141,6 @@ void SymmetricDataPartition::Split(const Dataset* train_data, const int inner_fe
   const uint32_t zero_bin = bin_mapper->ValueToBin(0.0f);
   const uint32_t max_bin = static_cast<uint32_t>(bin_mapper->num_bin() - 1);
   const uint32_t uint_threshold = static_cast<uint32_t>(threshold);
-  const MissingType missing_type = bin_mapper->missing_type();
   if (default_left > 0) {
     if (most_freq_bin <= uint_threshold) {
       SplitLevelLeafIndices<true, true>(SplitLevelLeafIndices_ARGS);
@@ -127,12 +160,14 @@ template <bool DEFAULT_LEFT, bool MOST_FREQ_LEFT>
   void SymmetricDataPartition::SplitLevelLeafIndices(
     const Dataset* train_data,
     const int inner_feature_index,
-    const int32_t threshold,
+    const uint32_t uint_threshold,
     const std::vector<int8_t>& leaf_should_be_split,
     const std::vector<SplitInfo>& level_split_info,
-    const int32_t most_freq_bin,
-    const int32_t max_bin,
-    const int32_t zero_bin) {
+    const uint32_t most_freq_bin,
+    const uint32_t max_bin,
+    const uint32_t zero_bin) {
+  const BinMapper* bin_mapper = train_data->FeatureBinMapper(inner_feature_index);
+  const MissingType missing_type = bin_mapper->missing_type();
   if (missing_type == MissingType::None) {
     SplitLevelLeafIndicesInner<false, false, false, false, DEFAULT_LEFT, MOST_FREQ_LEFT>(SplitLevelLeafIndices_ARGS);
   } else if (missing_type == MissingType::Zero) {
@@ -157,13 +192,13 @@ template <bool MISS_IS_ZERO, bool MISS_IS_NA, bool MFB_IS_ZERO,
 void SymmetricDataPartition::SplitLevelLeafIndicesInner(
   const Dataset* train_data,
   const int inner_feature_index,
-  const int32_t threshold,
+  const uint32_t uint_threshold,
   const std::vector<int8_t>& leaf_should_be_split,
   const std::vector<SplitInfo>& level_split_info,
-  const int32_t most_freq_bin,
-  const int32_t max_bin,
-  const int32_t zero_bin) {
-  std::vector<std::unique_ptr<BinIterator>> iters(num_threads_, nullptr);
+  const uint32_t most_freq_bin,
+  const uint32_t max_bin,
+  const uint32_t zero_bin) {
+  std::vector<std::unique_ptr<BinIterator>> iters(num_threads_);
 
   for (int thread_id = 0; thread_id < num_threads_; ++thread_id) {
     iters[thread_id].reset(train_data->FeatureIterator(inner_feature_index));
@@ -172,37 +207,38 @@ void SymmetricDataPartition::SplitLevelLeafIndicesInner(
   int small_leaf_index_in_next_level = 0;
   int large_leaf_index_in_next_level = 0;
   int non_split_leaf_index_in_next_level = 0;
-  
+
   for (int leaf_index = 0; leaf_index < num_leaf_in_level_; ++leaf_index) {
     if (leaf_should_be_split[leaf_index] > 0) {
       ++large_leaf_index_in_next_level;
+      non_split_leaf_index_in_next_level += 2;
     }
-    non_split_leaf_index_in_next_level += 2;
   }
   for (int leaf_index = 0; leaf_index < num_leaf_in_level_; ++leaf_index) {
     const SplitInfo& split_info = level_split_info[leaf_index];
+    const int inner_leaf_index = position_to_inner_leaf_index_[leaf_index];
     if (leaf_should_be_split[leaf_index] > 0) {
       if (split_info.left_count <= split_info.right_count) {
-        left_child_index_[leaf_index] = small_leaf_index_in_next_level;
-        right_child_index_[leaf_index] = large_leaf_index_in_next_level;
-        left_child_smaller_[leaf_index] = true;
+        left_child_index_[inner_leaf_index] = small_leaf_index_in_next_level;
+        right_child_index_[inner_leaf_index] = large_leaf_index_in_next_level;
+        left_child_smaller_[inner_leaf_index] = true;
       } else {
-        left_child_index_[leaf_index] = large_leaf_index_in_next_level;
-        right_child_index_[leaf_index] = small_leaf_index_in_next_level;
-        left_child_smaller_[leaf_index] = false;
+        left_child_index_[inner_leaf_index] = large_leaf_index_in_next_level;
+        right_child_index_[inner_leaf_index] = small_leaf_index_in_next_level;
+        left_child_smaller_[inner_leaf_index] = false;
       }
       small_leaf_positions_[small_leaf_index_in_next_level] = leaf_index;
       ++small_leaf_index_in_next_level;
       ++large_leaf_index_in_next_level;
     } else {
-      left_child_index_[leaf_index] = non_split_leaf_index_in_next_level;
+      left_child_index_[inner_leaf_index] = non_split_leaf_index_in_next_level;
       ++non_split_leaf_index_in_next_level;
     }
   }
   const int num_leaf_in_next_level = non_split_leaf_index_in_next_level;
   num_small_leaf_ = small_leaf_index_in_next_level;
   Threading::For<data_size_t>(0, num_data_, 512,
-    [this, &iters, most_freq_bin, zero_bin, max_bin]
+    [this, &iters, most_freq_bin, zero_bin, max_bin, num_leaf_in_next_level, leaf_should_be_split, uint_threshold]
     (int thread_id, data_size_t start, data_size_t end) {
       BinIterator* iter = iters[thread_id].get();
       iter->Reset(start);
@@ -214,15 +250,15 @@ void SymmetricDataPartition::SplitLevelLeafIndicesInner(
       }
       for (data_size_t i = start; i < end; ++i) {
         const uint32_t bin = iter->Get(i);
-        const int leaf_index = data_index_to_leaf_index_[i];
+        const uint32_t leaf_index = data_index_to_leaf_index_[i];
         if (leaf_should_be_split[leaf_index] > 0) {
           if ((MISS_IS_ZERO && !MFB_IS_ZERO && bin == zero_bin) ||
-              (MISS_IS_NA && !MFB_IS_NA && bin == maxb)) {
-            const new_leaf_index = DEFAULT_LEFT ?
+              (MISS_IS_NA && !MFB_IS_NA && bin == max_bin)) {
+            const int new_leaf_index = DEFAULT_LEFT ?
               left_child_index_[leaf_index] :
               right_child_index_[leaf_index];
             ++leaf_count_ref[new_leaf_index];
-            data_index_to_leaf_index[i] = new_leaf_index;
+            data_index_to_leaf_index_[i] = new_leaf_index;
             if (DEFAULT_LEFT) {
               if (left_child_smaller_[leaf_index]) {
                 ++data_in_small_leaf_count;
@@ -240,11 +276,11 @@ void SymmetricDataPartition::SplitLevelLeafIndicesInner(
             }
           } else if (bin == most_freq_bin) {
             if ((MISS_IS_ZERO && MFB_IS_ZERO) || (MISS_IS_NA && MFB_IS_NA)) {
-              const new_leaf_index = DEFAULT_LEFT ?
+              const int new_leaf_index = DEFAULT_LEFT ?
                 left_child_index_[leaf_index] :
                 right_child_index_[leaf_index];
               ++leaf_count_ref[new_leaf_index];
-              data_index_to_leaf_index[i] = new_leaf_index;
+              data_index_to_leaf_index_[i] = new_leaf_index;
               if (DEFAULT_LEFT) {
                 if (left_child_smaller_[leaf_index]) {
                   ++data_in_small_leaf_count;
@@ -261,11 +297,11 @@ void SymmetricDataPartition::SplitLevelLeafIndicesInner(
                 }
               }
             } else {
-              const new_leaf_index = MOST_FREQ_LEFT ?
+              const int new_leaf_index = MOST_FREQ_LEFT ?
                 left_child_index_[leaf_index] :
                 right_child_index_[leaf_index];
               ++leaf_count_ref[new_leaf_index];
-              data_index_to_leaf_index[i] = new_leaf_index;
+              data_index_to_leaf_index_[i] = new_leaf_index;
               if (MOST_FREQ_LEFT) {
                 if (left_child_smaller_[leaf_index]) {
                   ++data_in_small_leaf_count;
@@ -282,10 +318,10 @@ void SymmetricDataPartition::SplitLevelLeafIndicesInner(
                 }
               }
             }
-          } else if (bin > threshold) {
-            const new_leaf_index = right_child_index_[leaf_index];
+          } else if (bin > uint_threshold) {
+            const int new_leaf_index = right_child_index_[leaf_index];
             ++leaf_count_ref[new_leaf_index];
-            data_index_to_leaf_index[i] = new_leaf_index;
+            data_index_to_leaf_index_[i] = new_leaf_index;
             if (!left_child_smaller_[leaf_index]) {
               ++data_in_small_leaf_count;
               is_data_in_small_leaf_[i] = 1;
@@ -293,9 +329,9 @@ void SymmetricDataPartition::SplitLevelLeafIndicesInner(
               is_data_in_small_leaf_[i] = 0;
             }
           } else {
-            const new_leaf_index = left_child_index_[leaf_index];
+            const int new_leaf_index = left_child_index_[leaf_index];
             ++leaf_count_ref[new_leaf_index];
-            data_index_to_leaf_index[i] = new_leaf_index;
+            data_index_to_leaf_index_[i] = new_leaf_index;
             if (left_child_smaller_[leaf_index]) {
               ++data_in_small_leaf_count;
               is_data_in_small_leaf_[i] = 1;
@@ -304,14 +340,14 @@ void SymmetricDataPartition::SplitLevelLeafIndicesInner(
             }
           }
         } else {
-          const new_leaf_index = left_child_smaller_[leaf_index];
+          const int new_leaf_index = left_child_smaller_[leaf_index];
           ++leaf_count_ref[new_leaf_index];
-          data_index_to_leaf_index[i] = new_leaf_index;
+          data_index_to_leaf_index_[i] = new_leaf_index;
           is_data_in_small_leaf_[i] = 0;
         }
       }
     });
-  
+
   #pragma omp parallel for schedule(static) num_threads(num_threads_) if (num_leaf_in_next_level >= 512)
   for (int leaf_index = 0; leaf_index < num_leaf_in_next_level; ++leaf_index) {
     leaf_count_[leaf_index] = thread_leaf_count_[0][leaf_index];
@@ -323,19 +359,40 @@ void SymmetricDataPartition::SplitLevelLeafIndicesInner(
   for (int i = 1; i < num_threads_; ++i) {
     thread_data_in_small_leaf_count_[i] += thread_data_in_small_leaf_count_[i - 1];
   }
-  Threading::For<data_size_t>(0, num_data_,
+  Threading::For<data_size_t>(0, num_data_, 512,
     [this] (int thread_id, data_size_t start, data_size_t end) {
       int thread_pos = thread_data_in_small_leaf_count_[thread_id];
       for (data_size_t i = start; i < end; ++i) {
         if (is_data_in_small_leaf_[i] > 0) {
           data_indices_in_small_leaf_[thread_pos] = i;
-          ordered_small_leaf_index_[thread_pos] = static_cast<uint32_t>(data_index_to_leaf_index_[i]);
+          ordered_small_leaf_index_[thread_pos] = data_index_to_leaf_index_[i];
           ++thread_pos;
         }
       }
     });
 
   num_leaf_in_level_ = num_leaf_in_next_level;
+}
+
+void SymmetricDataPartition::SplitInnerLeafIndex(const int parent_real_leaf_index,
+  const int left_real_leaf_index,
+  const int right_real_leaf_index) {
+  if (right_real_leaf_index >= 0) {
+    const int parent_inner_leaf_index = inner_leaf_index_[parent_real_leaf_index];
+    const int left_inner_leaf_index = left_child_index_[parent_inner_leaf_index];
+    const int right_inner_leaf_index = right_child_index_[parent_inner_leaf_index];
+    CHECK_GE(left_inner_leaf_index, 0);
+    CHECK_GE(right_inner_leaf_index, 0);
+    inner_leaf_index_[left_real_leaf_index] = left_inner_leaf_index;
+    inner_leaf_index_[right_real_leaf_index] = right_inner_leaf_index;
+    real_leaf_index_[left_inner_leaf_index] = left_real_leaf_index;
+    real_leaf_index_[right_inner_leaf_index] = right_real_leaf_index;
+  } else {
+    const int inner_leaf_index = inner_leaf_index_[parent_real_leaf_index];
+    const int new_inner_leaf_index = left_child_index_[inner_leaf_index];
+    inner_leaf_index_[parent_real_leaf_index] = new_inner_leaf_index;
+    real_leaf_index_[new_inner_leaf_index] = parent_real_leaf_index;
+  }
 }
 
 } //  namespace LightGBM

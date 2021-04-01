@@ -64,7 +64,7 @@ class MultiValBinWrapper {
       data_block_size_ = num_data;
       Threading::BlockInfo<data_size_t>(num_threads_, num_data, min_block_size_,
                                         &n_data_block_, &data_block_size_);
-      ResizeHistBuf(hist_buf, cur_multi_val_bin, origin_hist_data);
+      ResizeHistBuf(hist_buf, cur_multi_val_bin);
       OMP_INIT_EX();
       #pragma omp parallel for schedule(static) num_threads(num_threads_)
       for (int block_id = 0; block_id < n_data_block_; ++block_id) {
@@ -73,7 +73,7 @@ class MultiValBinWrapper {
         data_size_t end = std::min<data_size_t>(start + data_block_size_, num_data);
         ConstructHistogramsForBlock<USE_INDICES, ORDERED>(
           cur_multi_val_bin, start, end, data_indices, gradients, hessians,
-          block_id, hist_buf);
+          block_id, hist_buf, origin_hist_data);
         OMP_LOOP_EX_END();
       }
       OMP_THROW_EX();
@@ -125,12 +125,12 @@ class MultiValBinWrapper {
       global_timer.Stop("Dataset::sparse_bin_histogram");
 
       global_timer.Start("Dataset::sparse_bin_histogram_merge");
-      for (int i = 0; i < origin_hist_data.size(); ++i) {
-        HistMerge(&(*hist_buf)[i]), origin_hist_data[i]);
+      for (size_t i = 0; i < origin_hist_data.size(); ++i) {
+        HistMerge(&((*hist_buf)[i]), origin_hist_data[i]);
       }
       global_timer.Stop("Dataset::sparse_bin_histogram_merge");
       global_timer.Start("Dataset::sparse_bin_histogram_move");
-      for (int i = 0; i < origin_hist_data.size(); ++i) {
+      for (size_t i = 0; i < origin_hist_data.size(); ++i) {
         HistMove((*hist_buf)[i], origin_hist_data[i]);
       }
       global_timer.Stop("Dataset::sparse_bin_histogram_move");
@@ -193,7 +193,7 @@ class MultiValBinWrapper {
     }
     if (USE_INDICES) {
       if (ORDERED) {
-        sub_multi_val_bin->ConstructSymmetricTreeHistogramOrdered(start, end, data_indices, leaf_indices,
+        sub_multi_val_bin->ConstructSymmetricTreeHistogramOrdered(start, end, data_indices,
                                                 gradients, hessians, data_ptr);
       } else {
         sub_multi_val_bin->ConstructSymmetricTreeHistogram(start, end, data_indices, leaf_indices, gradients,

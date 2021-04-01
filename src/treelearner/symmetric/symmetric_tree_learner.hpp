@@ -14,8 +14,8 @@ namespace LightGBM {
 class SymmetricTreeLearner : public SerialTreeLearner {
  public:
   explicit SymmetricTreeLearner(const Config* config);
-  
-  ~SymmetricTreeLearner();
+
+  ~SymmetricTreeLearner() {}
 
   void Init(const Dataset* train_data, bool is_constant_hessian) override;
 

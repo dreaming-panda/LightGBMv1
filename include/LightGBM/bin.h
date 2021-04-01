@@ -318,7 +318,7 @@ class Bin {
 
   virtual void ConstructSymmetricTreeHistogram(data_size_t num_data_in_small_leaf,
     const data_size_t* data_indices_in_small_leaf,
-    const int32_t* small_leaf_indices,
+    const uint32_t* small_leaf_indices,
     const score_t* ordered_gradients, const score_t* ordered_hessians,
     std::vector<hist_t*>& out) const = 0;
 
@@ -343,7 +343,7 @@ class Bin {
 
   virtual void ConstructSymmetricTreeHistogram(data_size_t num_data_in_small_leaf,
     const data_size_t* data_indices_in_small_leaf,
-    const int32_t* small_leaf_indices,
+    const uint32_t* small_leaf_indices,
     const score_t* ordered_gradients,
     std::vector<hist_t*>& out) const = 0;
 

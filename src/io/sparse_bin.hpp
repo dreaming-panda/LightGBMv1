@@ -199,7 +199,7 @@ class SparseBin : public Bin {
   template <bool USE_HESSIAN>
   void ConstructSymmetricTreeHistogramInner(data_size_t num_data_in_small_leaf,
     const data_size_t* data_indices_in_small_leaf,
-    const int32_t* small_leaf_indices,
+    const uint32_t* small_leaf_indices,
     const score_t* ordered_gradients, const score_t* ordered_hessians,
     std::vector<hist_t*>& out) const {
     data_size_t i_delta, cur_pos;
@@ -238,7 +238,7 @@ class SparseBin : public Bin {
 
   void ConstructSymmetricTreeHistogram(data_size_t num_data_in_small_leaf,
     const data_size_t* data_indices_in_small_leaf,
-    const int32_t* small_leaf_indices,
+    const uint32_t* small_leaf_indices,
     const score_t* ordered_gradients, const score_t* ordered_hessians,
     std::vector<hist_t*>& out) const override {
     ConstructSymmetricTreeHistogramInner<true>(num_data_in_small_leaf, data_indices_in_small_leaf, small_leaf_indices,
@@ -247,7 +247,7 @@ class SparseBin : public Bin {
 
   void ConstructSymmetricTreeHistogram(data_size_t num_data_in_small_leaf,
     const data_size_t* data_indices_in_small_leaf,
-    const int32_t* small_leaf_indices,
+    const uint32_t* small_leaf_indices,
     const score_t* ordered_gradients,
     std::vector<hist_t*>& out) const override {
     ConstructSymmetricTreeHistogramInner<false>(num_data_in_small_leaf, data_indices_in_small_leaf, small_leaf_indices,
