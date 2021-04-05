@@ -27,12 +27,13 @@ num_data_(num_data), num_threads_(num_threads) {
   small_leaf_positions_.resize(max_num_leaves, -1);
   num_leaf_in_level_ = 0;
 
-  thread_data_in_small_leaf_count_.resize(num_threads_, 0);
+  thread_data_in_small_leaf_pos_.resize(num_threads_ + 1, 0);
   left_child_index_.resize(max_num_leaves, -1);
   right_child_index_.resize(max_num_leaves, -1);
   left_child_smaller_.resize(max_num_leaves, false);
   inner_leaf_index_.resize(max_num_leaves, -1);
   position_to_inner_leaf_index_.resize(max_num_leaves, -1);
+  inner_leaf_index_to_position_.resize(max_num_leaves, -1);
   real_leaf_index_.resize(max_num_leaves, -1);
   num_small_leaf_ = 0;
 }
@@ -57,6 +58,7 @@ void SymmetricDataPartition::Init() {
   left_child_index_[0] = 0;
   right_child_index_[0] = -1;
   position_to_inner_leaf_index_[0] = 0;
+  inner_leaf_index_to_position_[0] = 0;
   real_leaf_index_[0] = 0;
   left_child_index_[0] = true;
 }
@@ -66,34 +68,57 @@ void SymmetricDataPartition::ConstructLevelHistograms(
   const Dataset* train_data,
   const std::vector<int8_t>& is_feature_used,
   const score_t* gradients, const score_t* hessians,
+  score_t* ordered_gradients, score_t* ordered_hessians,
   TrainingShareStates* share_state) const {
   if (is_col_wise_) {
     std::vector<int> used_feature_groups;
     int used_multi_val_feature_group = -1;
     GetUsedFeatureGroups(is_feature_used, train_data, &used_feature_groups, &used_multi_val_feature_group);
     const int num_used_dense_feature_groups = static_cast<int>(used_feature_groups.size());
+    const score_t* gradients_ptr = gradients;
+    const score_t* hessians_ptr = hessians;
+    if (num_leaf_in_level_ > 1) {
+      // not in root leaf
+      #pragma omp parallel for schedule(static) num_threads(num_threads_)
+      for (data_size_t i = 0; i < num_data_in_small_leaf_; ++i) {
+        const data_size_t data_index = data_indices_in_small_leaf_[i];
+        ordered_gradients[i] = gradients[data_index];
+        ordered_hessians[i] = hessians[data_index];
+      }
+      gradients_ptr = ordered_gradients;
+      hessians_ptr = ordered_hessians;
+    }
+    #pragma omp parallel for schedule(static) num_threads(num_threads_)
+    for (int i = 0; i < num_data_in_small_leaf_; ++i) {
+      //CHECK_GE(ordered_small_leaf_index_[i], 0);
+      CHECK_LT(ordered_small_leaf_index_[i], static_cast<uint32_t>(num_small_leaf_));
+    }
     #pragma omp parallel for schedule(static) num_threads(num_threads_)
     for (int i = 0; i < num_used_dense_feature_groups; ++i) {
       const int group_index = used_feature_groups[i];
+      const int num_bin = train_data->FeatureGroupNumBin(group_index);
       std::vector<hist_t*> group_hist_ptr;
       for (int j = 0; j < num_small_leaf_; ++j) {
         FeatureHistogram* feature_histograms = (*level_feature_histogram)[small_leaf_positions_[j]];
-        hist_t* hist_ptr = feature_histograms[train_data->group_feature_start(group_index)].RawData() - 1;
+        hist_t* hist_ptr = feature_histograms[train_data->group_feature_start(group_index)].RawData() - kHistOffset;
+        std::memset(reinterpret_cast<void*>(hist_ptr), 0, num_bin * kHistEntrySize);
         group_hist_ptr.emplace_back(hist_ptr);
       }
-      train_data->ConstructSymmetricLevelHistogram(group_index, group_hist_ptr, gradients, hessians,
+      train_data->ConstructSymmetricLevelHistogram(group_index, group_hist_ptr, gradients_ptr, hessians_ptr,
         num_data_in_small_leaf_, data_indices_in_small_leaf_.data(), ordered_small_leaf_index_.data());
     }
     if (used_multi_val_feature_group != -1) {
       const int multi_group_start_feature = train_data->group_feature_start(used_multi_val_feature_group);
       std::vector<hist_t*> group_hist_ptr;
+      const int num_bin = train_data->FeatureGroupNumBin(used_multi_val_feature_group);
       for (int j = 0; j < num_small_leaf_; ++j) {
         FeatureHistogram* feature_histograms = (*level_feature_histogram)[small_leaf_positions_[j]];
-        hist_t* hist_ptr = feature_histograms[multi_group_start_feature].RawData() - 1;
+        hist_t* hist_ptr = feature_histograms[multi_group_start_feature].RawData() - kHistOffset;
+        std::memset(reinterpret_cast<void*>(hist_ptr), 0, num_bin * kHistEntrySize);
         group_hist_ptr.emplace_back(hist_ptr);
       }
       train_data->ConstructSymmetricLevelHistogramsMultiVal(data_indices_in_small_leaf_.data(),
-        num_data_in_small_leaf_, ordered_small_leaf_index_.data(), gradients, hessians, share_state, group_hist_ptr);
+        num_data_in_small_leaf_, ordered_small_leaf_index_.data(), gradients_ptr, hessians_ptr, share_state, group_hist_ptr);
     }
   } else {
     Log::Fatal("symmetric tree with row-wise histogram construction is currently unsupported.");
@@ -202,7 +227,9 @@ void SymmetricDataPartition::SplitLevelLeafIndicesInner(
 
   for (int thread_id = 0; thread_id < num_threads_; ++thread_id) {
     iters[thread_id].reset(train_data->FeatureIterator(inner_feature_index));
+    thread_data_in_small_leaf_pos_[thread_id] = 0;
   }
+  thread_data_in_small_leaf_pos_.back() = 0;
 
   int small_leaf_index_in_next_level = 0;
   int large_leaf_index_in_next_level = 0;
@@ -214,6 +241,7 @@ void SymmetricDataPartition::SplitLevelLeafIndicesInner(
       non_split_leaf_index_in_next_level += 2;
     }
   }
+  int next_level_position = 0;
   for (int leaf_index = 0; leaf_index < num_leaf_in_level_; ++leaf_index) {
     const SplitInfo& split_info = level_split_info[leaf_index];
     const int inner_leaf_index = position_to_inner_leaf_index_[leaf_index];
@@ -222,17 +250,21 @@ void SymmetricDataPartition::SplitLevelLeafIndicesInner(
         left_child_index_[inner_leaf_index] = small_leaf_index_in_next_level;
         right_child_index_[inner_leaf_index] = large_leaf_index_in_next_level;
         left_child_smaller_[inner_leaf_index] = true;
+        small_leaf_positions_[small_leaf_index_in_next_level] = next_level_position;
       } else {
         left_child_index_[inner_leaf_index] = large_leaf_index_in_next_level;
         right_child_index_[inner_leaf_index] = small_leaf_index_in_next_level;
         left_child_smaller_[inner_leaf_index] = false;
+        small_leaf_positions_[small_leaf_index_in_next_level] = next_level_position + 1;
       }
-      small_leaf_positions_[small_leaf_index_in_next_level] = leaf_index;
       ++small_leaf_index_in_next_level;
       ++large_leaf_index_in_next_level;
+      next_level_position += 2;
     } else {
       left_child_index_[inner_leaf_index] = non_split_leaf_index_in_next_level;
+      right_child_index_[inner_leaf_index] = -1;
       ++non_split_leaf_index_in_next_level;
+      ++next_level_position;
     }
   }
   const int num_leaf_in_next_level = non_split_leaf_index_in_next_level;
@@ -242,21 +274,22 @@ void SymmetricDataPartition::SplitLevelLeafIndicesInner(
     (int thread_id, data_size_t start, data_size_t end) {
       BinIterator* iter = iters[thread_id].get();
       iter->Reset(start);
-      thread_data_in_small_leaf_count_[thread_id] = 0;
       std::vector<int>& leaf_count_ref = thread_leaf_count_[thread_id];
-      int& data_in_small_leaf_count = thread_data_in_small_leaf_count_[thread_id];
+      int& data_in_small_leaf_count = thread_data_in_small_leaf_pos_[thread_id + 1];
       for (int i = 0; i < num_leaf_in_next_level; ++i) {
         leaf_count_ref[i] = 0;
       }
       for (data_size_t i = start; i < end; ++i) {
         const uint32_t bin = iter->Get(i);
         const uint32_t leaf_index = data_index_to_leaf_index_[i];
-        if (leaf_should_be_split[leaf_index] > 0) {
+        const int leaf_position = inner_leaf_index_to_position_[leaf_index];
+        if (leaf_should_be_split[leaf_position] > 0) {
           if ((MISS_IS_ZERO && !MFB_IS_ZERO && bin == zero_bin) ||
               (MISS_IS_NA && !MFB_IS_NA && bin == max_bin)) {
             const int new_leaf_index = DEFAULT_LEFT ?
               left_child_index_[leaf_index] :
               right_child_index_[leaf_index];
+            CHECK_GE(new_leaf_index, 0);
             ++leaf_count_ref[new_leaf_index];
             data_index_to_leaf_index_[i] = new_leaf_index;
             if (DEFAULT_LEFT) {
@@ -279,6 +312,7 @@ void SymmetricDataPartition::SplitLevelLeafIndicesInner(
               const int new_leaf_index = DEFAULT_LEFT ?
                 left_child_index_[leaf_index] :
                 right_child_index_[leaf_index];
+          CHECK_GE(new_leaf_index, 0);
               ++leaf_count_ref[new_leaf_index];
               data_index_to_leaf_index_[i] = new_leaf_index;
               if (DEFAULT_LEFT) {
@@ -300,6 +334,7 @@ void SymmetricDataPartition::SplitLevelLeafIndicesInner(
               const int new_leaf_index = MOST_FREQ_LEFT ?
                 left_child_index_[leaf_index] :
                 right_child_index_[leaf_index];
+          CHECK_GE(new_leaf_index, 0);
               ++leaf_count_ref[new_leaf_index];
               data_index_to_leaf_index_[i] = new_leaf_index;
               if (MOST_FREQ_LEFT) {
@@ -320,6 +355,7 @@ void SymmetricDataPartition::SplitLevelLeafIndicesInner(
             }
           } else if (bin > uint_threshold) {
             const int new_leaf_index = right_child_index_[leaf_index];
+          CHECK_GE(new_leaf_index, 0);
             ++leaf_count_ref[new_leaf_index];
             data_index_to_leaf_index_[i] = new_leaf_index;
             if (!left_child_smaller_[leaf_index]) {
@@ -330,6 +366,7 @@ void SymmetricDataPartition::SplitLevelLeafIndicesInner(
             }
           } else {
             const int new_leaf_index = left_child_index_[leaf_index];
+          CHECK_GE(new_leaf_index, 0);
             ++leaf_count_ref[new_leaf_index];
             data_index_to_leaf_index_[i] = new_leaf_index;
             if (left_child_smaller_[leaf_index]) {
@@ -341,6 +378,7 @@ void SymmetricDataPartition::SplitLevelLeafIndicesInner(
           }
         } else {
           const int new_leaf_index = left_child_smaller_[leaf_index];
+          CHECK_GE(new_leaf_index, 0);
           ++leaf_count_ref[new_leaf_index];
           data_index_to_leaf_index_[i] = new_leaf_index;
           is_data_in_small_leaf_[i] = 0;
@@ -356,12 +394,13 @@ void SymmetricDataPartition::SplitLevelLeafIndicesInner(
     }
   }
 
-  for (int i = 1; i < num_threads_; ++i) {
-    thread_data_in_small_leaf_count_[i] += thread_data_in_small_leaf_count_[i - 1];
+  for (int i = 1; i < num_threads_ + 1; ++i) {
+    thread_data_in_small_leaf_pos_[i] += thread_data_in_small_leaf_pos_[i - 1];
   }
+  num_data_in_small_leaf_ = thread_data_in_small_leaf_pos_.back();
   Threading::For<data_size_t>(0, num_data_, 512,
     [this] (int thread_id, data_size_t start, data_size_t end) {
-      int thread_pos = thread_data_in_small_leaf_count_[thread_id];
+      int thread_pos = thread_data_in_small_leaf_pos_[thread_id];
       for (data_size_t i = start; i < end; ++i) {
         if (is_data_in_small_leaf_[i] > 0) {
           data_indices_in_small_leaf_[thread_pos] = i;
@@ -376,7 +415,9 @@ void SymmetricDataPartition::SplitLevelLeafIndicesInner(
 
 void SymmetricDataPartition::SplitInnerLeafIndex(const int parent_real_leaf_index,
   const int left_real_leaf_index,
-  const int right_real_leaf_index) {
+  const int right_real_leaf_index,
+  const int left_leaf_position,
+  const int right_leaf_position) {
   if (right_real_leaf_index >= 0) {
     const int parent_inner_leaf_index = inner_leaf_index_[parent_real_leaf_index];
     const int left_inner_leaf_index = left_child_index_[parent_inner_leaf_index];
@@ -387,11 +428,17 @@ void SymmetricDataPartition::SplitInnerLeafIndex(const int parent_real_leaf_inde
     inner_leaf_index_[right_real_leaf_index] = right_inner_leaf_index;
     real_leaf_index_[left_inner_leaf_index] = left_real_leaf_index;
     real_leaf_index_[right_inner_leaf_index] = right_real_leaf_index;
+    position_to_inner_leaf_index_[left_leaf_position] = left_inner_leaf_index;
+    position_to_inner_leaf_index_[right_leaf_position] = right_inner_leaf_index;
+    inner_leaf_index_to_position_[left_inner_leaf_index] = left_leaf_position;
+    inner_leaf_index_to_position_[right_inner_leaf_index] = right_leaf_position;
   } else {
     const int inner_leaf_index = inner_leaf_index_[parent_real_leaf_index];
     const int new_inner_leaf_index = left_child_index_[inner_leaf_index];
     inner_leaf_index_[parent_real_leaf_index] = new_inner_leaf_index;
     real_leaf_index_[new_inner_leaf_index] = parent_real_leaf_index;
+    position_to_inner_leaf_index_[left_leaf_position] = inner_leaf_index;
+    inner_leaf_index_to_position_[inner_leaf_index] = left_leaf_position;
   }
 }
 

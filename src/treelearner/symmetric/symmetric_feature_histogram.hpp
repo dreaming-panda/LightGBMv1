@@ -47,7 +47,7 @@ class SymmetricHistogramPool : public HistogramPool {
   best_gain,\
   default_left
 
-    void FindBestThresholdFromLevelHistograms(const int inner_feature_index,
+    bool FindBestThresholdFromLevelHistograms(const int inner_feature_index,
       const std::vector<std::vector<int>>& paired_leaf_indices_in_cur_level,
       const std::vector<int>& leaf_indices_in_cur_level,
       const std::vector<std::unique_ptr<LeafSplits>>& parent_leaf_splits,
@@ -60,15 +60,12 @@ class SymmetricHistogramPool : public HistogramPool {
         if (pair.size() == 2) {
           const int smaller_leaf_index = pair[0];
           const int larger_leaf_index = pair[1];
-          if (smaller_leaf_index < larger_leaf_index) {
-            Move(smaller_leaf_index, larger_leaf_index);
-          }
           FeatureHistogram *smaller_leaf_histogram = nullptr, *larger_leaf_histogram = nullptr;
           const bool get_smaller_leaf_histogram = Get(smaller_leaf_index, &smaller_leaf_histogram);
           const bool get_larger_leaf_histogram = Get(larger_leaf_index, &larger_leaf_histogram);
           CHECK(get_smaller_leaf_histogram);
           CHECK(get_larger_leaf_histogram);
-          larger_leaf_histogram->Subtract(*smaller_leaf_histogram);
+          larger_leaf_histogram[inner_feature_index].Subtract(smaller_leaf_histogram[inner_feature_index]);
         }
       }
       std::vector<hist_t*> level_histogram_ptr(num_leaves_in_cur_level, nullptr);
@@ -78,7 +75,7 @@ class SymmetricHistogramPool : public HistogramPool {
         const int leaf_index = leaf_indices_in_cur_level[leaf_index_in_level];
         FeatureHistogram* feature_histogram = nullptr;
         const bool get = Get(leaf_index, &feature_histogram);
-        level_histogram_ptr[leaf_index_in_level] = feature_histogram->RawData();
+        level_histogram_ptr[leaf_index_in_level] = feature_histogram[inner_feature_index].RawData();
         CHECK(get);
       }
       const bool use_l1 = meta.config->lambda_l1 > 0.0f;
@@ -101,34 +98,36 @@ class SymmetricHistogramPool : public HistogramPool {
             parent_leaf_splits[leaf_index_in_level]->weight()) + meta.config->min_gain_to_split;
         }
       }
+      bool valid = false;
       if (meta.num_bin > 2 && meta.missing_type != MissingType::None) {
         if (meta.missing_type == MissingType::Zero) {
           if (use_l1) {
-            FindBestThresholdFromLevelHistogramsInner<true, true, true, false>(FindBestThresholdFromLevelHistogramsInner_ARGS);
-            FindBestThresholdFromLevelHistogramsInner<true, false, true, false>(FindBestThresholdFromLevelHistogramsInner_ARGS);
+            valid |= FindBestThresholdFromLevelHistogramsInner<true, true, true, false>(FindBestThresholdFromLevelHistogramsInner_ARGS);
+            valid |= FindBestThresholdFromLevelHistogramsInner<true, false, true, false>(FindBestThresholdFromLevelHistogramsInner_ARGS);
           } else {
-            FindBestThresholdFromLevelHistogramsInner<false, true, true, false>(FindBestThresholdFromLevelHistogramsInner_ARGS);
-            FindBestThresholdFromLevelHistogramsInner<false, false, true, false>(FindBestThresholdFromLevelHistogramsInner_ARGS);
+            valid |= FindBestThresholdFromLevelHistogramsInner<false, true, true, false>(FindBestThresholdFromLevelHistogramsInner_ARGS);
+            valid |= FindBestThresholdFromLevelHistogramsInner<false, false, true, false>(FindBestThresholdFromLevelHistogramsInner_ARGS);
           }
         } else {
           if (use_l1) {
-            FindBestThresholdFromLevelHistogramsInner<true, true, false, true>(FindBestThresholdFromLevelHistogramsInner_ARGS);
-            FindBestThresholdFromLevelHistogramsInner<true, false, false, true>(FindBestThresholdFromLevelHistogramsInner_ARGS);
+            valid |= FindBestThresholdFromLevelHistogramsInner<true, true, false, true>(FindBestThresholdFromLevelHistogramsInner_ARGS);
+            valid |= FindBestThresholdFromLevelHistogramsInner<true, false, false, true>(FindBestThresholdFromLevelHistogramsInner_ARGS);
           } else {
-            FindBestThresholdFromLevelHistogramsInner<false, true, false, true>(FindBestThresholdFromLevelHistogramsInner_ARGS);
-            FindBestThresholdFromLevelHistogramsInner<false, false, false, true>(FindBestThresholdFromLevelHistogramsInner_ARGS);
+            valid |= FindBestThresholdFromLevelHistogramsInner<false, true, false, true>(FindBestThresholdFromLevelHistogramsInner_ARGS);
+            valid |= FindBestThresholdFromLevelHistogramsInner<false, false, false, true>(FindBestThresholdFromLevelHistogramsInner_ARGS);
           }
         }
       } else {
         if (use_l1) {
-          FindBestThresholdFromLevelHistogramsInner<true, true, false, false>(FindBestThresholdFromLevelHistogramsInner_ARGS);
+          valid |= FindBestThresholdFromLevelHistogramsInner<true, true, false, false>(FindBestThresholdFromLevelHistogramsInner_ARGS);
         } else {
-          FindBestThresholdFromLevelHistogramsInner<false, true, false, false>(FindBestThresholdFromLevelHistogramsInner_ARGS);
+          valid |= FindBestThresholdFromLevelHistogramsInner<false, true, false, false>(FindBestThresholdFromLevelHistogramsInner_ARGS);
         }
         if (meta.missing_type == MissingType::NaN) {
           *default_left = 0;
         }
       }
+      return valid;
     }
 
 #undef FindBestThresholdFromLevelHistogramsInner_ARGS
@@ -137,6 +136,8 @@ class SymmetricHistogramPool : public HistogramPool {
   feature_index,\
   threshold,\
   parent_leaf_splits,\
+  best_leaf_in_level_should_be_split,\
+  leaf_index_in_level,\
   left_output,\
   right_output,\
   left_sum_gradient,\
@@ -149,6 +150,7 @@ class SymmetricHistogramPool : public HistogramPool {
 
     void GetSplitLeafOutput(const int leaf_index, const int feature_index,
       const int threshold, const int8_t default_left, const std::unique_ptr<LeafSplits>& parent_leaf_splits,
+      std::vector<int8_t>* best_leaf_in_level_should_be_split, const int leaf_index_in_level,
       double* left_output, double* right_output, double* left_sum_gradient, double* left_sum_hessian,
       double* right_sum_gradient, double* right_sum_hessian, data_size_t* left_cnt, data_size_t* right_cnt,
       double* gain) const {
@@ -198,7 +200,7 @@ class SymmetricHistogramPool : public HistogramPool {
 
   private:
     template <bool USE_L1, bool REVERSE, bool SKIP_DEFAULT_BIN, bool NA_AS_MISSING>
-    void FindBestThresholdFromLevelHistogramsInner(
+    bool FindBestThresholdFromLevelHistogramsInner(
       const std::vector<std::unique_ptr<LeafSplits>>& parent_leaf_splits,
       const std::vector<double>& min_gain_shift,
       const std::vector<hist_t*>& level_histogram_ptr,
@@ -213,6 +215,7 @@ class SymmetricHistogramPool : public HistogramPool {
     template <bool USE_L1, bool REVERSE, bool SKIP_DEFAULT_BIN, bool NA_AS_MISSING>
     void GetSplitLeafOutputInner(const int leaf_index, const int feature_index,
       const int threshold, const std::unique_ptr<LeafSplits>& parent_leaf_splits,
+      std::vector<int8_t>* best_leaf_in_level_should_be_split, const int leaf_index_in_level,
       double* left_output, double* right_output, double* left_sum_gradient, double* left_sum_hessian,
       double* right_sum_gradient, double* right_sum_hessian, data_size_t* left_cnt, data_size_t* right_cnt,
       double* gain) const;
@@ -349,7 +352,7 @@ class SymmetricHistogramPool : public HistogramPool {
 #define GET_HESS(hist, i) hist[((i) << 1) + 1]
 
 template <bool USE_L1, bool REVERSE, bool SKIP_DEFAULT_BIN, bool NA_AS_MISSING>
-void SymmetricHistogramPool::FindBestThresholdFromLevelHistogramsInner(
+bool SymmetricHistogramPool::FindBestThresholdFromLevelHistogramsInner(
   const std::vector<std::unique_ptr<LeafSplits>>& parent_leaf_splits,
   const std::vector<double>& min_gain_shift,
   const std::vector<hist_t*>& level_histogram_ptr,
@@ -374,7 +377,7 @@ void SymmetricHistogramPool::FindBestThresholdFromLevelHistogramsInner(
   std::vector<double>& right_sum_gradient_ref = thread_right_sum_gradient_[thread_id];
   std::vector<double>& right_sum_hessian_ref = thread_right_sum_hessian_[thread_id];
   std::vector<data_size_t>& right_count_ref = thread_right_count_[thread_id];
-
+  bool valid = false;
   if (REVERSE) {
     int t = meta.num_bin - 1 - offset - static_cast<int>(NA_AS_MISSING);
     const int t_end = 1 - offset;
@@ -448,6 +451,7 @@ void SymmetricHistogramPool::FindBestThresholdFromLevelHistogramsInner(
           *best_threshold = t - 1 + offset;
           *best_default_left = static_cast<int8_t>(REVERSE);
         }
+        valid = true;
       }
     }
   } else {
@@ -544,22 +548,26 @@ void SymmetricHistogramPool::FindBestThresholdFromLevelHistogramsInner(
               *best_threshold = t + offset;
               *best_default_left = static_cast<int8_t>(REVERSE);
             }
+            valid = true;
           }
         }
       }
     }
   }
+  return valid;
 }
 
 template <bool USE_L1, bool REVERSE, bool SKIP_DEFAULT_BIN, bool NA_AS_MISSING>
 void SymmetricHistogramPool::GetSplitLeafOutputInner(const int leaf_index, const int feature_index,
   const int threshold, const std::unique_ptr<LeafSplits>& parent_leaf_splits,
+  std::vector<int8_t>* best_leaf_in_level_should_be_split, const int leaf_index_in_level,
   double* left_output, double* right_output, double* left_sum_gradient, double* left_sum_hessian,
   double* right_sum_gradient, double* right_sum_hessian, data_size_t* left_cnt, data_size_t* right_cnt,
   double* gain) const {
   const auto& meta = feature_metas_[feature_index];
   const int8_t offset = meta.offset;
   const double cnt_factor = parent_leaf_splits->num_data_in_leaf() / parent_leaf_splits->sum_hessians();
+  std::vector<int8_t>& best_leaf_in_level_should_be_split_ref = *best_leaf_in_level_should_be_split;
 
   double& left_sum_gradient_ref = *left_sum_gradient;
   double& left_sum_hessian_ref = *left_sum_hessian;
@@ -646,6 +654,14 @@ void SymmetricHistogramPool::GetSplitLeafOutputInner(const int leaf_index, const
     right_sum_gradient_ref = parent_leaf_splits->sum_gradients() - left_sum_gradient_ref;
     right_sum_hessian_ref = parent_leaf_splits->sum_hessians() - left_sum_hessian_ref;
     right_count_ref = parent_leaf_splits->num_data_in_leaf() - left_count_ref;
+  }
+  if (left_count_ref >= meta.config->min_data_in_leaf &&
+    left_sum_hessian_ref >= meta.config->min_sum_hessian_in_leaf &&
+    right_count_ref >= meta.config->min_data_in_leaf &&
+    right_sum_hessian_ref >= meta.config->min_sum_hessian_in_leaf) {
+    best_leaf_in_level_should_be_split_ref[leaf_index_in_level] = 1;
+  } else {
+    best_leaf_in_level_should_be_split_ref[leaf_index_in_level] = 0;
   }
   *gain = GetSplitGains<false, USE_L1, false, false>(
     left_sum_gradient_ref,

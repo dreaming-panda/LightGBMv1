@@ -20,6 +20,7 @@ class SymmetricDataPartition {
                                 const Dataset* train_data,
                                 const std::vector<int8_t>& is_feature_used,
                                 const score_t* gradients, const score_t* hessians,
+                                score_t* ordered_gradients, score_t* ordered_hessians,
                                 TrainingShareStates* share_state) const;
 
   void Split(const Dataset* train_data,
@@ -32,7 +33,9 @@ class SymmetricDataPartition {
 
   void SplitInnerLeafIndex(const int parent_real_leaf_index,
                            const int left_real_leaf_index,
-                           const int right_real_leaf_index);
+                           const int right_real_leaf_index,
+                           const int left_leaf_position,
+                           const int right_leaf_position);
 
   int leaf_count(const int leaf_index) { return leaf_count_[inner_leaf_index_[leaf_index]]; }
 
@@ -91,9 +94,10 @@ class SymmetricDataPartition {
   std::vector<bool> left_child_smaller_;
 
   const int num_threads_;
-  std::vector<int> thread_data_in_small_leaf_count_;
+  std::vector<int> thread_data_in_small_leaf_pos_;
   std::vector<int> inner_leaf_index_;
   std::vector<int> position_to_inner_leaf_index_;
+  std::vector<int> inner_leaf_index_to_position_;
   std::vector<int> real_leaf_index_;
 
   int num_small_leaf_;
