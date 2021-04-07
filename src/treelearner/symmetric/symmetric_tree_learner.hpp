@@ -48,12 +48,15 @@ class SymmetricTreeLearner : public SerialTreeLearner {
 
   void BeforeTrain() override;
 
+  void AfterTrain();
+
   void PrepareLevelHistograms();
 
   void SetUpLevelInfo(const int depth);
 
   void CheckSplit(const int num_leaves_in_old_level,
-    const std::vector<int>& old_left_child, const std::vector<int>& old_right_child);
+    const std::vector<int>& old_left_child, const std::vector<int>& old_right_child,
+    const std::vector<std::unique_ptr<LeafSplits>>& old_level_leaf_splits);
 
   std::unique_ptr<SymmetricHistogramPool> symmetric_histogram_pool_;
   std::unique_ptr<SymmetricDataPartition> symmetric_data_partition_;
@@ -68,6 +71,7 @@ class SymmetricTreeLearner : public SerialTreeLearner {
   int cur_level_;
   int num_leaves_in_cur_level_;
   std::vector<std::vector<int>> paired_leaf_indices_in_cur_level_;
+  int num_pairs_;
 
   int best_inner_feature_index_cur_level_;
   int best_threshold_cur_level_;

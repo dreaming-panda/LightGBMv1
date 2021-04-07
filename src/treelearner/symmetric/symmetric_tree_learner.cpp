@@ -33,6 +33,7 @@ void SymmetricTreeLearner::Init(const Dataset* train_data, bool is_constant_hess
   ordered_hessians_.resize(num_data_, 0.0f);
 
   paired_leaf_indices_in_cur_level_.resize(max_num_leaves_);
+  num_pairs_ = 0;
 
   thread_best_inner_feature_index_cur_level_.resize(num_threads_, -1);
   thread_best_threshold_cur_level_.resize(num_threads_, -1);
@@ -61,24 +62,28 @@ Tree* SymmetricTreeLearner::Train(const score_t* gradients, const score_t *hessi
     SetUpLevelInfo(depth);
     PrepareLevelHistograms();
     // construct and subtract
+    global_timer.Start("ConstructLevelHistograms");
     symmetric_data_partition_->ConstructLevelHistograms(&level_feature_histograms_, train_data_,
       col_sampler_.is_feature_used_bytree(),
       gradients, hessians, ordered_gradients_.data(), ordered_hessians_.data(),
       share_state_.get());
+    global_timer.Stop("ConstructLevelHistograms");
     // find best splits
+    global_timer.Start("FindBestLevelSplits");
     FindBestLevelSplits();
+    global_timer.Stop("FindBestLevelSplits");
     const bool to_continue = SplitLevel(tree.get());
     if (!to_continue) {
       Log::Warning("No further splits found, stop training at level %d", depth);
       break;
     }
   }
+  AfterTrain();
   return tree.release();
 }
 
 void SymmetricTreeLearner::PrepareLevelHistograms() {
-  const int num_pairs = static_cast<int>(paired_leaf_indices_in_cur_level_.size());
-  for (int i = 0; i < num_pairs; ++i) {
+  for (int i = 0; i < num_pairs_; ++i) {
     const std::vector<int>& pair = paired_leaf_indices_in_cur_level_[i];
     if (pair.size() == 2) {
       const int smaller_leaf_index = pair[0];
@@ -111,10 +116,19 @@ void SymmetricTreeLearner::BeforeTrain() {
 
   paired_leaf_indices_in_cur_level_[0].resize(1);
   paired_leaf_indices_in_cur_level_[0][0] = 0;
+  num_pairs_ = 1;
+  num_leaves_in_cur_level_ = 1;
 
   col_sampler_.ResetByTree();
 
   symmetric_data_partition_->Init();
+  symmetric_histogram_pool_->ResetMap();
+}
+
+void SymmetricTreeLearner::AfterTrain() {
+  for (int i = 0; i < max_num_leaves_; ++i) {
+    level_leaf_splits_[i].reset(nullptr);
+  }
 }
 
 void SymmetricTreeLearner::FindBestLevelSplits() {
@@ -177,12 +191,15 @@ bool SymmetricTreeLearner::FindBestLevelSplitsForFeature(const int inner_feature
     &thread_best_gain_cur_level_[thread_id],
     &thread_best_split_default_left_cur_level_[thread_id],
     thread_id,
-    num_leaves_in_cur_level_);
+    num_leaves_in_cur_level_,
+    train_data_,
+    num_pairs_);
   return valid;
 }
 
 void SymmetricTreeLearner::CheckSplit(const int num_leaves_in_old_level,
-    const std::vector<int>& old_left_child, const std::vector<int>& old_right_child) {
+    const std::vector<int>& old_left_child, const std::vector<int>& old_right_child,
+    const std::vector<std::unique_ptr<LeafSplits>>& old_level_leaf_splits) {
   std::vector<std::vector<double>> thread_sum_gradients(num_threads_);
   std::vector<std::vector<double>> thread_sum_hessians(num_threads_);
   std::vector<std::vector<data_size_t>> thread_num_data(num_threads_);
@@ -217,6 +234,8 @@ void SymmetricTreeLearner::CheckSplit(const int num_leaves_in_old_level,
     bool check_success = true;
     const SplitInfo& split_info = best_level_split_info_[i];
     const int left_real_leaf_index = old_left_child[i];
+    const int right_real_leaf_index = old_right_child[i];
+     if (right_real_leaf_index != -1) {
     if (split_info.left_sum_gradient != sum_gradients[left_real_leaf_index]) {
       check_success = false;
       Log::Warning("%f vs %f", split_info.left_sum_gradient, sum_gradients[left_real_leaf_index]);
@@ -232,9 +251,6 @@ void SymmetricTreeLearner::CheckSplit(const int num_leaves_in_old_level,
       Log::Warning("%d vs %d", split_info.left_count, num_datas[left_real_leaf_index]);
     }
     //CHECK_EQ(split_info.left_count, num_datas[left_real_leaf_index]);
-
-    const int right_real_leaf_index = old_right_child[i];
-    if (right_real_leaf_index != -1) {
       if (split_info.right_sum_gradient != sum_gradients[right_real_leaf_index]) {
       check_success = false;
         Log::Warning("%f vs %f", split_info.right_sum_gradient, sum_gradients[right_real_leaf_index]);
@@ -250,12 +266,26 @@ void SymmetricTreeLearner::CheckSplit(const int num_leaves_in_old_level,
         Log::Warning("%d vs %d", split_info.right_count, num_datas[right_real_leaf_index]);
       }
       //CHECK_EQ(split_info.right_count, num_datas[right_real_leaf_index]);
+      const std::unique_ptr<LeafSplits>& leaf_splits = old_level_leaf_splits[i];
+      if (split_info.left_sum_gradient + split_info.right_sum_gradient != leaf_splits->sum_gradients()) {
+        check_success = false;
+      }
+      if (split_info.left_sum_hessian + split_info.right_sum_hessian != leaf_splits->sum_hessians()) {
+        check_success = false;
+      }
+      if (split_info.left_count + split_info.right_count != leaf_splits->num_data_in_leaf()) {
+        check_success = false;
+      }
     }
     if (!check_success) {
-      Log::Warning("left_sum_gradient = %f, best_split_info.left_sum_gradient = %f", sum_gradients[left_real_leaf_index], split_info.left_sum_gradient);
-      Log::Warning("left_sum_hessian = %f, best_split_info.left_sum_hessian = %f", sum_hessians[left_real_leaf_index], split_info.left_sum_hessian);
-      Log::Warning("left_num_data = %d, best_split_info.left_num_data = %d", num_datas[left_real_leaf_index], split_info.left_count);
       if (right_real_leaf_index != -1) {
+        const std::unique_ptr<LeafSplits>& leaf_splits = old_level_leaf_splits[i];
+        Log::Warning("leaf_splits->sum_gradient() = %f", leaf_splits->sum_gradients());
+        Log::Warning("leaf_splits->sum_hessian() = %f", leaf_splits->sum_hessians());
+        Log::Warning("leaf_splits->num_data_in_leaf() = %d", leaf_splits->num_data_in_leaf());
+        Log::Warning("left_sum_gradient = %f, best_split_info.left_sum_gradient = %f", sum_gradients[left_real_leaf_index], split_info.left_sum_gradient);
+        Log::Warning("left_sum_hessian = %f, best_split_info.left_sum_hessian = %f", sum_hessians[left_real_leaf_index], split_info.left_sum_hessian);
+        Log::Warning("left_num_data = %d, best_split_info.left_num_data = %d", num_datas[left_real_leaf_index], split_info.left_count);
         Log::Warning("right_sum_gradient = %f, best_split_info.right_sum_gradient = %f", sum_gradients[right_real_leaf_index], split_info.right_sum_gradient);
         Log::Warning("right_sum_hessian = %f, best_split_info.right_sum_hessian = %f", sum_hessians[right_real_leaf_index], split_info.right_sum_hessian);
         Log::Warning("right_num_data = %d, best_split_info.right_num_data = %d", num_datas[right_real_leaf_index], split_info.right_count);
@@ -267,6 +297,7 @@ void SymmetricTreeLearner::CheckSplit(const int num_leaves_in_old_level,
 }
 
 bool SymmetricTreeLearner::SplitLevel(Tree* tree) {
+  global_timer.Start("symmetric_data_partition_->Split");
   symmetric_data_partition_->Split(
     train_data_,
     best_inner_feature_index_cur_level_,
@@ -274,6 +305,7 @@ bool SymmetricTreeLearner::SplitLevel(Tree* tree) {
     best_split_default_left_cur_level_,
     best_leaf_in_level_should_be_split_,
     best_level_split_info_);
+  global_timer.Stop("symmetric_data_partition_->Split");
   if (best_inner_feature_index_cur_level_ != -1) {
     std::vector<int> old_left_child, old_right_child;
     std::vector<int> old_leaf_indices_in_cur_level = leaf_indices_in_cur_level_;
@@ -323,7 +355,7 @@ bool SymmetricTreeLearner::SplitLevel(Tree* tree) {
           split_info.left_sum_hessian,
           split_info.left_output);
         leaf_indices_in_cur_level_[num_leaves_in_next_level++] = real_leaf_index;
-        level_leaf_splits_[num_leaves_in_next_level].reset(new LeafSplits(symmetric_data_partition_->leaf_count(right_leaf_index), config_));
+        level_leaf_splits_[num_leaves_in_next_level].reset(new LeafSplits(right_count, config_));
         level_leaf_splits_[num_leaves_in_next_level]->Init(
           right_leaf_index,
           split_info.right_count,
@@ -343,8 +375,9 @@ bool SymmetricTreeLearner::SplitLevel(Tree* tree) {
       }
     }
     const int num_leaves_in_old_level = num_leaves_in_cur_level_;
+    num_pairs_ = num_leaves_in_cur_level_;
     num_leaves_in_cur_level_ = num_leaves_in_next_level;
-    CheckSplit(num_leaves_in_old_level, old_left_child, old_right_child);
+    //CheckSplit(num_leaves_in_old_level, old_left_child, old_right_child, old_level_leaf_splits);
     return true;
   } else {
     return false;
@@ -382,7 +415,7 @@ Tree* SymmetricTreeLearner::FitByExistingTree(const Tree* /*old_tree*/, const st
 }
 
 void SymmetricTreeLearner::AddPredictionToScore(const Tree* tree, double* out_score) const {
-  CHECK_LE(tree->num_leaves(), data_partition_->num_leaves());
+  CHECK_LE(tree->num_leaves(), symmetric_data_partition_->num_leaves());
   if (tree->num_leaves() <= 1) {
     return;
   }

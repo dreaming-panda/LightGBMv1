@@ -53,8 +53,12 @@ class SymmetricHistogramPool : public HistogramPool {
       const std::vector<std::unique_ptr<LeafSplits>>& parent_leaf_splits,
       int* best_inner_feature_index, int* best_threshold,
       double* best_gain, int8_t* default_left, const int thread_id,
-      const int num_leaves_in_cur_level) {
-      const int num_pairs = static_cast<int>(paired_leaf_indices_in_cur_level.size());
+      const int num_leaves_in_cur_level,
+      const Dataset* train_data, const int num_pairs) {
+      std::vector<int> real_leaf_index_to_position(num_leaves_in_cur_level, -1);
+      for (int i = 0; i < num_leaves_in_cur_level; ++i) {
+        real_leaf_index_to_position[leaf_indices_in_cur_level[i]] = i;
+      }
       for (int i = 0; i < num_pairs; ++i) {
         const std::vector<int>& pair = paired_leaf_indices_in_cur_level[i];
         if (pair.size() == 2) {
@@ -65,7 +69,21 @@ class SymmetricHistogramPool : public HistogramPool {
           const bool get_larger_leaf_histogram = Get(larger_leaf_index, &larger_leaf_histogram);
           CHECK(get_smaller_leaf_histogram);
           CHECK(get_larger_leaf_histogram);
+          const int smaller_leaf_position = real_leaf_index_to_position[smaller_leaf_index];
+          train_data->FixHistogram(inner_feature_index,
+            parent_leaf_splits[smaller_leaf_position]->sum_gradients(),
+            parent_leaf_splits[smaller_leaf_position]->sum_hessians(),
+            smaller_leaf_histogram[inner_feature_index].RawData());
           larger_leaf_histogram[inner_feature_index].Subtract(smaller_leaf_histogram[inner_feature_index]);
+        } else if (num_pairs == 1) {
+          // fix histogram of root node
+          FeatureHistogram *root_leaf_histogram = nullptr;
+          const bool get_root_leaf_histogram = Get(0, &root_leaf_histogram);
+          CHECK(get_root_leaf_histogram);
+          train_data->FixHistogram(inner_feature_index,
+            parent_leaf_splits[0]->sum_gradients(),
+            parent_leaf_splits[0]->sum_hessians(),
+            root_leaf_histogram[inner_feature_index].RawData());
         }
       }
       std::vector<hist_t*> level_histogram_ptr(num_leaves_in_cur_level, nullptr);
@@ -195,6 +213,45 @@ class SymmetricHistogramPool : public HistogramPool {
         }
       }
     }
+
+  void DynamicChangeSize(const Dataset* train_data, int num_total_bin,
+                      const std::vector<uint32_t>& offsets, const Config* config,
+                      int cache_size, int total_size) override {
+    if (feature_metas_.empty()) {
+      SetFeatureInfo<true, true>(train_data, config, &feature_metas_);
+      uint64_t bin_cnt_over_features = 0;
+      for (int i = 0; i < train_data->num_features(); ++i) {
+        bin_cnt_over_features +=
+            static_cast<uint64_t>(feature_metas_[i].num_bin);
+      }
+      Log::Info("Total Bins %d", bin_cnt_over_features);
+    }
+    int old_cache_size = static_cast<int>(pool_.size());
+    Reset(cache_size, total_size);
+    const int num_groups = train_data->num_feature_groups();
+    if (cache_size > old_cache_size) {
+      pool_.resize(cache_size);
+      data_.resize(num_groups);
+      #pragma omp parallel for schedule(static)
+      for (int i = 0; i < num_groups; ++i) {
+        data_[i].resize(train_data->FeatureGroupNumBin(i) * cache_size * 2);
+      }
+    }
+    OMP_INIT_EX();
+  #pragma omp parallel for schedule(static)
+  for (int i = old_cache_size; i < cache_size; ++i) {
+    OMP_LOOP_EX_BEGIN();
+    pool_[i].reset(new FeatureHistogram[train_data->num_features()]);
+    for (int j = 0; j < train_data->num_features(); ++j) {
+      const int group = train_data->Feature2Group(j);
+      const int group_start_feature = train_data->group_feature_start(group);
+      pool_[i][j].Init(data_[group].data() + 2 * i * train_data->FeatureGroupNumBin(group) +
+        2 * (offsets[j] - offsets[group_start_feature] + 1), &feature_metas_[j]);
+    }
+    OMP_LOOP_EX_END();
+  }
+  OMP_THROW_EX();
+}
 
 #undef GetSplitLeafOutputInner_ARGS
 
@@ -459,97 +516,96 @@ bool SymmetricHistogramPool::FindBestThresholdFromLevelHistogramsInner(
       left_sum_gradient_ref[leaf_index_in_level] = 0.0f;
       left_sum_hessian_ref[leaf_index_in_level] = kEpsilon;
       left_count_ref[leaf_index_in_level] = 0;
+    }
+    int t = 0;
+    const int t_end = meta.num_bin - 2 - offset;
 
-      int t = 0;
-      const int t_end = meta.num_bin - 2 - offset;
-
-      if (NA_AS_MISSING) {
-        if (offset == 1) {
-          for (int leaf_index_in_level = 0; leaf_index_in_level < num_leaves_in_cur_level; ++leaf_index_in_level) {
-            left_sum_gradient_ref[leaf_index_in_level] = parent_leaf_splits[leaf_index_in_level]->sum_gradients();
-            left_sum_hessian_ref[leaf_index_in_level] = parent_leaf_splits[leaf_index_in_level]->sum_hessians();
-            left_count_ref[leaf_index_in_level] = parent_leaf_splits[leaf_index_in_level]->num_data_in_leaf();
-            for (int i = 0; i < meta.num_bin - 1; ++i) {
-              const auto grad = GET_GRAD(level_histogram_ptr[leaf_index_in_level], i);
-              const auto hess = GET_HESS(level_histogram_ptr[leaf_index_in_level], i);
-              const data_size_t cnt =
-                static_cast<data_size_t>(Common::RoundInt(hess * cnt_factors[leaf_index_in_level]));
-              left_sum_gradient_ref[leaf_index_in_level] -= grad;
-              left_sum_hessian_ref[leaf_index_in_level] -= hess;
-              left_count_ref[leaf_index_in_level] -= cnt;
-            }
+    if (NA_AS_MISSING) {
+      if (offset == 1) {
+        for (int leaf_index_in_level = 0; leaf_index_in_level < num_leaves_in_cur_level; ++leaf_index_in_level) {
+          left_sum_gradient_ref[leaf_index_in_level] = parent_leaf_splits[leaf_index_in_level]->sum_gradients();
+          left_sum_hessian_ref[leaf_index_in_level] = parent_leaf_splits[leaf_index_in_level]->sum_hessians();
+          left_count_ref[leaf_index_in_level] = parent_leaf_splits[leaf_index_in_level]->num_data_in_leaf();
+          for (int i = 0; i < meta.num_bin - 1; ++i) {
+            const auto grad = GET_GRAD(level_histogram_ptr[leaf_index_in_level], i);
+            const auto hess = GET_HESS(level_histogram_ptr[leaf_index_in_level], i);
+            const data_size_t cnt =
+              static_cast<data_size_t>(Common::RoundInt(hess * cnt_factors[leaf_index_in_level]));
+            left_sum_gradient_ref[leaf_index_in_level] -= grad;
+            left_sum_hessian_ref[leaf_index_in_level] -= hess;
+            left_count_ref[leaf_index_in_level] -= cnt;
           }
-          t -= 1;
+        }
+        t -= 1;
+      }
+    }
+
+    for (; t <= t_end; ++t) {
+      if (SKIP_DEFAULT_BIN) {
+        if ((t + offset) == static_cast<int>(meta.default_bin)) {
+          continue;
         }
       }
+      double threshold_gain = 0.0f;
+      bool has_leaf_to_split = false;
+      bool is_valid = false;
+      if (t >= 0) {
+        for (int leaf_index_in_level = 0; leaf_index_in_level < num_leaves_in_cur_level; ++leaf_index_in_level) {
+          const auto grad = GET_GRAD(level_histogram_ptr[leaf_index_in_level], t);
+          const auto hess = GET_HESS(level_histogram_ptr[leaf_index_in_level], t);
+          const data_size_t cnt =
+              static_cast<data_size_t>(Common::RoundInt(hess * cnt_factors[leaf_index_in_level]));
+          left_sum_gradient_ref[leaf_index_in_level] += grad;
+          left_sum_hessian_ref[leaf_index_in_level] += hess;
+          left_count_ref[leaf_index_in_level] += cnt;
 
-      for (; t <= t_end; ++t) {
-        if (SKIP_DEFAULT_BIN) {
-          if ((t + offset) == static_cast<int>(meta.default_bin)) {
+          if (left_count_ref[leaf_index_in_level] < meta.config->min_data_in_leaf ||
+            left_sum_hessian_ref[leaf_index_in_level] < meta.config->min_sum_hessian_in_leaf) {
+            has_leaf_to_split = true;
             continue;
           }
+
+          right_count_ref[leaf_index_in_level] = parent_leaf_splits[leaf_index_in_level]->num_data_in_leaf() - left_count_ref[leaf_index_in_level];
+          if (right_count_ref[leaf_index_in_level] < meta.config->min_data_in_leaf) {
+            continue;
+          }
+
+          right_sum_hessian_ref[leaf_index_in_level] = parent_leaf_splits[leaf_index_in_level]->sum_hessians() - left_sum_hessian_ref[leaf_index_in_level];
+          if (right_sum_hessian_ref[leaf_index_in_level] < meta.config->min_sum_hessian_in_leaf) {
+            continue;
+          }
+          has_leaf_to_split = true;
+          right_sum_gradient_ref[leaf_index_in_level] = parent_leaf_splits[leaf_index_in_level]->sum_gradients() - left_sum_gradient_ref[leaf_index_in_level];
+
+          double current_gain = GetSplitGains<false, USE_L1, false, false>(
+            left_sum_gradient_ref[leaf_index_in_level],
+            left_sum_hessian_ref[leaf_index_in_level],
+            right_sum_gradient_ref[leaf_index_in_level],
+            right_sum_hessian_ref[leaf_index_in_level],
+            meta.config->lambda_l1,
+            meta.config->lambda_l2,
+            meta.config->max_delta_step,
+            nullptr, meta.monotone_type, meta.config->path_smooth,
+            left_count_ref[leaf_index_in_level],
+            right_count_ref[leaf_index_in_level],
+            parent_leaf_splits[leaf_index_in_level]->weight());
+          if (current_gain <= min_gain_shift[leaf_index_in_level]) {
+            continue;
+          }
+          threshold_gain += current_gain;
+          is_valid = true;
         }
-        double threshold_gain = 0.0f;
-        bool has_leaf_to_split = false;
-        bool is_valid = false;
-        if (t >= 0) {
-          for (int leaf_index_in_level = 0; leaf_index_in_level < num_leaves_in_cur_level; ++leaf_index_in_level) {
-            const auto grad = GET_GRAD(level_histogram_ptr[leaf_index_in_level], t);
-            const auto hess = GET_HESS(level_histogram_ptr[leaf_index_in_level], t);
-            const data_size_t cnt =
-                static_cast<data_size_t>(Common::RoundInt(hess * cnt_factors[leaf_index_in_level]));
-            left_sum_gradient_ref[leaf_index_in_level] += grad;
-            left_sum_hessian_ref[leaf_index_in_level] += hess;
-            left_count_ref[leaf_index_in_level] += cnt;
-
-            if (left_count_ref[leaf_index_in_level] < meta.config->min_data_in_leaf ||
-              left_sum_hessian_ref[leaf_index_in_level] < meta.config->min_sum_hessian_in_leaf) {
-              has_leaf_to_split = true;
-              continue;
-            }
-
-            right_count_ref[leaf_index_in_level] = parent_leaf_splits[leaf_index_in_level]->num_data_in_leaf() - left_count_ref[leaf_index_in_level];
-            if (right_count_ref[leaf_index_in_level] < meta.config->min_data_in_leaf) {
-              continue;
-            }
-
-            right_sum_hessian_ref[leaf_index_in_level] = parent_leaf_splits[leaf_index_in_level]->sum_hessians() - left_sum_hessian_ref[leaf_index_in_level];
-            if (right_sum_hessian_ref[leaf_index_in_level] < meta.config->min_sum_hessian_in_leaf) {
-              continue;
-            }
-            has_leaf_to_split = true;
-            right_sum_gradient_ref[leaf_index_in_level] = parent_leaf_splits[leaf_index_in_level]->sum_gradients() - left_sum_gradient_ref[leaf_index_in_level];
-
-            double current_gain = GetSplitGains<false, USE_L1, false, false>(
-              left_sum_gradient_ref[leaf_index_in_level],
-              left_sum_hessian_ref[leaf_index_in_level],
-              right_sum_gradient_ref[leaf_index_in_level],
-              right_sum_hessian_ref[leaf_index_in_level],
-              meta.config->lambda_l1,
-              meta.config->lambda_l2,
-              meta.config->max_delta_step,
-              nullptr, meta.monotone_type, meta.config->path_smooth,
-              left_count_ref[leaf_index_in_level],
-              right_count_ref[leaf_index_in_level],
-              parent_leaf_splits[leaf_index_in_level]->weight());
-            if (current_gain <= min_gain_shift[leaf_index_in_level]) {
-              continue;
-            }
-            threshold_gain += current_gain;
-            is_valid = true;
+        if (!has_leaf_to_split) {
+          break;
+        }
+        if (is_valid) {
+          if (threshold_gain > *best_gain) {
+            *best_inner_feature_index = inner_feature_index;
+            *best_gain = threshold_gain;
+            *best_threshold = t + offset;
+            *best_default_left = static_cast<int8_t>(REVERSE);
           }
-          if (!has_leaf_to_split) {
-            break;
-          }
-          if (is_valid) {
-            if (threshold_gain > *best_gain) {
-              *best_inner_feature_index = inner_feature_index;
-              *best_gain = threshold_gain;
-              *best_threshold = t + offset;
-              *best_default_left = static_cast<int8_t>(REVERSE);
-            }
-            valid = true;
-          }
+          valid = true;
         }
       }
     }
