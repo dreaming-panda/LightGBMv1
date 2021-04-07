@@ -129,6 +129,11 @@ void GBDT::Init(const Config* config, const Dataset* train_data, const Objective
       class_need_train_[i] = objective_function_->ClassNeedTrain(i);
     }
   }
+
+  if (objective_function_ != nullptr) {
+    obj_rand_states_.reset(new ObjectiveRandomStates(num_data_, config_->seed));
+    objective_function_->InitObjectiveRandomStates(obj_rand_states_.get());
+  }
 }
 
 void GBDT::AddValidDataset(const Dataset* valid_data,
@@ -172,7 +177,7 @@ void GBDT::Boosting() {
   //  GetGradients(GetTrainingScore(&num_score), gradients_.data(), hessians_.data());
   objective_function_->
     GetIntGradients(GetTrainingScore(&num_score), gradients_.data(), hessians_.data(),
-      int_gradients_.data(), int_hessians_.data(), &grad_scale_, &hess_scale_);
+      int_gradients_.data(), int_hessians_.data(), &grad_scale_, &hess_scale_, obj_rand_states_.get());
 }
 
 data_size_t GBDT::BaggingHelper(data_size_t start, data_size_t cnt, data_size_t* buffer) {

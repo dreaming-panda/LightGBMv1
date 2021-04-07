@@ -576,7 +576,7 @@ void TrainingShareStates::CalcHistBit(const std::vector<const hist_t*>& parent_h
   double /*large_leaf_sum_gradient*/, double large_leaf_sum_hessian,
   data_size_t large_leaf_num_data, bool is_small_leaf) {
   global_timer.Start("TrainingShareStates::CalcHistBit");
-  data_size_t max_cnt_per_bin = 0;
+  /*data_size_t max_cnt_per_bin = 0;
   if (is_small_leaf) {
     double sum_hessian = small_leaf_sum_hessian + large_leaf_sum_hessian;
     data_size_t num_data = small_leaf_num_data + large_leaf_num_data;
@@ -618,9 +618,9 @@ void TrainingShareStates::CalcHistBit(const std::vector<const hist_t*>& parent_h
     } else {
       hist_bit_ = BIT32_HIST;
     }
-  } else {
+  } else {*/
     hist_bit_ = BIT32_HIST;
-  }
+  //}
   global_timer.Stop("TrainingShareStates::CalcHistBit");
 }
 

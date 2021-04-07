@@ -99,6 +99,15 @@ class BinaryLogloss: public ObjectiveFunction {
     label_weights_[1] *= scale_pos_weight_;
   }
 
+  void InitObjectiveRandomStates(ObjectiveRandomStates* /*obj_rand_state*/) const {
+    /*#pragma omp parallel for schedule(static)
+    for (data_size_t i = 0; i < num_data_; ++i) {
+      if (is_pos_(label_[i])) {
+        obj_rand_state->SetGradientValueSign(i, -1.0f);
+      }
+    }*/
+  }
+
   void GetGradients(const double* score, score_t* gradients, score_t* hessians) const override {
     if (!need_train_) {
       return;
@@ -135,18 +144,200 @@ class BinaryLogloss: public ObjectiveFunction {
   void GetIntGradients(const double* score,
     score_t* gradients, score_t* hessians,
     int_score_t* int_gradients, int_score_t* int_hessians,
-    double* grad_scale, double* hess_scale) const override {
+    double* grad_scale, double* hess_scale,
+    ObjectiveRandomStates* /*obj_rand_state*/) const override {
     if (!need_train_) {
       return;
     }
-    GetGradients(score, gradients, hessians);
-    DiscretizeGradients(gradients, hessians, int_gradients, int_hessians,
-      grad_scale, hess_scale);
+    //GetGradients(score, gradients, hessians);
+    //DiscretizeGradients2(gradients, hessians, int_gradients, int_hessians,
+    //  grad_scale, hess_scale);
+    GetIntGradientsFast(score, gradients, hessians, int_gradients, int_hessians, grad_scale, hess_scale, obj_rand_state);
+  }
+
+  void GetIntGradientsFast(const double* score,
+    score_t* gradients, score_t* hessians,
+    int_score_t* int_gradients, int_score_t* /*int_hessians*/,
+    double* grad_scale, double* hess_scale,
+    ObjectiveRandomStates* obj_rand_state) const {
+    if (!need_train_) {
+      return;
+    }
+    if (!obj_rand_state->boundary_locked()) {
+      int num_threads = OMP_NUM_THREADS();
+      std::vector<double> thread_max_gradient(num_threads, 0.0f);
+      std::vector<double> thread_max_hessian(num_threads, 0.0f);
+      std::vector<double> thread_min_gradient(num_threads, 1.0f);
+      std::vector<double> thread_min_hessian(num_threads, 0.25f);
+      Threading::For<data_size_t>(0, num_data_, 1024,
+        [this, gradients, hessians, &thread_max_gradient, &thread_max_hessian,
+          &thread_min_gradient, &thread_min_hessian, score]
+        (int, data_size_t start, data_size_t end) {
+          int thread_id = omp_get_thread_num();
+          for (data_size_t i = start; i < end; ++i) {
+            // get label and label weights
+            const int is_pos = is_pos_(label_[i]);
+            const int label = label_val_[is_pos];
+            const double label_weight = label_weights_[is_pos];
+            // calculate gradients and hessians
+            const double response = -label * sigmoid_ / (1.0f + std::exp(label * sigmoid_ * score[i]));
+            const double abs_response = fabs(response);
+            const score_t gradient = static_cast<score_t>(response * label_weight);
+            const score_t hessian = static_cast<score_t>(abs_response * (sigmoid_ - abs_response) * label_weight);
+            gradients[i] = gradient;
+            hessians[i] = hessian;
+            double fabs_grad = std::fabs(gradient);
+            double fabs_hess = std::fabs(hessian);
+            if (fabs_grad > thread_max_gradient[thread_id]) {
+              thread_max_gradient[thread_id] = fabs_grad;
+            }
+            if (fabs_hess > thread_max_hessian[thread_id]) {
+              thread_max_hessian[thread_id] = fabs_hess;
+            }
+            if (fabs_grad < thread_min_gradient[thread_id]) {
+              thread_min_gradient[thread_id] = fabs_grad;
+            }
+            if (fabs_hess < thread_min_hessian[thread_id]) {
+              thread_min_hessian[thread_id] = fabs_hess;
+            }
+          }});
+      double max_gradient = thread_max_gradient[0];
+      double max_hessian = thread_max_hessian[0];
+      double min_gradient = thread_min_gradient[0];
+      double min_hessian = thread_min_hessian[0];
+      for (int thread_id = 1; thread_id < num_threads; ++thread_id) {
+        if (max_gradient < thread_max_gradient[thread_id]) {
+          max_gradient = thread_max_gradient[thread_id];
+        }
+        if (max_hessian < thread_max_hessian[thread_id]) {
+          max_hessian = thread_max_hessian[thread_id];
+        }
+      }
+      Log::Warning("max_gradient = %f, max_hessian = %f", max_gradient, max_hessian);
+      Log::Warning("min_gradient = %f, min_hessian = %f", min_gradient, min_hessian);
+      obj_rand_state->SetGradientInfo(max_gradient, max_hessian);
+      *grad_scale = obj_rand_state->gradient_scale();
+      *hess_scale = obj_rand_state->hessian_scale();
+      Log::Warning("grad_scale = %.20f, hess_scale = %.20f", *grad_scale, *hess_scale);
+      const double g_inverse_scale = obj_rand_state->inverse_gradient_scale();
+      const double h_inverse_scale = obj_rand_state->inverse_hessian_scale();
+      const int random_values_use_start = obj_rand_state->GetNextRandomValueUseStart();
+      const double* gradient_random_values = obj_rand_state->gradient_random_values();
+      const double* hessian_random_values = obj_rand_state->hessian_random_values();
+      #pragma omp parallel for schedule(static)
+      for (data_size_t i = 0; i < num_data_; ++i) {
+        const double gradient = gradients[i];
+        const data_size_t random_value_pos = (i + random_values_use_start) % num_data_;
+        int_gradients[2 * i + 1] = gradient >= 0.0f ?
+          static_cast<int_score_t>(gradient * g_inverse_scale + gradient_random_values[random_value_pos]) :
+          static_cast<int_score_t>(gradient * g_inverse_scale - gradient_random_values[random_value_pos]);
+        int_gradients[2 * i] = static_cast<int_score_t>(hessians[i] * h_inverse_scale + hessian_random_values[random_value_pos]);
+        //int_hessians[i] = static_cast<int_score_t>(hessians[i] * h_inverse_scale);
+      }
+    } else {
+      *grad_scale = obj_rand_state->gradient_scale();
+      *hess_scale = obj_rand_state->hessian_scale();
+      Log::Warning("grad_scale = %.20f, hess_scale = %.20f", *grad_scale, *hess_scale);
+      const double g_inverse_scale = obj_rand_state->inverse_gradient_scale();
+      const double h_inverse_scale = obj_rand_state->inverse_hessian_scale();
+      const int random_values_use_start = obj_rand_state->GetNextRandomValueUseStart();
+      const double* gradient_random_values = obj_rand_state->gradient_random_values();
+      const double* hessian_random_values = obj_rand_state->hessian_random_values();
+      #pragma omp parallel for schedule(static)
+      for (data_size_t i = 0; i < num_data_; ++i) {
+        // get label and label weights
+        const int is_pos = is_pos_(label_[i]);
+        const int label = label_val_[is_pos];
+        const double label_weight = label_weights_[is_pos];
+        // calculate gradients and hessians
+        const double response = -label * sigmoid_ / (1.0f + std::exp(label * sigmoid_ * score[i]));
+        const double abs_response = fabs(response);
+        const score_t gradient = static_cast<score_t>(response * label_weight);
+        const score_t hessian = static_cast<score_t>(abs_response * (sigmoid_ - abs_response) * label_weight);
+        gradients[i] = gradient;
+        hessians[i] = hessian;
+        const data_size_t random_value_pos = (i + random_values_use_start) % num_data_;
+        int_gradients[2 * i + 1] = gradient >= 0.0f ?
+          static_cast<int_score_t>(gradient * g_inverse_scale + gradient_random_values[random_value_pos]) :
+          static_cast<int_score_t>(gradient * g_inverse_scale - gradient_random_values[random_value_pos]);
+        int_gradients[2 * i] = static_cast<int_score_t>(hessian * h_inverse_scale + hessian_random_values[random_value_pos]);
+        //int_hessians[i] = static_cast<int_score_t>(hessians[i] * h_inverse_scale);
+      }
+    }
   }
 
   void DiscretizeGradients(score_t* gradients, score_t* hessians,
     int_score_t* int_gradients, int_score_t* /*int_hessians*/,
-    double* grad_scale, double* hess_scale) const override {
+    double* grad_scale, double* hess_scale,
+    ObjectiveRandomStates* obj_rand_state) const override {
+    if (!obj_rand_state->boundary_locked()) {
+      double max_gradient = std::fabs(gradients[0]);
+      double max_hessian = std::fabs(hessians[0]);
+      int num_threads = OMP_NUM_THREADS();
+      std::vector<double> thread_max_gradient(num_threads, max_gradient);
+      std::vector<double> thread_max_hessian(num_threads, max_hessian);
+      std::vector<double> thread_min_gradient(num_threads, max_gradient);
+      std::vector<double> thread_min_hessian(num_threads, max_hessian);
+      Threading::For<data_size_t>(0, num_data_, 1024,
+        [gradients, hessians, &thread_max_gradient, &thread_max_hessian,
+          &thread_min_gradient, &thread_min_hessian]
+        (int, data_size_t start, data_size_t end) {
+          int thread_id = omp_get_thread_num();
+          for (data_size_t i = start; i < end; ++i) {
+            double fabs_grad = std::fabs(gradients[i]);
+            double fabs_hess = std::fabs(hessians[i]);
+            if (fabs_grad > thread_max_gradient[thread_id]) {
+              thread_max_gradient[thread_id] = fabs_grad;
+            }
+            if (fabs_hess > thread_max_hessian[thread_id]) {
+              thread_max_hessian[thread_id] = fabs_hess;
+            }
+            if (fabs_grad < thread_min_gradient[thread_id]) {
+              thread_min_gradient[thread_id] = fabs_grad;
+            }
+            if (fabs_hess < thread_min_hessian[thread_id]) {
+              thread_min_hessian[thread_id] = fabs_hess;
+            }
+          }});
+      max_gradient = thread_max_gradient[0];
+      max_hessian = thread_max_hessian[0];
+      double min_gradient = thread_min_gradient[0];
+      double min_hessian = thread_min_hessian[0];
+      for (int thread_id = 1; thread_id < num_threads; ++thread_id) {
+        if (max_gradient < thread_max_gradient[thread_id]) {
+          max_gradient = thread_max_gradient[thread_id];
+        }
+        if (max_hessian < thread_max_hessian[thread_id]) {
+          max_hessian = thread_max_hessian[thread_id];
+        }
+      }
+      Log::Warning("max_gradient = %f, max_hessian = %f", max_gradient, max_hessian);
+      Log::Warning("min_gradient = %f, min_hessian = %f", min_gradient, min_hessian);
+      obj_rand_state->SetGradientInfo(max_gradient, max_hessian);
+    }
+    *grad_scale = obj_rand_state->gradient_scale();
+    *hess_scale = obj_rand_state->hessian_scale();
+    Log::Warning("grad_scale = %.20f, hess_scale = %.20f", *grad_scale, *hess_scale);
+    const double g_inverse_scale = obj_rand_state->inverse_gradient_scale();
+    const double h_inverse_scale = obj_rand_state->inverse_hessian_scale();
+    const int random_values_use_start = obj_rand_state->GetNextRandomValueUseStart();
+    const double* gradient_random_values = obj_rand_state->gradient_random_values();
+    const double* hessian_random_values = obj_rand_state->hessian_random_values();
+    #pragma omp parallel for schedule(static)
+    for (data_size_t i = 0; i < num_data_; ++i) {
+      const double gradient = gradients[i];
+      const data_size_t random_value_pos = (i + random_values_use_start) % num_data_;
+      int_gradients[2 * i + 1] = gradient >= 0.0f ?
+        static_cast<int_score_t>(gradients[i] * g_inverse_scale + gradient_random_values[random_value_pos]) :
+        static_cast<int_score_t>(gradients[i] * g_inverse_scale - gradient_random_values[random_value_pos]);
+      int_gradients[2 * i] = static_cast<int_score_t>(hessians[i] * h_inverse_scale + hessian_random_values[random_value_pos]);
+      //int_hessians[i] = static_cast<int_score_t>(hessians[i] * h_inverse_scale);
+    }
+  }
+
+void DiscretizeGradients2(score_t* gradients, score_t* hessians,
+    int_score_t* int_gradients, int_score_t* /*int_hessians*/,
+    double* grad_scale, double* hess_scale) const {
     double max_gradient = std::fabs(gradients[0]);
     double max_hessian = std::fabs(hessians[0]);
     int num_threads = OMP_NUM_THREADS();
@@ -154,6 +345,8 @@ class BinaryLogloss: public ObjectiveFunction {
     std::vector<double> thread_max_hessian(num_threads, max_hessian);
     std::vector<double> thread_min_gradient(num_threads, max_gradient);
     std::vector<double> thread_min_hessian(num_threads, max_hessian);
+    static int iter = 0;
+    //DumpGradientToFile(gradients, hessians, iter, num_data_, 1, "no_clip", 0.0f, 0.0f, false);
     Threading::For<data_size_t>(0, num_data_, 1024,
       [gradients, hessians, &thread_max_gradient, &thread_max_hessian,
         &thread_min_gradient, &thread_min_hessian]
@@ -186,20 +379,62 @@ class BinaryLogloss: public ObjectiveFunction {
       if (max_hessian < thread_max_hessian[thread_id]) {
         max_hessian = thread_max_hessian[thread_id];
       }
+      if (min_gradient > thread_min_gradient[thread_id]) {
+        min_gradient = thread_min_gradient[thread_id];
+      }
+      if (min_hessian > thread_min_hessian[thread_id]) {
+        min_hessian = thread_min_hessian[thread_id];
+      }
     }
     Log::Warning("max_gradient = %f, max_hessian = %f", max_gradient, max_hessian);
     Log::Warning("min_gradient = %f, min_hessian = %f", min_gradient, min_hessian);
     *grad_scale = max_gradient / static_cast<double>(kIntGradBins / 2);
-    *hess_scale = max_hessian / static_cast<double>(kIntGradBins / 2);
+    *hess_scale = max_hessian / static_cast<double>(kIntGradBins);
     Log::Warning("grad_scale = %.20f, hess_scale = %.20f", *grad_scale, *hess_scale);
     const double g_inverse_scale = 1.0f / (*grad_scale);
     const double h_inverse_scale = 1.0f / (*hess_scale);
+    const double gs = *grad_scale;
+    const double hs = *hess_scale;
+    std::vector<std::mt19937> mt_generators;
+    for (int i = 0; i < OMP_NUM_THREADS(); ++i) {
+      mt_generators.emplace_back(i + iter);
+    }
+    std::vector<std::uniform_real_distribution<double>> dist;
+    for (int i = 0; i < OMP_NUM_THREADS(); ++i) {
+      dist.push_back(std::uniform_real_distribution<double>(0.0f, 1.0f));
+    }
     #pragma omp parallel for schedule(static)
     for (data_size_t i = 0; i < num_data_; ++i) {
-      int_gradients[2 * i + 1] = static_cast<int_score_t>(gradients[i] * g_inverse_scale);
-      int_gradients[2 * i] = static_cast<int_score_t>(hessians[i] * h_inverse_scale);
-      //int_hessians[i] = static_cast<int_score_t>(hessians[i] * h_inverse_scale);
+      const int thread_id = omp_get_thread_num();
+      const score_t gradient = gradients[i];
+      const score_t hessian = hessians[i];
+      const int_score_t int_grad = static_cast<int_score_t>(std::lround(gradient * g_inverse_scale));
+      const int_score_t int_hess = static_cast<int_score_t>(std::lround(hessian * h_inverse_scale));
+      const score_t gradient_low = int_grad * gs;
+      const score_t gradient_high = gradient >= 0.0f ? (int_grad + 1) * gs : (int_grad - 1) * gs;
+      const score_t hessian_low = int_hess * hs;
+      const score_t hessian_high = (int_hess + 1) * hs;
+      const score_t gradient_bias = (gradient - gradient_low) / (gradient_high - gradient_low);
+      const score_t hessian_bias = (hessian - hessian_low) / (hessian_high - hessian_low);
+      if (dist[thread_id](mt_generators[thread_id]) > gradient_bias) {
+        int_gradients[2 * i + 1] = int_grad;
+      } else {
+        if (gradient < 0.0f) {
+          CHECK(int_grad <= 0);
+          int_gradients[2 * i + 1] = int_grad - 1;
+        } else {
+          CHECK(int_grad >= 0);
+          int_gradients[2 * i + 1] = int_grad + 1;
+        }
+      }
+      if (dist[thread_id](mt_generators[thread_id]) > hessian_bias) {
+        int_gradients[2 * i] = int_hess;
+      } else {
+        int_gradients[2 * i] = int_hess + 1;
+      }
     }
+    //DumpGradientToFile(int_gradients, int_hessians, iter, num_data_, 1, "no_clip_discretized", *grad_scale, *hess_scale, true);
+    ++iter;
   }
 
   // implement custom average to boost from (if enabled among options)
