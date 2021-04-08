@@ -95,13 +95,13 @@ void MultiValBinWrapper<int_score_t, int_hist_t>::ConstructHistograms(const data
   const score_t* /*gradients*/,
   const score_t* /*hessians*/,
   const int_score_t* int_gradients,
-  const int_score_t* int_hessians,
+  const int_score_t* /*int_hessians*/,
   AlignedVector<hist_t>* /*hist_buf*/,
   AlignedVector<int_hist_t>* int_hist_buf,
   hist_t* out_hist_data,
   const bool use_indices,
   const bool ordered) {
-  ConstructHistogramsInner<true>(data_indices, num_data, int_gradients, int_hessians, use_indices, ordered, int_hist_buf, out_hist_data);
+  ConstructHistogramsInner<true>(data_indices, num_data, int_gradients, nullptr, use_indices, ordered, int_hist_buf, out_hist_data);
 }
 
 template <>
@@ -127,11 +127,11 @@ template <>
 template <bool USE_INDICES, bool ORDERED,  bool IS_INT_GRAD>
 void MultiValBinWrapper<int_score_t, int_hist_t>::ConstructHistogramsForBlock(const MultiValBin* sub_multi_val_bin,
   data_size_t start, data_size_t end, const data_size_t* data_indices,
-  const int_score_t* gradients, const int_score_t* hessians, int block_id,
+  const int_score_t* gradients, const int_score_t* /*hessians*/, int block_id,
   AlignedVector<int_hist_t>* hist_buf,
   hist_t* /*out_hist_data*/) {
   int_hist_t* data_ptr = hist_buf->data() + static_cast<size_t>(num_bin_aligned_) * block_id * 2;
-  ConstructHistogramsForBlockInner<USE_INDICES, ORDERED, IS_INT_GRAD>(sub_multi_val_bin, start, end, data_indices, gradients, hessians, data_ptr);
+  ConstructHistogramsForBlockInner<USE_INDICES, ORDERED, IS_INT_GRAD>(sub_multi_val_bin, start, end, data_indices, gradients, nullptr, data_ptr);
 }
 
 template <typename SCORE_T, typename HIST_BUF_T>

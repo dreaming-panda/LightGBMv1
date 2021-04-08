@@ -147,19 +147,18 @@ class MultiValBinWrapper : public MultiValBinWrapperBase {
     HIST_BUF_T* out_data) {
     std::memset(reinterpret_cast<void*>(out_data), 0, num_bin_ * 2 * sizeof(HIST_BUF_T));
     if (IS_INT_GRAD) {
-      const int_score_t* gradients_ptr = reinterpret_cast<const int_score_t*>(gradients);
-      const int_score_t* hessians_ptr = reinterpret_cast<const int_score_t*>(hessians);
+      const int_score_t* gradients_and_hessians_ptr = reinterpret_cast<const int_score_t*>(gradients);
       int_hist_t* out_data_ptr = reinterpret_cast<int_hist_t*>(out_data); 
       if (USE_INDICES) {
         if (ORDERED) {
           sub_multi_val_bin->ConstructIntHistogramOrdered(data_indices, start, end,
-                                                  gradients_ptr, hessians_ptr, out_data_ptr);
+                                                  gradients_and_hessians_ptr, out_data_ptr);
         } else {
-          sub_multi_val_bin->ConstructIntHistogram(data_indices, start, end, gradients_ptr,
-                                            hessians_ptr, out_data_ptr);
+          sub_multi_val_bin->ConstructIntHistogram(data_indices, start, end, gradients_and_hessians_ptr,
+                                            out_data_ptr);
         }
       } else {
-        sub_multi_val_bin->ConstructIntHistogram(start, end, gradients_ptr, hessians_ptr,
+        sub_multi_val_bin->ConstructIntHistogram(start, end, gradients_and_hessians_ptr,
                                           out_data_ptr);
       }
     } else {
@@ -281,7 +280,7 @@ struct TrainingShareStates {
         const score_t* gradients_ptr = nullptr;
         const score_t* hessians_ptr = nullptr;
         const int_score_t* int_gradients_ptr = reinterpret_cast<const int_score_t*>(gradients);
-        const int_score_t* int_hessians_ptr = reinterpret_cast<const int_score_t*>(hessians);
+        const int_score_t* int_hessians_ptr = nullptr;
         AlignedVector<hist_t>* hist_buf_ptr = nullptr;
         AlignedVector<int_hist_t>* int_hist_buf_ptr = &int_hist_buf_;
         ConstructHistogramsInner<USE_INDICES, ORDERED>(MultiValBinWraperConstructHistograms_ARGS);

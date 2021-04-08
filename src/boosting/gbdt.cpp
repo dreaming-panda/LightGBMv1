@@ -112,8 +112,7 @@ void GBDT::Init(const Config* config, const Dataset* train_data, const Objective
     gradients_.resize(total_size);
     hessians_.resize(total_size);
     if (config_->use_gradient_discretization) {
-      int_gradients_.resize(2 * total_size);
-      int_hessians_.resize(total_size);
+      int_gradients_and_hessians_.resize(2 * total_size);
     }
   }
   // get max feature index
@@ -187,7 +186,7 @@ void GBDT::Boosting() {
   } else {
     objective_function_->
       GetIntGradients(GetTrainingScore(&num_score), gradients_.data(), hessians_.data(),
-        int_gradients_.data(), int_hessians_.data(), &grad_scale_, &hess_scale_, obj_rand_states_.get());
+        int_gradients_and_hessians_.data(), &grad_scale_, &hess_scale_, obj_rand_states_.get());
   }
 }
 
@@ -383,7 +382,7 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
   Common::FunctionTimer fun_timer("GBDT::TrainOneIter", global_timer);
   std::vector<double> init_scores(num_tree_per_iteration_, 0.0);
   // boosting first
-  const int_score_t* int_gradients = nullptr, *int_hessians = nullptr;
+  int_score_t* int_gradients_and_hessians = nullptr;
   if (gradients == nullptr || hessians == nullptr) {
     for (int cur_tree_id = 0; cur_tree_id < num_tree_per_iteration_; ++cur_tree_id) {
       init_scores[cur_tree_id] = BoostFromAverage(cur_tree_id, true);
@@ -392,8 +391,7 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
     gradients = gradients_.data();
     hessians = hessians_.data();
     if (config_->use_gradient_discretization) {
-      int_gradients = int_gradients_.data();
-      int_hessians = int_hessians_.data();
+      int_gradients_and_hessians = int_gradients_and_hessians_.data();
     }
   } else {
     if (config_->use_gradient_discretization) {
@@ -410,8 +408,7 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
     if (class_need_train_[cur_tree_id] && train_data_->num_features() > 0) {
       auto grad = gradients + offset;
       auto hess = hessians + offset;
-      auto int_grad = int_gradients;
-      auto int_hess = int_hessians;
+      auto int_grad_and_hess = int_gradients_and_hessians + offset * 2;
       // need to copy gradients for bagging subset.
       // TODO(shiyu1994): not supported for int gradient
       if (is_use_subset_ && bag_data_cnt_ < num_data_) {
@@ -423,15 +420,16 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
         hess = hessians_.data() + offset;
         if (config_->use_gradient_discretization) {
           for (int i = 0; i < bag_data_cnt_; ++i) {
-            int_gradients_[offset + i] = int_grad[bag_data_indices_[i]];
-            int_hessians_[offset + i] = int_hess[bag_data_indices_[i]];
+            const size_t dst_pos = 2 * (offset + static_cast<size_t>(i));
+            const size_t src_pos = 2 * static_cast<size_t>(bag_data_indices_[i]);
+            int_gradients_and_hessians_[dst_pos] = int_grad_and_hess[src_pos];
+            int_gradients_and_hessians_[dst_pos + 1] = int_grad_and_hess[src_pos + 1];
           }
-          int_grad = int_gradients_.data() + offset;
-          int_hess = int_hessians_.data() + offset;
+          int_grad_and_hess = int_gradients_and_hessians_.data() + offset * 2;
         }
       }
       bool is_first_tree = models_.size() < static_cast<size_t>(num_tree_per_iteration_);
-      new_tree.reset(tree_learner_->Train(grad, hess, is_first_tree, int_grad, int_hess, grad_scale_, hess_scale_));
+      new_tree.reset(tree_learner_->Train(grad, hess, is_first_tree, int_grad_and_hess, grad_scale_, hess_scale_));
     }
 
     if (new_tree->num_leaves() > 1) {
@@ -758,8 +756,7 @@ void GBDT::ResetTrainingData(const Dataset* train_data, const ObjectiveFunction*
       gradients_.resize(total_size);
       hessians_.resize(total_size);
       if (config_->use_gradient_discretization) {
-        int_gradients_.resize(2 * total_size);
-        int_hessians_.resize(total_size);
+        int_gradients_and_hessians_.resize(2 * total_size);
       }
     }
 
@@ -863,8 +860,7 @@ void GBDT::ResetBaggingConfig(const Config* config, bool is_change_dataset) {
         gradients_.resize(total_size);
         hessians_.resize(total_size);
         if (config_->use_gradient_discretization) {
-          int_gradients_.resize(2 * total_size);
-          int_hessians_.resize(total_size);
+          int_gradients_and_hessians_.resize(2 * total_size);
         }
       }
     }

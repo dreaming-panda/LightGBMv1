@@ -43,8 +43,7 @@ class GOSS: public GBDT {
       gradients_.resize(total_size, 0.0f);
       hessians_.resize(total_size, 0.0f);
       if (config_->use_gradient_discretization) {
-        int_gradients_.resize(total_size, 0);
-        int_hessians_.resize(total_size, 0);
+        int_gradients_and_hessians_.resize(total_size * 2, 0);
       }
     }
   }

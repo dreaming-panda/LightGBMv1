@@ -158,7 +158,7 @@ class BinMapper {
   * \param zero_as_missing True to use zero as missing value
   * \param forced_upper_bounds Vector of split points that must be used (if this has size less than max_bin, remaining splits are found by the algorithm)
   */
-  int FindBin(double* values, int num_values, size_t total_sample_cnt, int max_bin, int min_data_in_bin, int min_split_data, bool pre_filter, BinType bin_type,
+  void FindBin(double* values, int num_values, size_t total_sample_cnt, int max_bin, int min_data_in_bin, int min_split_data, bool pre_filter, BinType bin_type,
                bool use_missing, bool zero_as_missing, const std::vector<double>& forced_upper_bounds);
 
   /*!
@@ -319,11 +319,13 @@ class Bin {
 
   virtual void ConstructIntHistogram(
     const data_size_t* data_indices, data_size_t start, data_size_t end,
-    const int_score_t* ordered_gradients, const int_score_t* ordered_hessians,
+    const int_score_t* ordered_gradients_and_hessians,
+    const bool use_hessian,
     int_hist_t* out) const = 0;
 
   virtual void ConstructIntHistogram(data_size_t start, data_size_t end,
-    const int_score_t* ordered_gradients, const int_score_t* ordered_hessians,
+    const int_score_t* ordered_gradients_and_hessians,
+    const bool use_hessian,
     int_hist_t* out) const = 0;
 
   /*!
@@ -344,12 +346,6 @@ class Bin {
 
   virtual void ConstructHistogram(data_size_t start, data_size_t end,
                                   const score_t* ordered_gradients, hist_t* out) const = 0;
-
-  virtual void ConstructIntHistogram(const data_size_t* data_indices, data_size_t start, data_size_t end,
-                                  const int_score_t* ordered_gradients, int_hist_t* out) const = 0;
-
-  virtual void ConstructIntHistogram(data_size_t start, data_size_t end,
-                                  const int_score_t* ordered_gradients, int_hist_t* out) const = 0;
 
   virtual data_size_t Split(uint32_t min_bin, uint32_t max_bin,
                             uint32_t default_bin, uint32_t most_freq_bin,
@@ -462,19 +458,16 @@ class MultiValBin {
 
   virtual void ConstructIntHistogram(const data_size_t* data_indices,
                                   data_size_t start, data_size_t end,
-                                  const int_score_t* int_gradients,
-                                  const int_score_t* int_hessians,
+                                  const int_score_t* int_gradients_and_hessians,
                                   int_hist_t* out) const = 0;
 
   virtual void ConstructIntHistogram(data_size_t start, data_size_t end,
-                                  const int_score_t* int_gradients,
-                                  const int_score_t* int_hessians,
+                                  const int_score_t* int_gradients_and_hessians,
                                   int_hist_t* out) const = 0;
 
   virtual void ConstructIntHistogramOrdered(const data_size_t* data_indices,
                                          data_size_t start, data_size_t end,
-                                         const int_score_t* int_ordered_gradients,
-                                         const int_score_t* int_ordered_hessians,
+                                         const int_score_t* ordered_int_gradients_and_hessians,
                                          int_hist_t* out) const = 0;
 
   virtual void FinishLoad() = 0;

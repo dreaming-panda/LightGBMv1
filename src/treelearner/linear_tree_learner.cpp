@@ -60,13 +60,12 @@ void LinearTreeLearner::InitLinear(const Dataset* train_data, const int max_leav
 }
 
 Tree* LinearTreeLearner::Train(const score_t* gradients, const score_t *hessians, bool is_first_tree,
-  const int_score_t* int_gradients, const int_score_t* int_hessians,
+  const int_score_t* int_gradients_and_hessians,
   const double /*grad_scale*/, const double /*hess_scale*/) {
   Common::FunctionTimer fun_timer("SerialTreeLearner::Train", global_timer);
   gradients_ = gradients;
   hessians_ = hessians;
-  int_gradients_ = int_gradients;
-  int_hessians_ = int_hessians;
+  int_gradients_and_hessians_ = int_gradients_and_hessians;
   int num_threads = OMP_NUM_THREADS();
   if (share_state_->num_threads != num_threads && share_state_->num_threads > 0) {
     Log::Warning(

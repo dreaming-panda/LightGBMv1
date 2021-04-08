@@ -57,14 +57,13 @@ class TreeLearner {
   * \param gradients The first order gradients
   * \param hessians The second order gradients
   * \param is_first_tree If linear tree learning is enabled, first tree needs to be handled differently
-  * \param int_gradients The discretized first order gradients
-  * \param int_hessians The discretized second order gradients
+  * \param int_gradients_and_hessians The discretized first and second order gradients
   * \param grad_scale The scaling factor to recover original first order gradient from discretized values
   * \param hess_scale The scaling factor to recover original second order gradient from discretized values
   * \return A trained tree
   */
   virtual Tree* Train(const score_t* gradients, const score_t *hessians, bool is_first_tree,
-    const int_score_t* int_gradients, const int_score_t* int_hessians,
+    const int_score_t* int_gradients_and_hessians,
     const double grad_scale, const double hess_scale) = 0;
 
   /*!

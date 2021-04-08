@@ -625,7 +625,6 @@ Dataset* DatasetLoader::ConstructFromSampleData(double** sample_values,
     num_total_features = Network::GlobalSyncUpByMax(num_total_features);
   }
   std::vector<std::unique_ptr<BinMapper>> bin_mappers(num_total_features);
-  std::vector<int> max_cnt_in_bin(num_total_features);
   // fill feature_names_ if not header
   if (feature_names_.empty()) {
     for (int i = 0; i < num_col; ++i) {
@@ -665,12 +664,12 @@ Dataset* DatasetLoader::ConstructFromSampleData(double** sample_values,
       }
       bin_mappers[i].reset(new BinMapper());
       if (config_.max_bin_by_feature.empty()) {
-        max_cnt_in_bin[i] = bin_mappers[i]->FindBin(sample_values[i], num_per_col[i], total_sample_size,
+        bin_mappers[i]->FindBin(sample_values[i], num_per_col[i], total_sample_size,
                                 config_.max_bin, config_.min_data_in_bin, filter_cnt, config_.feature_pre_filter,
                                 bin_type, config_.use_missing, config_.zero_as_missing,
                                 forced_bin_bounds[i]);
       } else {
-        max_cnt_in_bin[i] = bin_mappers[i]->FindBin(sample_values[i], num_per_col[i], total_sample_size,
+        bin_mappers[i]->FindBin(sample_values[i], num_per_col[i], total_sample_size,
                                 config_.max_bin_by_feature[i], config_.min_data_in_bin,
                                 filter_cnt, config_.feature_pre_filter, bin_type, config_.use_missing,
                                 config_.zero_as_missing, forced_bin_bounds[i]);
@@ -712,12 +711,12 @@ Dataset* DatasetLoader::ConstructFromSampleData(double** sample_values,
         continue;
       }
       if (config_.max_bin_by_feature.empty()) {
-        max_cnt_in_bin[i] = bin_mappers[i]->FindBin(sample_values[start[rank] + i], num_per_col[start[rank] + i],
+        bin_mappers[i]->FindBin(sample_values[start[rank] + i], num_per_col[start[rank] + i],
                                 total_sample_size, config_.max_bin, config_.min_data_in_bin,
                                 filter_cnt, config_.feature_pre_filter, bin_type, config_.use_missing, config_.zero_as_missing,
                                 forced_bin_bounds[i]);
       } else {
-        max_cnt_in_bin[i] = bin_mappers[i]->FindBin(sample_values[start[rank] + i], num_per_col[start[rank] + i],
+        bin_mappers[i]->FindBin(sample_values[start[rank] + i], num_per_col[start[rank] + i],
                                 total_sample_size, config_.max_bin_by_feature[start[rank] + i],
                                 config_.min_data_in_bin, filter_cnt, config_.feature_pre_filter, bin_type, config_.use_missing,
                                 config_.zero_as_missing, forced_bin_bounds[i]);
@@ -1028,12 +1027,12 @@ void DatasetLoader::ConstructBinMappersFromTextData(int rank, int num_machines,
       }
       bin_mappers[i].reset(new BinMapper());
       if (config_.max_bin_by_feature.empty()) {
-        max_cnt_in_bin[i] = bin_mappers[i]->FindBin(sample_values[i].data(), static_cast<int>(sample_values[i].size()),
+        bin_mappers[i]->FindBin(sample_values[i].data(), static_cast<int>(sample_values[i].size()),
                                 sample_data.size(), config_.max_bin, config_.min_data_in_bin,
                                 filter_cnt, config_.feature_pre_filter, bin_type, config_.use_missing, config_.zero_as_missing,
                                 forced_bin_bounds[i]);
       } else {
-        max_cnt_in_bin[i] = bin_mappers[i]->FindBin(sample_values[i].data(), static_cast<int>(sample_values[i].size()),
+        bin_mappers[i]->FindBin(sample_values[i].data(), static_cast<int>(sample_values[i].size()),
                                 sample_data.size(), config_.max_bin_by_feature[i],
                                 config_.min_data_in_bin, filter_cnt, config_.feature_pre_filter, bin_type, config_.use_missing,
                                 config_.zero_as_missing, forced_bin_bounds[i]);
@@ -1071,13 +1070,13 @@ void DatasetLoader::ConstructBinMappersFromTextData(int rank, int num_machines,
         continue;
       }
       if (config_.max_bin_by_feature.empty()) {
-        max_cnt_in_bin[i] = bin_mappers[i]->FindBin(sample_values[start[rank] + i].data(),
+        bin_mappers[i]->FindBin(sample_values[start[rank] + i].data(),
                                 static_cast<int>(sample_values[start[rank] + i].size()),
                                 sample_data.size(), config_.max_bin, config_.min_data_in_bin,
                                 filter_cnt, config_.feature_pre_filter, bin_type, config_.use_missing, config_.zero_as_missing,
                                 forced_bin_bounds[i]);
       } else {
-        max_cnt_in_bin[i] = bin_mappers[i]->FindBin(sample_values[start[rank] + i].data(),
+        bin_mappers[i]->FindBin(sample_values[start[rank] + i].data(),
                                 static_cast<int>(sample_values[start[rank] + i].size()),
                                 sample_data.size(), config_.max_bin_by_feature[i],
                                 config_.min_data_in_bin, filter_cnt, config_.feature_pre_filter, bin_type,

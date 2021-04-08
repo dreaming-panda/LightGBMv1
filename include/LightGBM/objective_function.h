@@ -146,21 +146,29 @@ class ObjectiveFunction {
   * \param score prediction score in this round
   * \param gradients Output gradients
   * \param hessians Output hessians
-  * \param int_gradients Output gradients
-  * \param int_hessians Output hessians
+  * \param int_gradients_and_hessians Output discretized gradients and hessians
   * \param grad_scale Output scaling factor of gradient
-  * \param grad_bias Output bias of gradient
   * \param hess_scale Output scaling factor of hessian
-  * \param hess_bias Output bias of hessian
   */
   virtual void GetIntGradients(const double* /*score*/,
     score_t* /*gradients*/, score_t* /*hessians*/,
-    int_score_t* /*int_gradients*/, int_score_t* /*int_hessians*/,
+    int_score_t* /*int_gradients_and_hessians*/,
     double* /*grad_scale*/, double* /*hess_scale*/,
     ObjectiveRandomStates* /*obj_rand_state*/) const {}
 
+  /*!
+  * \brief discretize the gradients and hessians into integer values
+  * \param gradients Intput gradients
+  * \param hessians Input hessians
+  * \param int_gradients_and_hessians Output discretized gradients and hessians
+  * \param grad_scale Output scaling factor of gradient
+  * \param hess_scale Output scaling factor of hessian
+  * \param obj_rand_state Random states of objective functions
+  * \param num_data Number of training data
+  * \param can_lock Whether to lock the discretization boundaries when some conditions are met
+  */
   virtual void DiscretizeGradients(score_t* gradients, score_t* hessians,
-    int_score_t* int_gradients, int_score_t* /*int_hessians*/,
+    int_score_t* int_gradients_and_hessians,
     double* grad_scale, double* hess_scale,
     ObjectiveRandomStates* obj_rand_state,
     const data_size_t num_data, const bool can_lock) const {
@@ -207,10 +215,10 @@ class ObjectiveFunction {
     for (data_size_t i = 0; i < num_data; ++i) {
       const double gradient = gradients[i];
       const data_size_t random_value_pos = (i + random_values_use_start) % num_data;
-      int_gradients[2 * i + 1] = gradient >= 0.0f ?
+      int_gradients_and_hessians[2 * i + 1] = gradient >= 0.0f ?
         static_cast<int_score_t>(gradient * g_inverse_scale + gradient_random_values[random_value_pos]) :
         static_cast<int_score_t>(gradient * g_inverse_scale - gradient_random_values[random_value_pos]);
-      int_gradients[2 * i] = static_cast<int_score_t>(hessians[i] * h_inverse_scale + hessian_random_values[random_value_pos]);
+      int_gradients_and_hessians[2 * i] = static_cast<int_score_t>(hessians[i] * h_inverse_scale + hessian_random_values[random_value_pos]);
     }
   }
 

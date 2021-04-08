@@ -322,7 +322,7 @@ namespace LightGBM {
     }
   }
 
-  int BinMapper::FindBin(double* values, int num_sample_values, size_t total_sample_cnt,
+  void BinMapper::FindBin(double* values, int num_sample_values, size_t total_sample_cnt,
                           int max_bin, int min_data_in_bin, int min_split_data, bool pre_filter, BinType bin_type,
                           bool use_missing, bool zero_as_missing,
                           const std::vector<double>& forced_upper_bounds) {
@@ -517,14 +517,6 @@ namespace LightGBM {
     } else {
       sparse_rate_ = 1.0f;
     }
-    int max_cnt_in_bin = 0;
-    for (uint32_t i = 0; i < static_cast<uint32_t>(num_bin_); ++i) {
-      if (i == most_freq_bin_) continue;
-      if (cnt_in_bin[i] > max_cnt_in_bin) {
-        max_cnt_in_bin = cnt_in_bin[i];
-      }
-    }
-    return max_cnt_in_bin;
   }
 
 

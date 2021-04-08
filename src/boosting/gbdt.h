@@ -494,10 +494,8 @@ class GBDT : public GBDTBase {
   std::vector<score_t, Common::AlignmentAllocator<score_t, kAlignedSize>> gradients_;
   /*! \brief Second order derivative of training data */
   std::vector<score_t, Common::AlignmentAllocator<score_t, kAlignedSize>> hessians_;
-  /*! \brief First order derivative of training data */
-  std::vector<int_score_t, Common::AlignmentAllocator<int_score_t, kAlignedSize>> int_gradients_;
-  /*! \brief Second order derivative of training data */
-  std::vector<int_score_t, Common::AlignmentAllocator<int_score_t, kAlignedSize>> int_hessians_;
+  /*! \brief First and second order derivative of training data */
+  std::vector<int_score_t, Common::AlignmentAllocator<int_score_t, kAlignedSize>> int_gradients_and_hessians_;
   double grad_scale_;
   double hess_scale_;
 #endif
