@@ -113,9 +113,9 @@ void GBDT::Init(const Config* config, const Dataset* train_data, const Objective
     hessians_.resize(total_size);
     if (config_->use_gradient_discretization) {
       int_gradients_and_hessians_.resize(2 * total_size);
-      grad_scale_.resize(num_tree_per_iteration_, 0.0f);
-      hess_scale_.resize(num_tree_per_iteration_, 0.0f);
     }
+    grad_scale_.resize(num_tree_per_iteration_, 1.0f);
+    hess_scale_.resize(num_tree_per_iteration_, 1.0f);
   }
   // get max feature index
   max_feature_idx_ = train_data_->num_total_features() - 1;

@@ -184,7 +184,7 @@ class MultiValBinWrapper : public MultiValBinWrapperBase {
 
   void HistMerge(AlignedVector<HIST_BUF_T>* hist_buf, hist_t* out_hist_data);
 
-  void HistMergeInner(AlignedVector<HIST_BUF_T>* hist_buf, HIST_BUF_T* dst);
+  void HistMergeInner(AlignedVector<HIST_BUF_T>* hist_buf, HIST_BUF_T* dst, const int offset);
 
   void ResizeHistBuf(AlignedVector<HIST_BUF_T>* hist_buf, MultiValBin* sub_multi_val_bin);
 };

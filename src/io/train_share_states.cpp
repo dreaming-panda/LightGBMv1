@@ -216,19 +216,20 @@ void MultiValBinWrapper<score_t, hist_t>::HistMerge(std::vector<hist_t,
   if (is_use_subcol_) {
     dst = hist_buf->data() + hist_buf->size() - 2 * static_cast<size_t>(num_bin_aligned_);
   }
-  HistMergeInner(hist_buf, dst);
+  HistMergeInner(hist_buf, dst, 1);
 }
 
 template <>
 void MultiValBinWrapper<int_score_t, int_hist_t>::HistMerge(std::vector<int_hist_t,
   Common::AlignmentAllocator<int_hist_t, kAlignedSize>>* hist_buf, hist_t* /*out_hist_data*/) {
   int_hist_t* dst = hist_buf->data();
-  HistMergeInner(hist_buf, dst);
+  HistMergeInner(hist_buf, dst, 0);
 }
 
 template <typename SCORE_T, typename HIST_BUF_T>
 void MultiValBinWrapper<SCORE_T, HIST_BUF_T>::HistMergeInner(std::vector<HIST_BUF_T,
-  Common::AlignmentAllocator<HIST_BUF_T, kAlignedSize>>* hist_buf, HIST_BUF_T* dst) {
+  Common::AlignmentAllocator<HIST_BUF_T, kAlignedSize>>* hist_buf, HIST_BUF_T* dst,
+  const int offset) {
   int n_bin_block = 1;
   int bin_block_size = num_bin_;
   Threading::BlockInfo<data_size_t>(num_threads_, num_bin_, 512, &n_bin_block,
@@ -238,7 +239,7 @@ void MultiValBinWrapper<SCORE_T, HIST_BUF_T>::HistMergeInner(std::vector<HIST_BU
     const int start = t * bin_block_size;
     const int end = std::min(start + bin_block_size, num_bin_);
     for (int tid = 1; tid < n_data_block_; ++tid) {
-      auto src_ptr = hist_buf->data() + static_cast<size_t>(num_bin_aligned_) * 2 * tid;
+      auto src_ptr = hist_buf->data() + static_cast<size_t>(num_bin_aligned_) * 2 * (tid - offset);
       for (int i = start * 2; i < end * 2; ++i) {
         dst[i] += src_ptr[i];
       }
