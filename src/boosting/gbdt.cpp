@@ -113,6 +113,8 @@ void GBDT::Init(const Config* config, const Dataset* train_data, const Objective
     hessians_.resize(total_size);
     if (config_->use_gradient_discretization) {
       int_gradients_and_hessians_.resize(2 * total_size);
+      grad_scale_.resize(num_tree_per_iteration_, 0.0f);
+      hess_scale_.resize(num_tree_per_iteration_, 0.0f);
     }
   }
   // get max feature index
@@ -135,7 +137,7 @@ void GBDT::Init(const Config* config, const Dataset* train_data, const Objective
     }
   }
 
-  if (objective_function_ != nullptr) {
+  if (objective_function_ != nullptr && config_->use_gradient_discretization) {
     obj_rand_states_.reset(new ObjectiveRandomStates(num_data_, config_->seed));
   }
   if (config_->linear_tree) {
@@ -409,8 +411,6 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
       auto grad = gradients + offset;
       auto hess = hessians + offset;
       auto int_grad_and_hess = int_gradients_and_hessians + offset * 2;
-      // need to copy gradients for bagging subset.
-      // TODO(shiyu1994): not supported for int gradient
       if (is_use_subset_ && bag_data_cnt_ < num_data_) {
         for (int i = 0; i < bag_data_cnt_; ++i) {
           gradients_[offset + i] = grad[bag_data_indices_[i]];
@@ -429,7 +429,8 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
         }
       }
       bool is_first_tree = models_.size() < static_cast<size_t>(num_tree_per_iteration_);
-      new_tree.reset(tree_learner_->Train(grad, hess, is_first_tree, int_grad_and_hess, grad_scale_, hess_scale_));
+      new_tree.reset(tree_learner_->Train(grad, hess, is_first_tree, int_grad_and_hess,
+        grad_scale_[cur_tree_id], hess_scale_[cur_tree_id]));
     }
 
     if (new_tree->num_leaves() > 1) {

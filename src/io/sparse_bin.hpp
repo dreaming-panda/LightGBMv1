@@ -223,7 +223,7 @@ class SparseBin : public Bin {
       }
       while (cur_pos < end && i_delta < num_vals_) {
         const uint32_t ti = static_cast<uint32_t>(vals_[i_delta]) << 1;
-        grad[ti] += ordered_gradients_and_hessians[cur_pos];
+        grad[ti] += ordered_gradients_and_hessians[cur_pos << 1];
         ++cnt[ti];
         cur_pos += deltas_[++i_delta];
       }
@@ -279,7 +279,7 @@ class SparseBin : public Bin {
           }
         } else {
           const uint32_t ti = static_cast<uint32_t>(vals_[i_delta]) << 1;
-          grad[ti] += ordered_gradients_and_hessians[i];
+          grad[ti] += ordered_gradients_and_hessians[i << 1];
           ++cnt[ti];
           if (++i >= end) {
             break;

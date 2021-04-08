@@ -97,11 +97,11 @@ class CrossEntropy: public ObjectiveFunction {
   void GetIntGradients(const double* score,
     score_t* gradients, score_t* hessians,
     int_score_t* int_gradients_and_hessians,
-    double* grad_scale, double* hess_scale,
+    std::vector<double>* grad_scale, std::vector<double>* hess_scale,
     ObjectiveRandomStates* obj_rand_state) const override {
     GetGradients(score, gradients, hessians);
-    DiscretizeGradients(gradients, hessians, int_gradients_and_hessians,
-      grad_scale, hess_scale, obj_rand_state, num_data_, false);
+    DiscretizeGradients<false>(gradients, hessians, int_gradients_and_hessians,
+      grad_scale->data(), hess_scale->data(), obj_rand_state, num_data_, false);
   }
 
   const char* GetName() const override {
@@ -230,11 +230,11 @@ class CrossEntropyLambda: public ObjectiveFunction {
   void GetIntGradients(const double* score,
     score_t* gradients, score_t* hessians,
     int_score_t* int_gradients_and_hessians,
-    double* grad_scale, double* hess_scale,
+    std::vector<double>* grad_scale, std::vector<double>* hess_scale,
     ObjectiveRandomStates* obj_rand_state) const override {
     GetGradients(score, gradients, hessians);
-    DiscretizeGradients(gradients, hessians, int_gradients_and_hessians,
-      grad_scale, hess_scale, obj_rand_state, num_data_, false);
+    DiscretizeGradients<false>(gradients, hessians, int_gradients_and_hessians,
+      grad_scale->data(), hess_scale->data(), obj_rand_state, num_data_, false);
   }
 
   const char* GetName() const override {

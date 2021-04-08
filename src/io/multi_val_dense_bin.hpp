@@ -76,8 +76,8 @@ class MultiValDenseBin : public MultiValBin {
         PREFETCH_T0(data_ptr_base + RowPtr(pf_idx));
         const auto j_start = RowPtr(idx);
         const VAL_T* data_ptr = data_ptr_base + j_start;
-        const SCORE_T gradient = gradients[idx];
-        const SCORE_T hessian = hessians[idx];
+        const SCORE_T gradient = ORDERED ? gradients[i] : gradients[idx];
+        const SCORE_T hessian = ORDERED ? hessians[i] : hessians[idx];
         for (int j = 0; j < num_feature_; ++j) {
           const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
           const auto ti = (bin + offsets_[j]) << 1;
@@ -90,8 +90,8 @@ class MultiValDenseBin : public MultiValBin {
       const auto idx = USE_INDICES ? data_indices[i] : i;
       const auto j_start = RowPtr(idx);
       const VAL_T* data_ptr = data_ptr_base + j_start;
-      const SCORE_T gradient = gradients[idx];
-      const SCORE_T hessian = hessians[idx];
+      const SCORE_T gradient = ORDERED ? gradients[i] : gradients[idx];
+      const SCORE_T hessian = ORDERED ? hessians[i] : hessians[idx];
       for (int j = 0; j < num_feature_; ++j) {
         const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
         const auto ti = (bin + offsets_[j]) << 1;

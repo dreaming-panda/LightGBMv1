@@ -139,16 +139,17 @@ class RF : public GBDT {
           hess = tmp_hess_.data();
           if (config_->use_gradient_discretization) {
             for (int i = 0; i < bag_data_cnt_; ++i) {
-              const size_t dst_pos = 2 * (offset + static_cast<size_t>(i));
+              const size_t dst_pos = 2 * static_cast<size_t>(i);
               const size_t src_pos = 2 * static_cast<size_t>(bag_data_indices_[i]);
               tmp_int_grad_and_hess_[dst_pos] = int_grad_and_hess[src_pos];
               tmp_int_grad_and_hess_[dst_pos + 1] = int_grad_and_hess[src_pos + 1];
             }
-            int_grad_and_hess = tmp_int_grad_and_hess_.data() + offset * 2;
+            int_grad_and_hess = tmp_int_grad_and_hess_.data();
           }
         }
 
-        new_tree.reset(tree_learner_->Train(grad, hess, false, int_grad_and_hess, 0.0f, 0.0f));
+        new_tree.reset(tree_learner_->Train(grad, hess, false, int_grad_and_hess,
+          grad_scale_[cur_tree_id], hess_scale_[cur_tree_id]));
       }
 
       if (new_tree->num_leaves() > 1) {

@@ -58,7 +58,9 @@ void SerialTreeLearner::Init(const Dataset* train_data, bool is_constant_hessian
   // initialize ordered gradients and hessians
   ordered_gradients_.resize(num_data_);
   ordered_hessians_.resize(num_data_);
-  ordered_int_gradients_and_hessians_.resize(2 * num_data_);
+  if (config_->use_gradient_discretization) {
+    ordered_int_gradients_and_hessians_.resize(2 * num_data_);
+  }
 
   GetShareStates(train_data_, is_constant_hessian, true);
   histogram_pool_.DynamicChangeSize(train_data_,
@@ -212,12 +214,13 @@ Tree* SerialTreeLearner::Train(const score_t* gradients, const score_t *hessians
     Split(tree_ptr, best_leaf, &left_leaf, &right_leaf);
     cur_depth = std::max(cur_depth, tree->leaf_depth(left_leaf));
   }
-  Log::Debug("Trained a tree with leaves = %d and depth = %d", tree->num_leaves(), cur_depth);
+
   if (config_->use_gradient_discretization) {
     global_timer.Start("SerialTreeLearner::RenewIntGradTreeOutput");
     RenewIntGradTreeOutput(tree.get());
     global_timer.Stop("SerialTreeLearner::RenewIntGradTreeOutput");
   }
+  Log::Debug("Trained a tree with leaves = %d and depth = %d", tree->num_leaves(), cur_depth);
 
   return tree.release();
 }
@@ -377,15 +380,6 @@ void SerialTreeLearner::ConstructHistograms(
   // construct smaller leaf
   hist_t* ptr_smaller_leaf_hist_data =
       smaller_leaf_histogram_array_[0].RawData() - kHistOffset;
-  if (larger_leaf_splits_ != nullptr && larger_leaf_histogram_array_ != nullptr) {
-    std::vector<const hist_t*> feature_hists(num_features_, nullptr);
-    std::vector<const BinMapper*> feature_bin_mappers(num_features_, nullptr);
-    #pragma omp parallel for schedule(static) if (num_features_ >= 1024)
-    for (int i = 0; i < num_features_; ++i) {
-      feature_hists[i] = larger_leaf_histogram_array_[i].RawData();
-      feature_bin_mappers[i] = train_data_->FeatureBinMapper(i);
-    }
-  }
   train_data_->ConstructHistograms(
       is_feature_used, smaller_leaf_splits_->data_indices(),
       smaller_leaf_splits_->num_data_in_leaf(),
@@ -719,6 +713,7 @@ void SerialTreeLearner::SplitInner(Tree* tree, int best_leaf, int* left_leaf,
   }
 }
 
+// TODO(shiyu1994): check various restrictions are effective in renew
 void SerialTreeLearner::RenewIntGradTreeOutput(Tree* tree) const {
   for (int leaf_id = 0; leaf_id < tree->num_leaves(); ++leaf_id) {
     data_size_t leaf_cnt = 0;

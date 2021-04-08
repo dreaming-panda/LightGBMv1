@@ -63,7 +63,8 @@ class ObjectiveRandomStates {
 
   double max_hessian_abs() const { return max_hessian_abs_; }
 
-  void SetGradientInfo(const double max_gradient_abs, const double max_hessian_abs, const bool can_lock) {
+  void SetGradientInfo(const double max_gradient_abs, const double max_hessian_abs,
+    const bool can_lock, const bool is_constant_hessian) {
     if (!boundary_locked_) {
       if (max_gradient_abs >= 0.99f && max_hessian_abs >= 0.248f && can_lock) {
         boundary_locked_ = true;
@@ -74,7 +75,11 @@ class ObjectiveRandomStates {
         max_hessian_abs_ = max_hessian_abs;
       }
       gradient_scale_ = max_gradient_abs_ / static_cast<double>(kIntGradBins / 2);
-      hessian_scale_ = max_hessian_abs_ / static_cast<double>(kIntGradBins);
+      if (!is_constant_hessian) {
+        hessian_scale_ = max_hessian_abs_ / static_cast<double>(kIntGradBins);
+      } else {
+        hessian_scale_ = max_hessian_abs_;
+      }
       inverse_gradient_scale_ = 1.0f / gradient_scale_;
       inverse_hessian_scale_ = 1.0f / hessian_scale_;
     }
@@ -153,7 +158,7 @@ class ObjectiveFunction {
   virtual void GetIntGradients(const double* /*score*/,
     score_t* /*gradients*/, score_t* /*hessians*/,
     int_score_t* /*int_gradients_and_hessians*/,
-    double* /*grad_scale*/, double* /*hess_scale*/,
+    std::vector<double>* /*grad_scale*/, std::vector<double>* /*hess_scale*/,
     ObjectiveRandomStates* /*obj_rand_state*/) const {}
 
   /*!
@@ -167,7 +172,8 @@ class ObjectiveFunction {
   * \param num_data Number of training data
   * \param can_lock Whether to lock the discretization boundaries when some conditions are met
   */
-  virtual void DiscretizeGradients(score_t* gradients, score_t* hessians,
+  template <bool IS_CONSTANT_HESSIAN>
+  void DiscretizeGradients(score_t* gradients, score_t* hessians,
     int_score_t* int_gradients_and_hessians,
     double* grad_scale, double* hess_scale,
     ObjectiveRandomStates* obj_rand_state,
@@ -188,21 +194,27 @@ class ObjectiveFunction {
             if (fabs_grad > thread_max_gradient[thread_id]) {
               thread_max_gradient[thread_id] = fabs_grad;
             }
-            if (fabs_hess > thread_max_hessian[thread_id]) {
-              thread_max_hessian[thread_id] = fabs_hess;
+            if (!IS_CONSTANT_HESSIAN) {
+              if (fabs_hess > thread_max_hessian[thread_id]) {
+                thread_max_hessian[thread_id] = fabs_hess;
+              }
             }
           }});
       max_gradient = thread_max_gradient[0];
-      max_hessian = thread_max_hessian[0];
+      if (!IS_CONSTANT_HESSIAN) {
+        max_hessian = thread_max_hessian[0];
+      }
       for (int thread_id = 1; thread_id < num_threads; ++thread_id) {
         if (max_gradient < thread_max_gradient[thread_id]) {
           max_gradient = thread_max_gradient[thread_id];
         }
-        if (max_hessian < thread_max_hessian[thread_id]) {
-          max_hessian = thread_max_hessian[thread_id];
+        if (!IS_CONSTANT_HESSIAN) {
+          if (max_hessian < thread_max_hessian[thread_id]) {
+            max_hessian = thread_max_hessian[thread_id];
+          }
         }
       }
-      obj_rand_state->SetGradientInfo(max_gradient, max_hessian, can_lock);
+      obj_rand_state->SetGradientInfo(max_gradient, max_hessian, can_lock, IsConstantHessian());
     }
     *grad_scale = obj_rand_state->gradient_scale();
     *hess_scale = obj_rand_state->hessian_scale();
@@ -214,11 +226,19 @@ class ObjectiveFunction {
     #pragma omp parallel for schedule(static)
     for (data_size_t i = 0; i < num_data; ++i) {
       const double gradient = gradients[i];
-      const data_size_t random_value_pos = (i + random_values_use_start) % num_data;
-      int_gradients_and_hessians[2 * i + 1] = gradient >= 0.0f ?
-        static_cast<int_score_t>(gradient * g_inverse_scale + gradient_random_values[random_value_pos]) :
-        static_cast<int_score_t>(gradient * g_inverse_scale - gradient_random_values[random_value_pos]);
-      int_gradients_and_hessians[2 * i] = static_cast<int_score_t>(hessians[i] * h_inverse_scale + hessian_random_values[random_value_pos]);
+      if (IS_CONSTANT_HESSIAN) {
+        const data_size_t random_value_pos = (i + random_values_use_start) % num_data;
+        int_gradients_and_hessians[2 * i + 1] = gradient >= 0.0f ?
+          static_cast<int_score_t>(gradient * g_inverse_scale + gradient_random_values[random_value_pos]) :
+          static_cast<int_score_t>(gradient * g_inverse_scale - gradient_random_values[random_value_pos]);
+        int_gradients_and_hessians[2 * i] = 1;
+      } else {
+        const data_size_t random_value_pos = (i + random_values_use_start) % num_data;
+        int_gradients_and_hessians[2 * i + 1] = gradient >= 0.0f ?
+          static_cast<int_score_t>(gradient * g_inverse_scale + gradient_random_values[random_value_pos]) :
+          static_cast<int_score_t>(gradient * g_inverse_scale - gradient_random_values[random_value_pos]);
+        int_gradients_and_hessians[2 * i] = static_cast<int_score_t>(hessians[i] * h_inverse_scale + hessian_random_values[random_value_pos]);
+      }
     }
   }
 

@@ -129,6 +129,21 @@ class MulticlassSoftmax: public ObjectiveFunction {
     }
   }
 
+  void GetIntGradients(const double* score,
+    score_t* gradients, score_t* hessians,
+    int_score_t* int_gradients_and_hessians,
+    std::vector<double>* grad_scale, std::vector<double>* hess_scale,
+    ObjectiveRandomStates* obj_rand_state) const override {
+    std::vector<double>& grad_scale_ref = *grad_scale;
+    std::vector<double>& hess_scale_ref = *hess_scale;
+    GetGradients(score, gradients, hessians);
+    for (int i = 0; i < num_class_; ++i) {
+      int64_t offset = static_cast<int64_t>(num_data_) * i;
+      DiscretizeGradients<false>(gradients + offset, hessians + offset, int_gradients_and_hessians + 2 * offset,
+        &(grad_scale_ref[i]), &(hess_scale_ref[i]), obj_rand_state, num_data_, false);
+    }
+  }
+
   void ConvertOutput(const double* input, double* output) const override {
     Common::Softmax(input, output, num_class_);
   }
@@ -229,6 +244,21 @@ class MulticlassOVA: public ObjectiveFunction {
     for (int i = 0; i < num_class_; ++i) {
       int64_t offset = static_cast<int64_t>(num_data_) * i;
       binary_loss_[i]->GetGradients(score + offset, gradients + offset, hessians + offset);
+    }
+  }
+
+  void GetIntGradients(const double* score,
+    score_t* gradients, score_t* hessians,
+    int_score_t* int_gradients_and_hessians,
+    std::vector<double>* grad_scale, std::vector<double>* hess_scale,
+    ObjectiveRandomStates* obj_rand_state) const override {
+    std::vector<double>& grad_scale_ref = *grad_scale;
+    std::vector<double>& hess_scale_ref = *hess_scale;
+    for (int i = 0; i < num_class_; ++i) {
+      int64_t offset = static_cast<int64_t>(num_data_) * i;
+      binary_loss_[i]->GetGradients(score + offset, gradients + offset, hessians + offset);
+      DiscretizeGradients<false>(gradients + offset, hessians + offset, int_gradients_and_hessians + 2 * offset,
+        &(grad_scale_ref[i]), &(hess_scale_ref[i]), obj_rand_state, num_data_, false);
     }
   }
 

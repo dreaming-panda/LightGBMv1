@@ -25,8 +25,8 @@ class LinearTreeLearner: public SerialTreeLearner {
   void InitLinear(const Dataset* train_data, const int max_leaves) override;
 
   Tree* Train(const score_t* gradients, const score_t *hessians, bool is_first_tree,
-  const int_score_t* int_gradients_and_hessians,
-  const double grad_scale, const double hess_scale) override;
+    const int_score_t* int_gradients_and_hessians,
+    const double grad_scale, const double hess_scale) override;
 
   /*! \brief Create array mapping dataset to leaf index, used for linear trees */
   void GetLeafMap(Tree* tree) const;

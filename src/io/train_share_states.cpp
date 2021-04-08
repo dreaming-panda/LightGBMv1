@@ -24,7 +24,7 @@ void MultiValBinWrapper<SCORE_T, HIST_BUF_T>::ConstructHistogramsForBlocks(const
     n_data_block_ = 1;
     data_block_size_ = num_data;
     Threading::BlockInfo<data_size_t>(num_threads_, num_data, min_block_size_,
-                                      max_block_size_, &n_data_block_, &data_block_size_);
+                                      &n_data_block_, &data_block_size_);
     ResizeHistBuf(hist_buf, cur_multi_val_bin);
     OMP_INIT_EX();
     #pragma omp parallel for schedule(static) num_threads(num_threads_)
@@ -139,7 +139,6 @@ MultiValBinWrapper<SCORE_T, HIST_BUF_T>::MultiValBinWrapper(MultiValBin* bin, da
   const std::vector<int>& feature_groups_contained):
   MultiValBinWrapperBase(feature_groups_contained) {
   num_threads_ = OMP_NUM_THREADS();
-  max_block_size_ = num_data;
   num_data_ = num_data;
   multi_val_bin_.reset(bin);
   if (bin == nullptr) {

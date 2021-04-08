@@ -61,7 +61,7 @@ void LinearTreeLearner::InitLinear(const Dataset* train_data, const int max_leav
 
 Tree* LinearTreeLearner::Train(const score_t* gradients, const score_t *hessians, bool is_first_tree,
   const int_score_t* int_gradients_and_hessians,
-  const double /*grad_scale*/, const double /*hess_scale*/) {
+  const double grad_scale, const double hess_scale) {
   Common::FunctionTimer fun_timer("SerialTreeLearner::Train", global_timer);
   gradients_ = gradients;
   hessians_ = hessians;
@@ -74,6 +74,7 @@ Tree* LinearTreeLearner::Train(const score_t* gradients, const score_t *hessians
         share_state_->num_threads, num_threads);
   }
   share_state_->num_threads = num_threads;
+  share_state_->SetGradScale(grad_scale, hess_scale);
 
   // some initial works before training
   BeforeTrain();

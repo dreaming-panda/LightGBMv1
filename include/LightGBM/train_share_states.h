@@ -6,13 +6,13 @@
 #define LIGHTGBM_TRAIN_SHARE_STATES_H_
 
 #include <LightGBM/bin.h>
+#include <LightGBM/feature_group.h>
 #include <LightGBM/meta.h>
 #include <LightGBM/utils/threading.h>
-#include <LightGBM/feature_group.h>
 
+#include <algorithm>
 #include <memory>
 #include <vector>
-#include <algorithm>
 
 namespace LightGBM {
 
@@ -85,7 +85,6 @@ class MultiValBinWrapperBase {
   const std::vector<int> feature_groups_contained_;
 
   int num_threads_;
-  int max_block_size_;
   int num_bin_;
   int num_bin_aligned_;
   int n_data_block_;
