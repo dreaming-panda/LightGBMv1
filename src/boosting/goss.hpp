@@ -42,6 +42,10 @@ class GOSS: public GBDT {
       size_t total_size = static_cast<size_t>(num_data_) * num_tree_per_iteration_;
       gradients_.resize(total_size, 0.0f);
       hessians_.resize(total_size, 0.0f);
+      if (config_->use_gradient_discretization) {
+        int_gradients_.resize(total_size, 0);
+        int_hessians_.resize(total_size, 0);
+      }
     }
   }
 
@@ -65,6 +69,9 @@ class GOSS: public GBDT {
       for (int64_t i = 0; i < total_size; ++i) {
         gradients_[i] = gradients[i];
         hessians_[i] = hessians[i];
+      }
+      if (config_->use_gradient_discretization) {
+        Log::Fatal("Cannot use gradient discretization for customized functions.");
       }
       return GBDT::TrainOneIter(gradients_.data(), hessians_.data());
     } else {

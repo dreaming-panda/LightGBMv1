@@ -51,6 +51,10 @@ class RF : public GBDT {
     if (is_use_subset_ && bag_data_cnt_ < num_data_) {
       tmp_grad_.resize(num_data_);
       tmp_hess_.resize(num_data_);
+      if (config_->use_gradient_discretization) {
+        tmp_int_grad_.resize(num_data_);
+        tmp_int_hess_.resize(num_data_);
+      }
     }
   }
 
@@ -76,6 +80,10 @@ class RF : public GBDT {
     if (is_use_subset_ && bag_data_cnt_ < num_data_) {
       tmp_grad_.resize(num_data_);
       tmp_hess_.resize(num_data_);
+      if (config_->use_gradient_discretization) {
+        tmp_int_grad_.resize(num_data_);
+        tmp_int_hess_.resize(num_data_);
+      }
     }
   }
 
@@ -96,8 +104,14 @@ class RF : public GBDT {
         tmp_scores[offset + i] = init_scores_[j];
       }
     }
-    objective_function_->
-      GetGradients(tmp_scores.data(), gradients_.data(), hessians_.data());
+    if (!config_->use_gradient_discretization) {
+      objective_function_->
+        GetGradients(tmp_scores.data(), gradients_.data(), hessians_.data());
+    } else {
+      objective_function_->
+        GetIntGradients(tmp_scores.data(), gradients_.data(), hessians_.data(),
+          int_gradients_.data(), int_hessians_.data(), &grad_scale_, &hess_scale_, obj_rand_states_.get());
+    }
   }
 
   bool TrainOneIter(const score_t* gradients, const score_t* hessians) override {
@@ -106,14 +120,17 @@ class RF : public GBDT {
     CHECK_EQ(gradients, nullptr);
     CHECK_EQ(hessians, nullptr);
 
+    const int_score_t* int_gradients = int_gradients_.data(), *int_hessians = int_hessians_.data();
     gradients = gradients_.data();
     hessians = hessians_.data();
     for (int cur_tree_id = 0; cur_tree_id < num_tree_per_iteration_; ++cur_tree_id) {
-      std::unique_ptr<Tree> new_tree(new Tree(2, false));
+      std::unique_ptr<Tree> new_tree(new Tree(2, false, false));
       size_t offset = static_cast<size_t>(cur_tree_id)* num_data_;
       if (class_need_train_[cur_tree_id]) {
         auto grad = gradients + offset;
         auto hess = hessians + offset;
+        auto int_grad = int_gradients + offset;
+        auto int_hess = int_hessians + offset;
 
         // need to copy gradients for bagging subset.
         if (is_use_subset_ && bag_data_cnt_ < num_data_) {
@@ -123,9 +140,17 @@ class RF : public GBDT {
           }
           grad = tmp_grad_.data();
           hess = tmp_hess_.data();
+          if (config_->use_gradient_discretization) {
+            for (int i = 0; i < bag_data_cnt_; ++i) {
+              tmp_int_grad_[offset + i] = int_grad[bag_data_indices_[i]];
+              tmp_int_hess_[offset + i] = int_hess[bag_data_indices_[i]];
+            }
+            int_grad = tmp_int_grad_.data() + offset;
+            int_hess = tmp_int_hess_.data() + offset;
+          }
         }
 
-        new_tree.reset(tree_learner_->Train(grad, hess, nullptr, nullptr, 0.0f, 0.0f));
+        new_tree.reset(tree_learner_->Train(grad, hess, false, int_grad, int_hess, 0.0f, 0.0f));
       }
 
       if (new_tree->num_leaves() > 1) {
@@ -210,6 +235,8 @@ class RF : public GBDT {
  private:
   std::vector<score_t> tmp_grad_;
   std::vector<score_t> tmp_hess_;
+  std::vector<int_score_t> tmp_int_grad_;
+  std::vector<int_score_t> tmp_int_hess_;
   std::vector<double> init_scores_;
 };
 

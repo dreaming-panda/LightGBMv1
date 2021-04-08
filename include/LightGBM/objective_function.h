@@ -8,6 +8,7 @@
 #include <LightGBM/config.h>
 #include <LightGBM/dataset.h>
 #include <LightGBM/meta.h>
+#include <LightGBM/utils/threading.h>
 
 #include <string>
 #include <functional>

@@ -24,7 +24,7 @@ You can find below a table of correspondence:
 
 Legend:
 
-\* AMD APP SDK is deprecated. On Windows, OpenCL is included in AMD graphics driver. On Linux, newer generation AMD cards are supported by the `ROCm`_ driver. You can download an archived copy of AMD APP SDK for Linux from `our GitHub repo`_.
+\* AMD APP SDK is deprecated. On Windows, OpenCL is included in AMD graphics driver. On Linux, newer generation AMD cards are supported by the `ROCm`_ driver. You can download an archived copy of AMD APP SDK from our GitHub repo (`for Linux`_ and `for Windows`_).
 
 
 --------------
@@ -104,10 +104,10 @@ Example of using GPU (``gpu_platform_id = 0`` and ``gpu_device_id = 0`` in our s
     [LightGBM] [Info] Size of histogram bin entry: 12
     [LightGBM] [Info] 40 dense feature groups (0.12 MB) transferred to GPU in 0.004211 secs. 76 sparse feature groups.
     [LightGBM] [Info] No further splits with positive gain, best gain: -inf
-    [LightGBM] [Info] Trained a tree with leaves=16 and max_depth=8
+    [LightGBM] [Info] Trained a tree with leaves=16 and depth=8
     [1]:    test's rmse:1.10643e-17 
     [LightGBM] [Info] No further splits with positive gain, best gain: -inf
-    [LightGBM] [Info] Trained a tree with leaves=7 and max_depth=5
+    [LightGBM] [Info] Trained a tree with leaves=7 and depth=5
     [2]:    test's rmse:0
 
 Running on OpenCL CPU backend devices is in generally slow, and we observe crashes on some Windows and macOS systems. Make sure you check the ``Using GPU Device`` line in the log and it is not using a CPU. The above log shows that we are using ``Oland`` GPU from AMD and not CPU.
@@ -142,10 +142,10 @@ Example of using CPU (``gpu_platform_id = 0``, ``gpu_device_id = 1``). The GPU d
     [LightGBM] [Info] Size of histogram bin entry: 12
     [LightGBM] [Info] 40 dense feature groups (0.12 MB) transferred to GPU in 0.004540 secs. 76 sparse feature groups.
     [LightGBM] [Info] No further splits with positive gain, best gain: -inf
-    [LightGBM] [Info] Trained a tree with leaves=16 and max_depth=8
+    [LightGBM] [Info] Trained a tree with leaves=16 and depth=8
     [1]:    test's rmse:1.10643e-17 
     [LightGBM] [Info] No further splits with positive gain, best gain: -inf
-    [LightGBM] [Info] Trained a tree with leaves=7 and max_depth=5
+    [LightGBM] [Info] Trained a tree with leaves=7 and depth=5
     [2]:    test's rmse:0
     
 
@@ -159,7 +159,9 @@ Known issues:
 
 .. _ROCm: https://rocmdocs.amd.com/en/latest/
 
-.. _our GitHub repo: https://github.com/microsoft/LightGBM/releases/download/v2.0.12/AMD-APP-SDKInstaller-v3.0.130.136-GA-linux64.tar.bz2
+.. _for Linux: https://github.com/microsoft/LightGBM/releases/download/v2.0.12/AMD-APP-SDKInstaller-v3.0.130.136-GA-linux64.tar.bz2
+
+.. _for Windows: https://github.com/microsoft/LightGBM/releases/download/v2.0.12/AMD-APP-SDKInstaller-v3.0.130.135-GA-windows-F-x64.exe
 
 .. _NVIDIA CUDA Toolkit: https://developer.nvidia.com/cuda-downloads
 

@@ -340,6 +340,9 @@ void MultiValBinWrapperBase::CopyMultiValBinSubset(
       if (feature_groups[i]->is_multi_val_) {
         for (int j = 0; j < feature_groups[i]->num_feature_; ++j) {
           const auto& bin_mapper = feature_groups[i]->bin_mappers_[j];
+          if (i == 0 && j == 0 && bin_mapper->GetMostFreqBin() > 0) {
+            num_total_bin = 1;
+          }
           int cur_num_bin = bin_mapper->num_bin();
           if (bin_mapper->GetMostFreqBin() == 0) {
             cur_num_bin -= offset;
@@ -410,10 +413,10 @@ void MultiValBinWrapperBase::CopyMultiValBinSubset(
 }
 
 void TrainingShareStates::CalcBinOffsets(const std::vector<std::unique_ptr<FeatureGroup>>& feature_groups,
-  std::vector<uint32_t>* offsets, bool is_col_wise) {
+  std::vector<uint32_t>* offsets, bool in_is_col_wise) {
   offsets->clear();
   feature_hist_offsets_.clear();
-  if (is_col_wise) {
+  if (in_is_col_wise) {
     uint32_t cur_num_bin = 0;
     uint32_t hist_cur_num_bin = 0;
     for (int group = 0; group < static_cast<int>(feature_groups.size()); ++group) {

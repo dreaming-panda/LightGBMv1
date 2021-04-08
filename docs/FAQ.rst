@@ -22,9 +22,10 @@ You may also ping a member of the core team according to the relevant area of ex
 
 -  `@guolinke <https://github.com/guolinke>`__ **Guolin Ke** (C++ code / R-package / Python-package)
 -  `@chivee <https://github.com/chivee>`__ **Qiwei Ye** (C++ code / Python-package)
+-  `@shiyu1994 <https://github.com/shiyu1994>`__ **Yu Shi** (C++ code / Python-package)
 -  `@btrotta <https://github.com/btrotta>`__ **Belinda Trotta** (C++ code)
 -  `@Laurae2 <https://github.com/Laurae2>`__ **Damien Soukhavong** (R-package)
--  `@jameslamb <https://github.com/jameslamb>`__ **James Lamb** (R-package)
+-  `@jameslamb <https://github.com/jameslamb>`__ **James Lamb** (R-package / Dask-package)
 -  `@wxchan <https://github.com/wxchan>`__ **Wenxuan Chen** (Python-package)
 -  `@henry0312 <https://github.com/henry0312>`__ **Tsukasa Omoto** (Python-package)
 -  `@StrikerRUS <https://github.com/StrikerRUS>`__ **Nikita Titov** (Python-package)
@@ -171,6 +172,10 @@ Intel toolchain. Intel compilers are unaffected by this bug.
 For C/C++ users, any OpenMP feature cannot be used before the fork happens. If an OpenMP feature is used before the
 fork happens (example: using OpenMP for forking), OpenMP will hang inside the forked sessions. Use new processes instead
 and copy memory as required by creating new processes instead of forking (or, use Intel compilers).
+
+Cloud platform container services may cause LightGBM to hang, if they use Linux fork to run multiple containers on a 
+single instance. For example, LightGBM hangs in AWS Batch array jobs, which `use the ECS agent 
+<https://aws.amazon.com/batch/faqs/#Features>`__ to manage multiple running jobs. Setting ``nthreads=1`` mitigates the issue.
 
 12. Why is early stopping not enabled by default in LightGBM?
 -------------------------------------------------------------

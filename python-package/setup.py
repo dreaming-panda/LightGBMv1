@@ -1,22 +1,37 @@
 # coding: utf-8
 """Setup lightgbm package."""
-from __future__ import absolute_import
-
-import io
 import logging
 import os
-import shutil
 import struct
 import subprocess
 import sys
-
+from distutils.dir_util import copy_tree, create_tree, remove_tree
+from distutils.file_util import copy_file
 from platform import system
+
 from setuptools import find_packages, setup
 from setuptools.command.install import install
 from setuptools.command.install_lib import install_lib
 from setuptools.command.sdist import sdist
-from distutils.dir_util import copy_tree
-from distutils.file_util import copy_file
+from wheel.bdist_wheel import bdist_wheel
+
+LIGHTGBM_OPTIONS = [
+    ('mingw', 'm', 'Compile with MinGW'),
+    ('integrated-opencl', None, 'Compile integrated OpenCL version'),
+    ('gpu', 'g', 'Compile GPU version'),
+    ('cuda', None, 'Compile CUDA version'),
+    ('mpi', None, 'Compile MPI version'),
+    ('nomp', None, 'Compile version without OpenMP support'),
+    ('hdfs', 'h', 'Compile HDFS version'),
+    ('bit32', None, 'Compile 32-bit version'),
+    ('precompile', 'p', 'Use precompiled library'),
+    ('boost-root=', None, 'Boost preferred installation prefix'),
+    ('boost-dir=', None, 'Directory with Boost package configuration file'),
+    ('boost-include-dir=', None, 'Directory containing Boost headers'),
+    ('boost-librarydir=', None, 'Preferred Boost library directory'),
+    ('opencl-include-dir=', None, 'OpenCL include directory'),
+    ('opencl-library=', None, 'Path to OpenCL library')
+]
 
 
 def find_lib():
@@ -25,7 +40,7 @@ def find_lib():
     exec(compile(open(libpath_py, "rb").read(), libpath_py, 'exec'), libpath, libpath)
 
     LIB_PATH = [os.path.relpath(path, CURRENT_DIR) for path in libpath['find_lib_path']()]
-    logger.info("Installing lib_lightgbm from: %s" % LIB_PATH)
+    logger.info(f"Installing lib_lightgbm from: {LIB_PATH}")
     return LIB_PATH
 
 
@@ -35,14 +50,24 @@ def copy_files(integrated_opencl=False, use_gpu=False):
         src = os.path.join(CURRENT_DIR, os.path.pardir, folder_name)
         if os.path.exists(src):
             dst = os.path.join(CURRENT_DIR, 'compile', folder_name)
-            shutil.rmtree(dst, ignore_errors=True)
+            if os.path.exists(dst):
+                if os.path.isdir:
+                    # see https://github.com/pypa/distutils/pull/21
+                    remove_tree(dst)
+                else:
+                    os.remove(dst)
+            create_tree(src, dst, verbose=0)
             copy_tree(src, dst, verbose=0)
         else:
-            raise Exception('Cannot copy {0} folder'.format(src))
+            raise Exception(f'Cannot copy {src} folder')
 
     if not os.path.isfile(os.path.join(CURRENT_DIR, '_IS_SOURCE_PACKAGE.txt')):
         copy_files_helper('include')
         copy_files_helper('src')
+        for submodule in os.listdir(os.path.join(CURRENT_DIR, os.path.pardir, 'external_libs')):
+            if submodule == 'compute' and not use_gpu:
+                continue
+            copy_files_helper(os.path.join('external_libs', submodule))
         if not os.path.exists(os.path.join(CURRENT_DIR, "compile", "windows")):
             os.makedirs(os.path.join(CURRENT_DIR, "compile", "windows"))
         copy_file(os.path.join(CURRENT_DIR, os.path.pardir, "windows", "LightGBM.sln"),
@@ -58,11 +83,11 @@ def copy_files(integrated_opencl=False, use_gpu=False):
                   os.path.join(CURRENT_DIR, "compile", "CMakeLists.txt"),
                   verbose=0)
         if integrated_opencl:
-            copy_file(os.path.join(CURRENT_DIR, os.path.pardir, "CMakeIntegratedOpenCL.cmake"),
-                      os.path.join(CURRENT_DIR, "compile", "CMakeIntegratedOpenCL.cmake"),
+            if not os.path.exists(os.path.join(CURRENT_DIR, "compile", "cmake")):
+                os.makedirs(os.path.join(CURRENT_DIR, "compile", "cmake"))
+            copy_file(os.path.join(CURRENT_DIR, os.path.pardir, "cmake", "IntegratedOpenCL.cmake"),
+                      os.path.join(CURRENT_DIR, "compile", "cmake", "IntegratedOpenCL.cmake"),
                       verbose=0)
-        if use_gpu:
-            copy_files_helper('compute')
 
 
 def clear_path(path):
@@ -73,19 +98,15 @@ def clear_path(path):
             if os.path.isfile(file_path):
                 os.remove(file_path)
             else:
-                shutil.rmtree(file_path)
+                remove_tree(file_path)
 
 
 def silent_call(cmd, raise_error=False, error_msg=''):
     try:
-        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
         with open(LOG_PATH, "ab") as log:
-            log.write(output)
+            subprocess.check_call(cmd, stderr=log, stdout=log)
         return 0
     except Exception as err:
-        if isinstance(err, subprocess.CalledProcessError):
-            with open(LOG_PATH, "ab") as log:
-                log.write(err.output)
         if raise_error:
             raise Exception("\n".join((error_msg, LOG_NOTICE)))
         return 1
@@ -98,7 +119,7 @@ def compile_cpp(use_mingw=False, use_gpu=False, use_cuda=False, use_mpi=False,
                 nomp=False, bit32=False, integrated_opencl=False):
 
     if os.path.exists(os.path.join(CURRENT_DIR, "build_cpp")):
-        shutil.rmtree(os.path.join(CURRENT_DIR, "build_cpp"))
+        remove_tree(os.path.join(CURRENT_DIR, "build_cpp"))
     os.makedirs(os.path.join(CURRENT_DIR, "build_cpp"))
     os.chdir(os.path.join(CURRENT_DIR, "build_cpp"))
 
@@ -111,17 +132,17 @@ def compile_cpp(use_mingw=False, use_gpu=False, use_cuda=False, use_mpi=False,
     if use_gpu:
         cmake_cmd.append("-DUSE_GPU=ON")
         if boost_root:
-            cmake_cmd.append("-DBOOST_ROOT={0}".format(boost_root))
+            cmake_cmd.append(f"-DBOOST_ROOT={boost_root}")
         if boost_dir:
-            cmake_cmd.append("-DBoost_DIR={0}".format(boost_dir))
+            cmake_cmd.append(f"-DBoost_DIR={boost_dir}")
         if boost_include_dir:
-            cmake_cmd.append("-DBoost_INCLUDE_DIR={0}".format(boost_include_dir))
+            cmake_cmd.append(f"-DBoost_INCLUDE_DIR={boost_include_dir}")
         if boost_librarydir:
-            cmake_cmd.append("-DBOOST_LIBRARYDIR={0}".format(boost_librarydir))
+            cmake_cmd.append(f"-DBOOST_LIBRARYDIR={boost_librarydir}")
         if opencl_include_dir:
-            cmake_cmd.append("-DOpenCL_INCLUDE_DIR={0}".format(opencl_include_dir))
+            cmake_cmd.append(f"-DOpenCL_INCLUDE_DIR={opencl_include_dir}")
         if opencl_library:
-            cmake_cmd.append("-DOpenCL_LIBRARY={0}".format(opencl_library))
+            cmake_cmd.append(f"-DOpenCL_LIBRARY={opencl_library}")
     elif use_cuda:
         cmake_cmd.append("-DUSE_CUDA=ON")
     if use_mpi:
@@ -143,7 +164,7 @@ def compile_cpp(use_mingw=False, use_gpu=False, use_cuda=False, use_mpi=False,
         else:
             status = 1
             lib_path = os.path.join(CURRENT_DIR, "compile", "windows", "x64", "DLL", "lib_lightgbm.dll")
-            if not any((use_gpu, use_mpi, use_hdfs, nomp, bit32, integrated_opencl)):
+            if not any((use_gpu, use_cuda, use_mpi, use_hdfs, nomp, bit32, integrated_opencl)):
                 logger.info("Starting to compile with MSBuild from existing solution file.")
                 platform_toolsets = ("v142", "v141", "v140")
                 for pt in platform_toolsets:
@@ -151,7 +172,7 @@ def compile_cpp(use_mingw=False, use_gpu=False, use_cuda=False, use_mpi=False,
                                           os.path.join(CURRENT_DIR, "compile", "windows", "LightGBM.sln"),
                                           "/p:Configuration=DLL",
                                           "/p:Platform=x64",
-                                          "/p:PlatformToolset={0}".format(pt)])
+                                          f"/p:PlatformToolset={pt}"])
                     if status == 0 and os.path.exists(lib_path):
                         break
                     else:
@@ -162,7 +183,7 @@ def compile_cpp(use_mingw=False, use_gpu=False, use_cuda=False, use_mpi=False,
                 arch = "Win32" if bit32 else "x64"
                 vs_versions = ("Visual Studio 16 2019", "Visual Studio 15 2017", "Visual Studio 14 2015")
                 for vs in vs_versions:
-                    logger.info("Starting to compile with %s." % vs)
+                    logger.info(f"Starting to compile with {vs} ({arch}).")
                     status = silent_call(cmake_cmd + ["-G", vs, "-A", arch])
                     if status == 0:
                         break
@@ -194,23 +215,7 @@ class CustomInstallLib(install_lib):
 
 class CustomInstall(install):
 
-    user_options = install.user_options + [
-        ('mingw', 'm', 'Compile with MinGW'),
-        ('integrated-opencl', None, 'Compile integrated OpenCL version'),
-        ('gpu', 'g', 'Compile GPU version'),
-        ('cuda', None, 'Compile CUDA version'),
-        ('mpi', None, 'Compile MPI version'),
-        ('nomp', None, 'Compile version without OpenMP support'),
-        ('hdfs', 'h', 'Compile HDFS version'),
-        ('bit32', None, 'Compile 32-bit version'),
-        ('precompile', 'p', 'Use precompiled library'),
-        ('boost-root=', None, 'Boost preferred installation prefix'),
-        ('boost-dir=', None, 'Directory with Boost package configuration file'),
-        ('boost-include-dir=', None, 'Directory containing Boost headers'),
-        ('boost-librarydir=', None, 'Preferred Boost library directory'),
-        ('opencl-include-dir=', None, 'OpenCL include directory'),
-        ('opencl-library=', None, 'Path to OpenCL library')
-    ]
+    user_options = install.user_options + LIGHTGBM_OPTIONS
 
     def initialize_options(self):
         install.initialize_options(self)
@@ -251,15 +256,59 @@ class CustomInstall(install):
             os.remove(LOG_PATH)
 
 
+class CustomBdistWheel(bdist_wheel):
+
+    user_options = bdist_wheel.user_options + LIGHTGBM_OPTIONS
+
+    def initialize_options(self):
+        bdist_wheel.initialize_options(self)
+        self.mingw = 0
+        self.integrated_opencl = 0
+        self.gpu = 0
+        self.cuda = 0
+        self.boost_root = None
+        self.boost_dir = None
+        self.boost_include_dir = None
+        self.boost_librarydir = None
+        self.opencl_include_dir = None
+        self.opencl_library = None
+        self.mpi = 0
+        self.hdfs = 0
+        self.precompile = 0
+        self.nomp = 0
+        self.bit32 = 0
+
+    def finalize_options(self):
+        bdist_wheel.finalize_options(self)
+
+        install = self.reinitialize_command('install')
+
+        install.mingw = self.mingw
+        install.integrated_opencl = self.integrated_opencl
+        install.gpu = self.gpu
+        install.cuda = self.cuda
+        install.boost_root = self.boost_root
+        install.boost_dir = self.boost_dir
+        install.boost_include_dir = self.boost_include_dir
+        install.boost_librarydir = self.boost_librarydir
+        install.opencl_include_dir = self.opencl_include_dir
+        install.opencl_library = self.opencl_library
+        install.mpi = self.mpi
+        install.hdfs = self.hdfs
+        install.precompile = self.precompile
+        install.nomp = self.nomp
+        install.bit32 = self.bit32
+
+
 class CustomSdist(sdist):
 
     def run(self):
         copy_files(integrated_opencl=True, use_gpu=True)
         open(os.path.join(CURRENT_DIR, '_IS_SOURCE_PACKAGE.txt'), 'w').close()
         if os.path.exists(os.path.join(CURRENT_DIR, 'lightgbm', 'Release')):
-            shutil.rmtree(os.path.join(CURRENT_DIR, 'lightgbm', 'Release'))
+            remove_tree(os.path.join(CURRENT_DIR, 'lightgbm', 'Release'))
         if os.path.exists(os.path.join(CURRENT_DIR, 'lightgbm', 'windows', 'x64')):
-            shutil.rmtree(os.path.join(CURRENT_DIR, 'lightgbm', 'windows', 'x64'))
+            remove_tree(os.path.join(CURRENT_DIR, 'lightgbm', 'windows', 'x64'))
         if os.path.isfile(os.path.join(CURRENT_DIR, 'lightgbm', 'lib_lightgbm.so')):
             os.remove(os.path.join(CURRENT_DIR, 'lightgbm', 'lib_lightgbm.so'))
         sdist.run(self)
@@ -270,13 +319,13 @@ class CustomSdist(sdist):
 if __name__ == "__main__":
     CURRENT_DIR = os.path.abspath(os.path.dirname(__file__))
     LOG_PATH = os.path.join(os.path.expanduser('~'), 'LightGBM_compilation.log')
-    LOG_NOTICE = "The full version of error log was saved into {0}".format(LOG_PATH)
+    LOG_NOTICE = f"The full version of error log was saved into {LOG_PATH}"
     if os.path.isfile(os.path.join(CURRENT_DIR, os.path.pardir, 'VERSION.txt')):
         copy_file(os.path.join(CURRENT_DIR, os.path.pardir, 'VERSION.txt'),
                   os.path.join(CURRENT_DIR, 'lightgbm', 'VERSION.txt'),
-                  verbose=0)
-    version = io.open(os.path.join(CURRENT_DIR, 'lightgbm', 'VERSION.txt'), encoding='utf-8').read().strip()
-    readme = io.open(os.path.join(CURRENT_DIR, 'README.rst'), encoding='utf-8').read()
+                  verbose=0)  # type:ignore
+    version = open(os.path.join(CURRENT_DIR, 'lightgbm', 'VERSION.txt'), encoding='utf-8').read().strip()
+    readme = open(os.path.join(CURRENT_DIR, 'README.rst'), encoding='utf-8').read()
 
     sys.path.insert(0, CURRENT_DIR)
 
@@ -288,16 +337,26 @@ if __name__ == "__main__":
           description='LightGBM Python Package',
           long_description=readme,
           install_requires=[
+              'wheel',
               'numpy',
               'scipy',
               'scikit-learn!=0.22.0'
           ],
+          extras_require={
+              'dask': [
+                  'dask[array]>=2.0.0',
+                  'dask[dataframe]>=2.0.0',
+                  'dask[distributed]>=2.0.0',
+                  'pandas',
+              ],
+          },
           maintainer='Guolin Ke',
           maintainer_email='guolin.ke@microsoft.com',
           zip_safe=False,
           cmdclass={
               'install': CustomInstall,
               'install_lib': CustomInstallLib,
+              'bdist_wheel': CustomBdistWheel,
               'sdist': CustomSdist,
           },
           packages=find_packages(),
@@ -312,10 +371,9 @@ if __name__ == "__main__":
                        'Operating System :: Microsoft :: Windows',
                        'Operating System :: POSIX',
                        'Operating System :: Unix',
-                       'Programming Language :: Python :: 2',
-                       'Programming Language :: Python :: 2.7',
                        'Programming Language :: Python :: 3',
                        'Programming Language :: Python :: 3.6',
                        'Programming Language :: Python :: 3.7',
                        'Programming Language :: Python :: 3.8',
+                       'Programming Language :: Python :: 3.9',
                        'Topic :: Scientific/Engineering :: Artificial Intelligence'])

@@ -22,8 +22,13 @@ namespace LightGBM {
 class LeafSplits {
  public:
   LeafSplits(data_size_t num_data, const Config* config)
-    :config_(config), num_data_in_leaf_(num_data), num_data_(num_data),
+      : deterministic_(false),
+        num_data_in_leaf_(num_data),
+        num_data_(num_data),
     data_indices_(nullptr), weight_(0) {
+    if (config != nullptr) {
+      deterministic_ = config->deterministic;
+    }
   }
   void ResetNumData(data_size_t num_data) {
     num_data_ = num_data;
@@ -71,7 +76,7 @@ class LeafSplits {
     data_indices_ = nullptr;
     double tmp_sum_gradients = 0.0f;
     double tmp_sum_hessians = 0.0f;
-#pragma omp parallel for schedule(static, 512) reduction(+:tmp_sum_gradients, tmp_sum_hessians) if (num_data_in_leaf_ >= 1024 && !config_->deterministic)
+#pragma omp parallel for schedule(static, 512) reduction(+:tmp_sum_gradients, tmp_sum_hessians) if (num_data_in_leaf_ >= 1024 && !deterministic_)
     for (data_size_t i = 0; i < num_data_in_leaf_; ++i) {
       tmp_sum_gradients += gradients[i];
       tmp_sum_hessians += hessians[i];
@@ -92,7 +97,7 @@ class LeafSplits {
     data_indices_ = nullptr;
     double tmp_sum_gradients = 0.0f;
     double tmp_sum_hessians = 0.0f;
-#pragma omp parallel for schedule(static, 512) reduction(+:tmp_sum_gradients, tmp_sum_hessians) if (num_data_in_leaf_ >= 1024 && !config_->deterministic)
+#pragma omp parallel for schedule(static, 512) reduction(+:tmp_sum_gradients, tmp_sum_hessians) if (num_data_in_leaf_ >= 1024 && !deterministic_)
     for (data_size_t i = 0; i < num_data_in_leaf_; ++i) {
       tmp_sum_gradients += int_gradients[2 * i + 1] * grad_scale;
       tmp_sum_hessians += int_gradients[2 * i] * hess_scale;
@@ -114,7 +119,7 @@ class LeafSplits {
     data_indices_ = data_partition->GetIndexOnLeaf(leaf, &num_data_in_leaf_);
     double tmp_sum_gradients = 0.0f;
     double tmp_sum_hessians = 0.0f;
-#pragma omp parallel for schedule(static, 512) reduction(+:tmp_sum_gradients, tmp_sum_hessians) if (num_data_in_leaf_ >= 1024 && !config_->deterministic)
+#pragma omp parallel for schedule(static, 512) reduction(+:tmp_sum_gradients, tmp_sum_hessians) if (num_data_in_leaf_ >= 1024 && !deterministic_)
     for (data_size_t i = 0; i < num_data_in_leaf_; ++i) {
       const data_size_t idx = data_indices_[i];
       tmp_sum_gradients += gradients[idx];
@@ -138,7 +143,7 @@ class LeafSplits {
     data_indices_ = data_partition->GetIndexOnLeaf(leaf, &num_data_in_leaf_);
     double tmp_sum_gradients = 0.0f;
     double tmp_sum_hessians = 0.0f;
-#pragma omp parallel for schedule(static, 512) reduction(+:tmp_sum_gradients, tmp_sum_hessians) if (num_data_in_leaf_ >= 1024 && !config_->deterministic)
+#pragma omp parallel for schedule(static, 512) reduction(+:tmp_sum_gradients, tmp_sum_hessians) if (num_data_in_leaf_ >= 1024 && deterministic_)
     for (data_size_t i = 0; i < num_data_in_leaf_; ++i) {
       const data_size_t idx = data_indices_[i];
       tmp_sum_gradients += int_gradients[2 * idx + 1] * grad_scale;
@@ -191,7 +196,7 @@ class LeafSplits {
 
 
  private:
-  const Config* config_;
+  bool deterministic_;
   /*! \brief current leaf index */
   int leaf_index_;
   /*! \brief number of data on current leaf */

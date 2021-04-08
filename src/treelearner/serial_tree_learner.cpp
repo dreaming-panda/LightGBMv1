@@ -162,7 +162,7 @@ void SerialTreeLearner::ResetConfig(const Config* config) {
   constraints_.reset(LeafConstraintsBase::Create(config_, config_->num_leaves, train_data_->num_features()));
 }
 
-Tree* SerialTreeLearner::Train(const score_t* gradients, const score_t *hessians,
+Tree* SerialTreeLearner::Train(const score_t* gradients, const score_t *hessians, bool /*is_first_tree*/,
   const int_score_t* int_gradients, const int_score_t* int_hessians,
   const double grad_scale, const double hess_scale) {
   Common::FunctionTimer fun_timer("SerialTreeLearner::Train", global_timer);
@@ -184,7 +184,7 @@ Tree* SerialTreeLearner::Train(const score_t* gradients, const score_t *hessians
   BeforeTrain();
 
   bool track_branch_features = !(config_->interaction_constraints_vector.empty());
-  auto tree = std::unique_ptr<Tree>(new Tree(config_->num_leaves, track_branch_features));
+  auto tree = std::unique_ptr<Tree>(new Tree(config_->num_leaves, track_branch_features, false));
   auto tree_ptr = tree.get();
   constraints_->ShareTreePointer(tree_ptr);
 
@@ -215,10 +215,11 @@ Tree* SerialTreeLearner::Train(const score_t* gradients, const score_t *hessians
     Split(tree_ptr, best_leaf, &left_leaf, &right_leaf);
     cur_depth = std::max(cur_depth, tree->leaf_depth(left_leaf));
   }
-  Log::Debug("Trained a tree with leaves = %d and max_depth = %d", tree->num_leaves(), cur_depth);
+  Log::Debug("Trained a tree with leaves = %d and depth = %d", tree->num_leaves(), cur_depth);
   global_timer.Start("SerialTreeLearner::RenewIntGradTreeOutput");
   RenewIntGradTreeOutput(tree.get());
   global_timer.Stop("SerialTreeLearner::RenewIntGradTreeOutput");
+
   return tree.release();
 }
 
@@ -257,7 +258,8 @@ Tree* SerialTreeLearner::FitByExistingTree(const Tree* old_tree, const score_t* 
   return tree.release();
 }
 
-Tree* SerialTreeLearner::FitByExistingTree(const Tree* old_tree, const std::vector<int>& leaf_pred, const score_t* gradients, const score_t *hessians) {
+Tree* SerialTreeLearner::FitByExistingTree(const Tree* old_tree, const std::vector<int>& leaf_pred,
+                                           const score_t* gradients, const score_t *hessians) const {
   data_partition_->ResetByLeafPred(leaf_pred, old_tree->num_leaves());
   return FitByExistingTree(old_tree, gradients, hessians);
 }

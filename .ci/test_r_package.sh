@@ -11,6 +11,21 @@ export PATH="$R_LIB_PATH/R/bin:$PATH"
 # https://stat.ethz.ch/pipermail/r-package-devel/2020q3/005930.html
 export _R_CHECK_SYSTEM_CLOCK_=0
 
+# ignore R CMD CHECK NOTE checking how long it has
+# been since the last submission
+export _R_CHECK_CRAN_INCOMING_REMOTE_=0
+
+# CRAN ignores the "installed size is too large" NOTE,
+# so our CI can too. Setting to a large value here just
+# to catch extreme problems
+export _R_CHECK_PKG_SIZES_THRESHOLD_=100
+
+# don't fail builds for long-running examples unless they're very long.
+# See https://github.com/microsoft/LightGBM/issues/4049#issuecomment-793412254.
+if [[ $R_BUILD_TYPE != "cran" ]]; then
+    export _R_CHECK_EXAMPLE_TIMING_THRESHOLD_=30
+fi
+
 # Get details needed for installing R components
 R_MAJOR_VERSION=( ${R_VERSION//./ } )
 if [[ "${R_MAJOR_VERSION}" == "3" ]]; then
@@ -18,8 +33,8 @@ if [[ "${R_MAJOR_VERSION}" == "3" ]]; then
     export R_LINUX_VERSION="3.6.3-1bionic"
     export R_APT_REPO="bionic-cran35/"
 elif [[ "${R_MAJOR_VERSION}" == "4" ]]; then
-    export R_MAC_VERSION=4.0.3
-    export R_LINUX_VERSION="4.0.3-1.1804.0"
+    export R_MAC_VERSION=4.0.4
+    export R_LINUX_VERSION="4.0.4-1.1804.0"
     export R_APT_REPO="bionic-cran40/"
 else
     echo "Unrecognized R version: ${R_VERSION}"
@@ -44,13 +59,13 @@ if [[ $OS_NAME == "linux" ]]; then
             devscripts \
             r-base-dev=${R_LINUX_VERSION} \
             texinfo \
+            texlive-latex-extra \
             texlive-latex-recommended \
             texlive-fonts-recommended \
             texlive-fonts-extra \
             qpdf \
             || exit -1
 
-    
     if [[ $R_BUILD_TYPE == "cran" ]]; then
         sudo apt-get install \
             --no-install-recommends \
@@ -62,18 +77,19 @@ fi
 
 # Installing R precompiled for Mac OS 10.11 or higher
 if [[ $OS_NAME == "macos" ]]; then
+    brew update-reset && brew update
     if [[ $R_BUILD_TYPE == "cran" ]]; then
         brew install automake
     fi
     brew install \
         checkbashisms \
         qpdf
-    brew cask install basictex
+    brew install --cask basictex
     export PATH="/Library/TeX/texbin:$PATH"
     sudo tlmgr --verify-repo=none update --self
     sudo tlmgr --verify-repo=none install inconsolata helvetic
 
-    wget -q https://cran.r-project.org/bin/macosx/R-${R_MAC_VERSION}.pkg -O R.pkg
+    curl -sL https://cran.r-project.org/bin/macosx/R-${R_MAC_VERSION}.pkg -o R.pkg
     sudo installer \
         -pkg $(pwd)/R.pkg \
         -target /
@@ -89,37 +105,15 @@ if [[ $OS_NAME == "macos" ]]; then
     fi
 fi
 
-conda install \
-    -y \
-    -q \
-    --no-deps \
-        pandoc
-
 # Manually install Depends and Imports libraries + 'testthat'
 # to avoid a CI-time dependency on devtools (for devtools::install_deps())
 packages="c('data.table', 'jsonlite', 'Matrix', 'R6', 'testthat')"
+compile_from_source="both"
 if [[ $OS_NAME == "macos" ]]; then
     packages+=", type = 'binary'"
+    compile_from_source="never"
 fi
-Rscript --vanilla -e "install.packages(${packages}, repos = '${CRAN_MIRROR}', lib = '${R_LIB_PATH}', dependencies = c('Depends', 'Imports', 'LinkingTo'))" || exit -1
-
-if [[ $TASK == "r-package-check-docs" ]]; then
-    Rscript build_r.R || exit -1
-    Rscript --vanilla -e "install.packages('roxygen2', repos = '${CRAN_MIRROR}', lib = '${R_LIB_PATH}', dependencies = c('Depends', 'Imports', 'LinkingTo'))" || exit -1
-    Rscript --vanilla -e "roxygen2::roxygenize('R-package/', load = 'installed')" || exit -1
-    num_doc_files_changed=$(
-        git diff --name-only | grep -E "\.Rd|NAMESPACE" | wc -l
-    )
-    if [[ ${num_doc_files_changed} -gt 0 ]]; then
-        echo "Some R documentation files have changed. Please re-generate them and commit those changes."
-        echo ""
-        echo "    Rscript build_r.R"
-        echo "    Rscript -e \"roxygen2::roxygenize('R-package/', load = 'installed')\""
-        echo ""
-        exit -1
-    fi
-    exit 0
-fi
+Rscript --vanilla -e "options(install.packages.compile.from.source = '${compile_from_source}'); install.packages(${packages}, repos = '${CRAN_MIRROR}', lib = '${R_LIB_PATH}', dependencies = c('Depends', 'Imports', 'LinkingTo'))" || exit -1
 
 cd ${BUILD_DIRECTORY}
 
@@ -187,19 +181,8 @@ if [[ $check_succeeded == "no" ]]; then
     exit -1
 fi
 
-if grep -q -R "WARNING" "$LOG_FILE_NAME"; then
-    echo "WARNINGS have been found by R CMD check!"
-    exit -1
-fi
-
-ALLOWED_CHECK_NOTES=2
-NUM_CHECK_NOTES=$(
-    cat ${LOG_FILE_NAME} \
-        | grep -e '^Status: .* NOTE.*' \
-        | sed 's/[^0-9]*//g'
-)
-if [[ ${NUM_CHECK_NOTES} -gt ${ALLOWED_CHECK_NOTES} ]]; then
-    echo "Found ${NUM_CHECK_NOTES} NOTEs from R CMD check. Only ${ALLOWED_CHECK_NOTES} are allowed"
+if grep -q -E "NOTE|WARNING|ERROR" "$LOG_FILE_NAME"; then
+    echo "NOTEs, WARNINGs, or ERRORs have been found by R CMD check"
     exit -1
 fi
 
@@ -208,8 +191,7 @@ fi
 if [[ $OS_NAME == "macos" ]] && [[ $R_BUILD_TYPE == "cran" ]]; then
     omp_working=$(
         cat $BUILD_LOG_FILE \
-        | grep -E "checking whether OpenMP will work .*yes" \
-        | wc -l
+        | grep --count -E "checking whether OpenMP will work .*yes"
     )
     if [[ $omp_working -ne 1 ]]; then
         echo "OpenMP was not found, and should be when testing the CRAN package on macOS"
@@ -222,8 +204,7 @@ fi
 if [[ $R_BUILD_TYPE == "cran" ]]; then
     pragma_warning_present=$(
         cat $BUILD_LOG_FILE \
-        | grep -E "warning: unknown pragma ignored" \
-        | wc -l
+        | grep --count -E "warning: unknown pragma ignored"
     )
     if [[ $pragma_warning_present -ne 0 ]]; then
         echo "Unknown pragma warning is present, pragmas should have been removed before build"

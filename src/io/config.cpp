@@ -113,6 +113,8 @@ void GetTaskType(const std::unordered_map<std::string, std::string>& params, Tas
       *task = TaskType::kConvertModel;
     } else if (value == std::string("refit") || value == std::string("refit_tree")) {
       *task = TaskType::KRefitTree;
+    } else if (value == std::string("save_binary")) {
+      *task = TaskType::kSaveBinary;
     } else {
       Log::Fatal("Unknown task type %s", value.c_str());
     }
@@ -234,8 +236,10 @@ void Config::Set(const std::unordered_map<std::string, std::string>& params) {
   }
   valid = new_valid;
 
-  // check for conflicts
-  CheckParamConflict();
+  if ((task == TaskType::kSaveBinary) && !save_binary) {
+    Log::Info("save_binary parameter set to true because task is save_binary");
+    save_binary = true;
+  }
 
   if (verbosity == 1) {
     LightGBM::Log::ResetLogLevel(LightGBM::LogLevel::Info);
@@ -246,6 +250,9 @@ void Config::Set(const std::unordered_map<std::string, std::string>& params) {
   } else {
     LightGBM::Log::ResetLogLevel(LightGBM::LogLevel::Fatal);
   }
+
+  // check for conflicts
+  CheckParamConflict();
 }
 
 bool CheckMultiClassObjective(const std::string& objective) {
@@ -317,7 +324,9 @@ void Config::CheckParamConflict() {
     double full_num_leaves = std::pow(2, max_depth);
     if (full_num_leaves > num_leaves
         && num_leaves == kDefaultNumLeaves) {
-      Log::Warning("Accuracy may be bad since you didn't set num_leaves and 2^max_depth > num_leaves");
+      Log::Warning("Accuracy may be bad since you didn't explicitly set num_leaves OR 2^max_depth > num_leaves."
+                   " (num_leaves=%d).",
+                   num_leaves);
     }
 
     if (full_num_leaves < num_leaves) {
@@ -333,13 +342,28 @@ void Config::CheckParamConflict() {
       Log::Warning("Although \"deterministic\" is set, the results ran by GPU may be non-deterministic.");
     }
   }
-
   // force gpu_use_dp for CUDA
   if (device_type == std::string("cuda") && !gpu_use_dp) {
     Log::Warning("CUDA currently requires double precision calculations.");
     gpu_use_dp = true;
   }
-
+  // linear tree learner must be serial type and run on cpu device
+  if (linear_tree) {
+    if (device_type != std::string("cpu")) {
+      device_type = "cpu";
+      Log::Warning("Linear tree learner only works with CPU.");
+    }
+    if (tree_learner != std::string("serial")) {
+      tree_learner = "serial";
+      Log::Warning("Linear tree learner must be serial.");
+    }
+    if (zero_as_missing) {
+      Log::Fatal("zero_as_missing must be false when fitting linear trees.");
+    }
+    if (objective == std::string("regresson_l1")) {
+      Log::Fatal("Cannot use regression_l1 objective when fitting linear trees.");
+    }
+  }
   // min_data_in_leaf must be at least 2 if path smoothing is active. This is because when the split is calculated
   // the count is calculated using the proportion of hessian in the leaf which is rounded up to nearest int, so it can
   // be 1 when there is actually no data in the leaf. In rare cases this can cause a bug because with path smoothing the
@@ -350,7 +374,7 @@ void Config::CheckParamConflict() {
   }
   if (is_parallel && (monotone_constraints_method == std::string("intermediate") || monotone_constraints_method == std::string("advanced"))) {
     // In distributed mode, local node doesn't have histograms on all features, cannot perform "intermediate" monotone constraints.
-    Log::Warning("Cannot use \"intermediate\" or \"advanced\" monotone constraints in parallel learning, auto set to \"basic\" method.");
+    Log::Warning("Cannot use \"intermediate\" or \"advanced\" monotone constraints in distributed learning, auto set to \"basic\" method.");
     monotone_constraints_method = "basic";
   }
   if (feature_fraction_bynode != 1.0 && (monotone_constraints_method == std::string("intermediate") || monotone_constraints_method == std::string("advanced"))) {
