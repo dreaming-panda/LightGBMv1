@@ -164,9 +164,12 @@ class DenseBin : public Bin {
           PREFETCH_T0(data_ptr_base + pf_idx);
         }
         const auto ti = static_cast<uint32_t>(data(idx));
+        const int16_t gradient_16 = gradients_ptr[i];
         if (USE_HESSIAN) {
-          const int16_t gradient_16 = gradients_ptr[i];
           const int64_t gradient_64 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 32) | (gradient_16 & 0xff);
+          out_ptr[ti] += gradient_64;
+        } else {
+          const int64_t gradient_64 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 32) | (1);
           out_ptr[ti] += gradient_64;
         }
       }
@@ -175,8 +178,11 @@ class DenseBin : public Bin {
       const auto idx = USE_INDICES ? data_indices[i] : i;
       const auto ti = static_cast<uint32_t>(data(idx));
       const int16_t gradient_16 = gradients_ptr[i];
-      const int64_t gradient_64 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 32) | (gradient_16 & 0xff);
       if (USE_HESSIAN) {
+        const int64_t gradient_64 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 32) | (gradient_16 & 0xff);
+        out_ptr[ti] += gradient_64;
+      } else {
+        const int64_t gradient_64 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 32) | (1);
         out_ptr[ti] += gradient_64;
       }
     }

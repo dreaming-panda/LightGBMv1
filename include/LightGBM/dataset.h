@@ -402,7 +402,7 @@ class Dataset {
       score_t* gradients, score_t* hessians,
       int_score_t* int_gradients, int_score_t* int_hessians,
       const std::vector<int8_t>& is_feature_used, bool is_constant_hessian,
-      bool force_col_wise, bool force_row_wise) const;
+      bool force_col_wise, bool force_row_wise, bool is_int_gradient) const;
 
   LIGHTGBM_EXPORT void FinishLoad();
 
@@ -454,7 +454,6 @@ class Dataset {
                                    TrainingShareStates* share_state,
                                    hist_t* hist_data) const;
 
-  template <bool IS_INT_HIST>
   inline void ConstructHistograms(
       const std::vector<int8_t>& is_feature_used,
       const data_size_t* data_indices, data_size_t num_data,
@@ -467,37 +466,73 @@ class Dataset {
       return;
     }
     bool use_indices = data_indices != nullptr && (num_data < num_data_);
-    if (share_state->is_constant_hessian) {
-      if (use_indices) {
-        ConstructHistogramsInner<true, false, IS_INT_HIST>(
-            is_feature_used, data_indices, num_data, gradients, hessians,
-            ordered_gradients, ordered_hessians,
-            int_gradients, int_hessians,
-            int_ordered_gradients, int_ordered_hessians,
-            share_state, hist_data);
+    if (share_state->is_int_gradient) {
+      if (share_state->is_constant_hessian) {
+        if (use_indices) {
+          ConstructHistogramsInner<true, false, true>(
+              is_feature_used, data_indices, num_data, gradients, hessians,
+              ordered_gradients, ordered_hessians,
+              int_gradients, int_hessians,
+              int_ordered_gradients, int_ordered_hessians,
+              share_state, hist_data);
+        } else {
+          ConstructHistogramsInner<false, false, true>(
+              is_feature_used, data_indices, num_data, gradients, hessians,
+              ordered_gradients, ordered_hessians,
+              int_gradients, int_hessians,
+              int_ordered_gradients, int_ordered_hessians,
+              share_state, hist_data);
+        }
       } else {
-        ConstructHistogramsInner<false, false, IS_INT_HIST>(
-            is_feature_used, data_indices, num_data, gradients, hessians,
-            ordered_gradients, ordered_hessians,
-            int_gradients, int_hessians,
-            int_ordered_gradients, int_ordered_hessians,
-            share_state, hist_data);
+        if (use_indices) {
+          ConstructHistogramsInner<true, true, true>(
+              is_feature_used, data_indices, num_data, gradients, hessians,
+              ordered_gradients, ordered_hessians,
+              int_gradients, int_hessians,
+              int_ordered_gradients, int_ordered_hessians,
+              share_state, hist_data);
+        } else {
+          ConstructHistogramsInner<false, true, true>(
+              is_feature_used, data_indices, num_data, gradients, hessians,
+              ordered_gradients, ordered_hessians,
+              int_gradients, int_hessians,
+              int_ordered_gradients, int_ordered_hessians,
+              share_state, hist_data);
+        }
       }
     } else {
-      if (use_indices) {
-        ConstructHistogramsInner<true, true, IS_INT_HIST>(
-            is_feature_used, data_indices, num_data, gradients, hessians,
-            ordered_gradients, ordered_hessians,
-            int_gradients, int_hessians,
-            int_ordered_gradients, int_ordered_hessians,
-            share_state, hist_data);
+      if (share_state->is_constant_hessian) {
+        if (use_indices) {
+          ConstructHistogramsInner<true, false, false>(
+              is_feature_used, data_indices, num_data, gradients, hessians,
+              ordered_gradients, ordered_hessians,
+              int_gradients, int_hessians,
+              int_ordered_gradients, int_ordered_hessians,
+              share_state, hist_data);
+        } else {
+          ConstructHistogramsInner<false, false, false>(
+              is_feature_used, data_indices, num_data, gradients, hessians,
+              ordered_gradients, ordered_hessians,
+              int_gradients, int_hessians,
+              int_ordered_gradients, int_ordered_hessians,
+              share_state, hist_data);
+        }
       } else {
-        ConstructHistogramsInner<false, true, IS_INT_HIST>(
-            is_feature_used, data_indices, num_data, gradients, hessians,
-            ordered_gradients, ordered_hessians,
-            int_gradients, int_hessians,
-            int_ordered_gradients, int_ordered_hessians,
-            share_state, hist_data);
+        if (use_indices) {
+          ConstructHistogramsInner<true, true, false>(
+              is_feature_used, data_indices, num_data, gradients, hessians,
+              ordered_gradients, ordered_hessians,
+              int_gradients, int_hessians,
+              int_ordered_gradients, int_ordered_hessians,
+              share_state, hist_data);
+        } else {
+          ConstructHistogramsInner<false, true, false>(
+              is_feature_used, data_indices, num_data, gradients, hessians,
+              ordered_gradients, ordered_hessians,
+              int_gradients, int_hessians,
+              int_ordered_gradients, int_ordered_hessians,
+              share_state, hist_data);
+        }
       }
     }
   }
@@ -651,8 +686,6 @@ class Dataset {
   Dataset(const Dataset&) = delete;
 
   void AddFeaturesFrom(Dataset* other);
-
-  void PrepareHistBitInfo(const std::vector<int>& max_cnt_in_bin, data_size_t num_sampled);
 
  private:
   std::string data_filename_;

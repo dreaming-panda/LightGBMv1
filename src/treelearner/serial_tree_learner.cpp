@@ -81,7 +81,7 @@ void SerialTreeLearner::GetShareStates(const Dataset* dataset,
         ordered_gradients_.data(), ordered_hessians_.data(),
         int_ordered_gradients_.data(), int_ordered_hessians_.data(),
         col_sampler_.is_feature_used_bytree(), is_constant_hessian,
-        config_->force_col_wise, config_->force_row_wise));
+        config_->force_col_wise, config_->force_row_wise, config_->use_gradient_discretization));
   } else {
     CHECK_NOTNULL(share_state_);
     // cannot change is_hist_col_wise during training
@@ -90,7 +90,7 @@ void SerialTreeLearner::GetShareStates(const Dataset* dataset,
         int_ordered_gradients_.data(), int_ordered_hessians_.data(),
         col_sampler_.is_feature_used_bytree(),
         is_constant_hessian, share_state_->is_col_wise,
-        !share_state_->is_col_wise));
+        !share_state_->is_col_wise, config_->use_gradient_discretization));
   }
   CHECK_NOTNULL(share_state_);
 }
@@ -378,11 +378,8 @@ void SerialTreeLearner::ConstructHistograms(
       feature_hists[i] = larger_leaf_histogram_array_[i].RawData();
       feature_bin_mappers[i] = train_data_->FeatureBinMapper(i);
     }
-    share_state_->CalcHistBit(feature_hists, feature_bin_mappers,
-      smaller_leaf_splits_->sum_gradients(), smaller_leaf_splits_->sum_hessians(), smaller_leaf_splits_->num_data_in_leaf(),
-      larger_leaf_splits_->sum_gradients(), larger_leaf_splits_->sum_hessians(), larger_leaf_splits_->num_data_in_leaf(), true);
   }
-  train_data_->ConstructHistograms<true>(
+  train_data_->ConstructHistograms(
       is_feature_used, smaller_leaf_splits_->data_indices(),
       smaller_leaf_splits_->num_data_in_leaf(),
       gradients_, hessians_,
@@ -392,12 +389,9 @@ void SerialTreeLearner::ConstructHistograms(
       ptr_smaller_leaf_hist_data);
   if (larger_leaf_histogram_array_ != nullptr && !use_subtract) {
     // construct larger leaf
-    share_state_->CalcHistBit(std::vector<const hist_t*>{nullptr}, std::vector<const BinMapper*>{nullptr},
-      smaller_leaf_splits_->sum_gradients(), smaller_leaf_splits_->sum_hessians(), smaller_leaf_splits_->num_data_in_leaf(),
-      larger_leaf_splits_->sum_gradients(), larger_leaf_splits_->sum_hessians(), larger_leaf_splits_->num_data_in_leaf(), false);
     hist_t* ptr_larger_leaf_hist_data =
         larger_leaf_histogram_array_[0].RawData() - kHistOffset;
-    train_data_->ConstructHistograms<true>(
+    train_data_->ConstructHistograms(
         is_feature_used, larger_leaf_splits_->data_indices(),
         larger_leaf_splits_->num_data_in_leaf(), 
         gradients_, hessians_,

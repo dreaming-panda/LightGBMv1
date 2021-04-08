@@ -583,7 +583,7 @@ TrainingShareStates* Dataset::GetShareStates(
     score_t* gradients, score_t* hessians,
     int_score_t* int_gradients, int_score_t* int_hessians,
     const std::vector<int8_t>& is_feature_used, bool is_constant_hessian,
-    bool force_col_wise, bool force_row_wise) const {
+    bool force_col_wise, bool force_row_wise, bool is_int_gradient) const {
   Common::FunctionTimer fun_timer("Dataset::TestMultiThreadingMethod",
                                   global_timer);
   if (force_col_wise && force_row_wise) {
@@ -603,7 +603,7 @@ TrainingShareStates* Dataset::GetShareStates(
     share_state->CalcBinOffsets(
       feature_groups_, &offsets, true);
     share_state->SetMultiValBin(GetMultiBinFromSparseFeatures(offsets),
-      num_data_, feature_groups_, false, true);
+      num_data_, feature_groups_, false, true, is_int_gradient);
     share_state->is_col_wise = true;
     share_state->is_constant_hessian = is_constant_hessian;
     return share_state;
@@ -613,7 +613,7 @@ TrainingShareStates* Dataset::GetShareStates(
     share_state->CalcBinOffsets(
       feature_groups_, &offsets, false);
     share_state->SetMultiValBin(GetMultiBinFromAllFeatures(offsets), num_data_,
-      feature_groups_, false, false);
+      feature_groups_, false, false, is_int_gradient);
     share_state->is_col_wise = false;
     share_state->is_constant_hessian = is_constant_hessian;
     return share_state;
@@ -630,14 +630,14 @@ TrainingShareStates* Dataset::GetShareStates(
     std::vector<uint32_t> col_wise_offsets;
     col_wise_state->CalcBinOffsets(feature_groups_, &col_wise_offsets, true);
     col_wise_state->SetMultiValBin(GetMultiBinFromSparseFeatures(col_wise_offsets), num_data_,
-      feature_groups_, false, true);
+      feature_groups_, false, true, is_int_gradient);
     col_wise_init_time = std::chrono::steady_clock::now() - start_time;
 
     start_time = std::chrono::steady_clock::now();
     std::vector<uint32_t> row_wise_offsets;
     row_wise_state->CalcBinOffsets(feature_groups_, &row_wise_offsets, false);
     row_wise_state->SetMultiValBin(GetMultiBinFromAllFeatures(row_wise_offsets), num_data_,
-      feature_groups_, false, false);
+      feature_groups_, false, false, is_int_gradient);
     row_wise_init_time = std::chrono::steady_clock::now() - start_time;
 
     uint64_t max_total_bin = std::max<uint64_t>(row_wise_state->num_hist_total_bin(),
@@ -657,14 +657,14 @@ TrainingShareStates* Dataset::GetShareStates(
     InitTrain(is_feature_used, row_wise_state.get());
     std::chrono::duration<double, std::milli> col_wise_time, row_wise_time;
     start_time = std::chrono::steady_clock::now();
-    ConstructHistograms<true>(is_feature_used, nullptr, num_data_, 
-                        gradients, hessians, gradients, hessians, 
+    ConstructHistograms(is_feature_used, nullptr, num_data_,
+                        gradients, hessians, gradients, hessians,
                         int_gradients, int_hessians, int_gradients, int_hessians,
                         col_wise_state.get(),
                         hist_data.data());
     col_wise_time = std::chrono::steady_clock::now() - start_time;
     start_time = std::chrono::steady_clock::now();
-    ConstructHistograms<true>(is_feature_used, nullptr, num_data_,
+    ConstructHistograms(is_feature_used, nullptr, num_data_,
                         gradients, hessians, gradients, hessians,
                         int_gradients, int_hessians, int_gradients, int_hessians,
                         row_wise_state.get(),
@@ -1063,8 +1063,7 @@ void Dataset::InitTrain(const std::vector<int8_t>& is_feature_used,
   Common::FunctionTimer fun_time("Dataset::InitTrain", global_timer);
   share_state->InitTrain(group_feature_start_,
         feature_groups_,
-        is_feature_used,
-        all_max_cnt_);
+        is_feature_used);
 }
 
 template <bool USE_INDICES, bool ORDERED, typename SCORE_T, bool IS_INT_GRAD>
@@ -1232,10 +1231,19 @@ void Dataset::ConstructHistogramsInner(
                 0, num_data, ptr_ordered_grad, data_ptr);
           }
         }
-        /*auto cnt_dst = reinterpret_cast<hist_cnt_t*>(data_ptr + 1);
-        for (int i = 0; i < num_bin * 2; i += 2) {
-          data_ptr[i + 1] = static_cast<double>(cnt_dst[i]) * hessians[0];
-        }*/
+        if (IS_INT_GRAD) {
+          auto data_ptr = share_state->GetIntegerHistogram(group);
+          auto cnt_dst = reinterpret_cast<hist_cnt_t*>(data_ptr + 1);
+          for (int i = 0; i < num_bin * 2; i += 2) {
+            data_ptr[i + 1] = static_cast<double>(cnt_dst[i]) * hessians[0];
+          }
+        } else {
+          auto data_ptr = hist_data + group_bin_boundaries_[group] * 2;
+          auto cnt_dst = reinterpret_cast<hist_cnt_t*>(data_ptr + 1);
+          for (int i = 0; i < num_bin * 2; i += 2) {
+            data_ptr[i + 1] = static_cast<double>(cnt_dst[i]) * hessians[0];
+          }
+        }
       }
       OMP_LOOP_EX_END();
     }
@@ -1525,22 +1533,6 @@ void Dataset::AddFeaturesFrom(Dataset* other) {
   PushClearIfEmpty(&max_bin_by_feature_, num_total_features_,
                    other->max_bin_by_feature_, other->num_total_features_, -1);
   num_total_features_ += other->num_total_features_;
-}
-
-void Dataset::PrepareHistBitInfo(const std::vector<int>& max_cnt_in_bin, int num_sampled) {
-  all_max_cnt_ = 0;
-  for (int i = 0; i < num_features_; ++i) {
-    if (FeatureBinMapper(i)->num_bin() <= 10) {
-      Log::Warning("feature %d has bin %d", RealFeatureIndex(i), FeatureBinMapper(i)->num_bin());
-    }
-  }
-  const double factor = static_cast<double>(num_data_) / static_cast<double>(num_sampled);
-  for (size_t i = 0; i < max_cnt_in_bin.size(); ++i) {
-    const int max_cnt = static_cast<int>(max_cnt_in_bin[i] * factor);
-    if (max_cnt > all_max_cnt_) {
-      all_max_cnt_ = max_cnt;
-    }
-  }
 }
 
 }  // namespace LightGBM

@@ -139,6 +139,16 @@ class RegressionL2loss: public ObjectiveFunction {
     }
   }
 
+  void GetIntGradients(const double* score,
+    score_t* gradients, score_t* hessians,
+    int_score_t* int_gradients, int_score_t* int_hessians,
+    double* grad_scale, double* hess_scale,
+    ObjectiveRandomStates* obj_rand_state) const override {
+    GetGradients(score, gradients, hessians);
+    DiscretizeGradients(gradients, hessians, int_gradients, int_hessians,
+      grad_scale, hess_scale, obj_rand_state, num_data_, false);
+  }
+
   const char* GetName() const override {
     return "regression";
   }

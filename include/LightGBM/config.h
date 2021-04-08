@@ -985,6 +985,17 @@ struct Config {
 
   #pragma endregion
 
+  #pragma region Gradient Discretization Parameters
+
+  // desc = whether to use gradient discretization, which can potentially speedup training
+  bool use_gradient_discretization = false;
+
+  // desc = number of bins to discretize gradients and hessians
+  // desc = must be no less than 2
+  int n_gradient_bins = 16;
+
+  #pragma endregion
+
   #pragma endregion
 
   size_t file_load_progress_interval_bytes = size_t(10) * 1024 * 1024 * 1024;

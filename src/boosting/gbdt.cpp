@@ -132,7 +132,6 @@ void GBDT::Init(const Config* config, const Dataset* train_data, const Objective
 
   if (objective_function_ != nullptr) {
     obj_rand_states_.reset(new ObjectiveRandomStates(num_data_, config_->seed));
-    objective_function_->InitObjectiveRandomStates(obj_rand_states_.get());
   }
 }
 
