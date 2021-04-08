@@ -170,11 +170,8 @@ class ObjectiveFunction {
       int num_threads = OMP_NUM_THREADS();
       std::vector<double> thread_max_gradient(num_threads, max_gradient);
       std::vector<double> thread_max_hessian(num_threads, max_hessian);
-      std::vector<double> thread_min_gradient(num_threads, max_gradient);
-      std::vector<double> thread_min_hessian(num_threads, max_hessian);
       Threading::For<data_size_t>(0, num_data, 1024,
-        [gradients, hessians, &thread_max_gradient, &thread_max_hessian,
-          &thread_min_gradient, &thread_min_hessian]
+        [gradients, hessians, &thread_max_gradient, &thread_max_hessian]
         (int, data_size_t start, data_size_t end) {
           int thread_id = omp_get_thread_num();
           for (data_size_t i = start; i < end; ++i) {
@@ -186,17 +183,9 @@ class ObjectiveFunction {
             if (fabs_hess > thread_max_hessian[thread_id]) {
               thread_max_hessian[thread_id] = fabs_hess;
             }
-            if (fabs_grad < thread_min_gradient[thread_id]) {
-              thread_min_gradient[thread_id] = fabs_grad;
-            }
-            if (fabs_hess < thread_min_hessian[thread_id]) {
-              thread_min_hessian[thread_id] = fabs_hess;
-            }
           }});
       max_gradient = thread_max_gradient[0];
       max_hessian = thread_max_hessian[0];
-      double min_gradient = thread_min_gradient[0];
-      double min_hessian = thread_min_hessian[0];
       for (int thread_id = 1; thread_id < num_threads; ++thread_id) {
         if (max_gradient < thread_max_gradient[thread_id]) {
           max_gradient = thread_max_gradient[thread_id];
@@ -205,13 +194,10 @@ class ObjectiveFunction {
           max_hessian = thread_max_hessian[thread_id];
         }
       }
-      Log::Warning("max_gradient = %f, max_hessian = %f", max_gradient, max_hessian);
-      Log::Warning("min_gradient = %f, min_hessian = %f", min_gradient, min_hessian);
       obj_rand_state->SetGradientInfo(max_gradient, max_hessian, can_lock);
     }
     *grad_scale = obj_rand_state->gradient_scale();
     *hess_scale = obj_rand_state->hessian_scale();
-    Log::Warning("grad_scale = %.20f, hess_scale = %.20f", *grad_scale, *hess_scale);
     const double g_inverse_scale = obj_rand_state->inverse_gradient_scale();
     const double h_inverse_scale = obj_rand_state->inverse_hessian_scale();
     const int random_values_use_start = obj_rand_state->GetNextRandomValueUseStart();

@@ -216,9 +216,11 @@ Tree* SerialTreeLearner::Train(const score_t* gradients, const score_t *hessians
     cur_depth = std::max(cur_depth, tree->leaf_depth(left_leaf));
   }
   Log::Debug("Trained a tree with leaves = %d and depth = %d", tree->num_leaves(), cur_depth);
-  global_timer.Start("SerialTreeLearner::RenewIntGradTreeOutput");
-  RenewIntGradTreeOutput(tree.get());
-  global_timer.Stop("SerialTreeLearner::RenewIntGradTreeOutput");
+  if (config_->use_gradient_discretization) {
+    global_timer.Start("SerialTreeLearner::RenewIntGradTreeOutput");
+    RenewIntGradTreeOutput(tree.get());
+    global_timer.Stop("SerialTreeLearner::RenewIntGradTreeOutput");
+  }
 
   return tree.release();
 }
@@ -284,14 +286,20 @@ void SerialTreeLearner::BeforeTrain() {
   // Sumup for root
   if (data_partition_->leaf_count(0) == num_data_) {
     // use all data
-    //smaller_leaf_splits_->Init(gradients_, hessians_);
-    smaller_leaf_splits_->Init(int_gradients_, int_hessians_,
-      share_state_->grad_scale(), share_state_->hess_scale());
+    if (!config_->use_gradient_discretization) {
+      smaller_leaf_splits_->Init(gradients_, hessians_);
+    } else {
+      smaller_leaf_splits_->Init(int_gradients_, int_hessians_,
+        share_state_->grad_scale(), share_state_->hess_scale());
+    }
   } else {
     // use bagging, only use part of data
-    //smaller_leaf_splits_->Init(0, data_partition_.get(), gradients_, hessians_);
-    smaller_leaf_splits_->Init(0, data_partition_.get(),
-      int_gradients_, int_hessians_, share_state_->grad_scale(), share_state_->hess_scale());
+    if (!config_->use_gradient_discretization) {
+      smaller_leaf_splits_->Init(0, data_partition_.get(), gradients_, hessians_);
+    } else {
+      smaller_leaf_splits_->Init(0, data_partition_.get(),
+        int_gradients_, int_hessians_, share_state_->grad_scale(), share_state_->hess_scale());
+    }
   }
 
   larger_leaf_splits_->Init();
