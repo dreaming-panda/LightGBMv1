@@ -1020,7 +1020,7 @@ struct Config {
 
   // desc = number of bins to discretize gradients and hessians
   // desc = must be no less than 2
-  int n_gradient_bins = 16;
+  int num_gradient_bins = 16;
 
   #pragma endregion
 

@@ -301,7 +301,7 @@ const std::unordered_set<std::string>& Config::parameter_set() {
   "gpu_use_dp",
   "num_gpu",
   "use_gradient_discretization",
-  "n_gradient_bins"
+  "num_gradient_bins"
   });
   return params;
 }
@@ -630,8 +630,8 @@ void Config::GetMembersFromString(const std::unordered_map<std::string, std::str
 
   GetBool(params, "use_gradient_discretization", &use_gradient_discretization);
 
-  GetInt(params, "n_gradient_bins", &n_gradient_bins);
-  CHECK_GT(n_gradient_bins, 1);
+  GetInt(params, "num_gradient_bins", &num_gradient_bins);
+  CHECK_GT(num_gradient_bins, 1);
 }
 
 std::string Config::SaveMembersToString() const {

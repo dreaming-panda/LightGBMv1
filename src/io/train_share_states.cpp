@@ -354,10 +354,8 @@ void MultiValBinWrapperBase::CopyMultiValBinSubset(
             lower_bound.push_back(num_total_bin - cur_num_bin);
             upper_bound.push_back(num_total_bin);
 
-            hist_move_src_.push_back(
-                (new_num_total_bin - cur_num_bin) * 2);
-            hist_move_dest_.push_back((num_total_bin - cur_num_bin) *
-                                                2);
+            hist_move_src_.push_back((new_num_total_bin - cur_num_bin) * 2);
+            hist_move_dest_.push_back((num_total_bin - cur_num_bin) * 2);
             hist_move_size_.push_back(cur_num_bin * 2);
             delta.push_back(num_total_bin - new_num_total_bin);
           }
@@ -378,10 +376,8 @@ void MultiValBinWrapperBase::CopyMultiValBinSubset(
           lower_bound.push_back(num_total_bin - cur_num_bin);
           upper_bound.push_back(num_total_bin);
 
-          hist_move_src_.push_back(
-              (new_num_total_bin - cur_num_bin) * 2);
-          hist_move_dest_.push_back((num_total_bin - cur_num_bin) *
-                                              2);
+          hist_move_src_.push_back((new_num_total_bin - cur_num_bin) * 2);
+          hist_move_dest_.push_back((num_total_bin - cur_num_bin) * 2);
           hist_move_size_.push_back(cur_num_bin * 2);
           delta.push_back(num_total_bin - new_num_total_bin);
         }

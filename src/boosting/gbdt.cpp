@@ -138,7 +138,7 @@ void GBDT::Init(const Config* config, const Dataset* train_data, const Objective
   }
 
   if (objective_function_ != nullptr && config_->use_gradient_discretization) {
-    obj_rand_states_.reset(new ObjectiveRandomStates(num_data_, config_->seed));
+    obj_rand_states_.reset(new ObjectiveRandomStates(num_data_, config_->seed, config_->num_gradient_bins));
   }
   if (config_->linear_tree) {
     linear_tree_ = true;

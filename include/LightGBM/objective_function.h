@@ -17,10 +17,11 @@ namespace LightGBM {
 
 class ObjectiveRandomStates {
  public:
-  ObjectiveRandomStates(const data_size_t num_data, const int random_seed) {
+  ObjectiveRandomStates(const data_size_t num_data, const int random_seed, const int num_gradient_bins) {
     num_data_ = num_data;
     num_threads_ = OMP_NUM_THREADS();
     random_seed_ = random_seed;
+    num_gradient_bins_ = num_gradient_bins;
 
     gradient_random_values_.resize(num_data_, 0.0f);
     hessian_random_values_.resize(num_data_, 0.0f);
@@ -74,9 +75,9 @@ class ObjectiveRandomStates {
         max_gradient_abs_ = max_gradient_abs;
         max_hessian_abs_ = max_hessian_abs;
       }
-      gradient_scale_ = max_gradient_abs_ / static_cast<double>(kIntGradBins / 2);
+      gradient_scale_ = max_gradient_abs_ / static_cast<double>(num_gradient_bins_ / 2);
       if (!is_constant_hessian) {
-        hessian_scale_ = max_hessian_abs_ / static_cast<double>(kIntGradBins);
+        hessian_scale_ = max_hessian_abs_ / static_cast<double>(num_gradient_bins_);
       } else {
         hessian_scale_ = max_hessian_abs_;
       }
@@ -104,6 +105,7 @@ class ObjectiveRandomStates {
  private:
   data_size_t num_data_;
   int num_threads_;
+  int num_gradient_bins_;
 
   std::vector<double> gradient_random_values_;
   std::vector<double> hessian_random_values_;
@@ -227,13 +229,13 @@ class ObjectiveFunction {
     for (data_size_t i = 0; i < num_data; ++i) {
       const double gradient = gradients[i];
       if (IS_CONSTANT_HESSIAN) {
-        const data_size_t random_value_pos = (i + random_values_use_start) % num_data;
+        const data_size_t random_value_pos = (i /*+ random_values_use_start*/) % num_data;
         int_gradients_and_hessians[2 * i + 1] = gradient >= 0.0f ?
           static_cast<int_score_t>(gradient * g_inverse_scale + gradient_random_values[random_value_pos]) :
           static_cast<int_score_t>(gradient * g_inverse_scale - gradient_random_values[random_value_pos]);
         int_gradients_and_hessians[2 * i] = 1;
       } else {
-        const data_size_t random_value_pos = (i + random_values_use_start) % num_data;
+        const data_size_t random_value_pos = (i /*+ random_values_use_start*/) % num_data;
         int_gradients_and_hessians[2 * i + 1] = gradient >= 0.0f ?
           static_cast<int_score_t>(gradient * g_inverse_scale + gradient_random_values[random_value_pos]) :
           static_cast<int_score_t>(gradient * g_inverse_scale - gradient_random_values[random_value_pos]);
