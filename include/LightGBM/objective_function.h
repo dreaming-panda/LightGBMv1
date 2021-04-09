@@ -229,13 +229,13 @@ class ObjectiveFunction {
     for (data_size_t i = 0; i < num_data; ++i) {
       const double gradient = gradients[i];
       if (IS_CONSTANT_HESSIAN) {
-        const data_size_t random_value_pos = (i /*+ random_values_use_start*/) % num_data;
+        const data_size_t random_value_pos = (i + random_values_use_start) % num_data;
         int_gradients_and_hessians[2 * i + 1] = gradient >= 0.0f ?
           static_cast<int_score_t>(gradient * g_inverse_scale + gradient_random_values[random_value_pos]) :
           static_cast<int_score_t>(gradient * g_inverse_scale - gradient_random_values[random_value_pos]);
         int_gradients_and_hessians[2 * i] = 1;
       } else {
-        const data_size_t random_value_pos = (i /*+ random_values_use_start*/) % num_data;
+        const data_size_t random_value_pos = (i + random_values_use_start) % num_data;
         int_gradients_and_hessians[2 * i + 1] = gradient >= 0.0f ?
           static_cast<int_score_t>(gradient * g_inverse_scale + gradient_random_values[random_value_pos]) :
           static_cast<int_score_t>(gradient * g_inverse_scale - gradient_random_values[random_value_pos]);
