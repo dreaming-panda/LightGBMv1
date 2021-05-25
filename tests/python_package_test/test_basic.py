@@ -350,11 +350,13 @@ def test_category_encoding(tmp_path):
         np.testing.assert_equal(len(train_data_1.get_feature_name()), expected_num_features)
         np.testing.assert_equal(booster_1.num_feature(), expected_num_features)
         pred_1 = booster_1.predict(X_test)
+        #eval_1 = booster_1.eval(valid_data_1, "valid_data")
         pred_contrib_1 = booster_1.predict(X_test, pred_contrib=True)
+
+        # checks that Dataset with category_encoders can be saved to and load from file
         tmp_dataset = str(tmp_path / 'category_encoding_{}_temp_dataset.bin'.format(model_prefix))
         train_data_1.save_binary(tmp_dataset)
 
-        # checks that Dataset with category_encoders can be saved to and load from file
         train_data_2 = lgb.Dataset(tmp_dataset)
         valid_data_2 = train_data_2.create_valid(X_test, label=y_test)
         booster_2 = lgb.train(params, train_data_2, valid_sets=[valid_data_2], valid_names=["valid_data"])
@@ -363,8 +365,10 @@ def test_category_encoding(tmp_path):
         np.testing.assert_equal(len(train_data_2.get_feature_name()), expected_num_features)
         np.testing.assert_equal(booster_2.num_feature(), expected_num_features)
         pred_2 = booster_2.predict(X_test)
+        #eval_2 = booster_2.eval(valid_data_2, "valid_data")
         pred_contrib_2 = booster_2.predict(X_test, pred_contrib=True)
         np.testing.assert_allclose(pred_1, pred_2)
+        #np.testing.assert_allclose(eval_1, eval_2)
         np.testing.assert_allclose(pred_contrib_1, pred_contrib_2)
 
         # checks that Booster with category_encoders can be saved to and load from file
@@ -373,8 +377,10 @@ def test_category_encoding(tmp_path):
         booster_3 = lgb.Booster(params=params, model_file=model_file)
         np.testing.assert_equal(booster_3.num_feature(), expected_num_features)
         pred_3 = booster_3.predict(X_test)
+        #eval_3 = booster_3.eval(valid_data_1, "valid_data")
         pred_contrib_3 = booster_3.predict(X_test, pred_contrib=True)
         np.testing.assert_allclose(pred_1, pred_3)
+        #np.testing.assert_allclose()
         np.testing.assert_allclose(pred_contrib_1, pred_contrib_3)
 
         # checks that category_encoders works in params
