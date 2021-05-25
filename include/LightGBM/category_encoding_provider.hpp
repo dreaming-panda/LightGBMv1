@@ -112,6 +112,7 @@ class CategoryEncodingProvider {
       } else {
         Log::Fatal("CatConverter model format error");
       }
+      return ret;
     }
   };
 

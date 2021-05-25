@@ -258,10 +258,8 @@ std::string CategoryEncodingProvider::DumpToString() const {
   return str_buf.str();
 }
 
-CategoryEncodingProvider::CategoryEncodingProvider(const std::string model_string) {
-  size_t used_len = 0;
-  CategoryEncodingProvider(model_string.c_str(), &used_len);
-}
+CategoryEncodingProvider::CategoryEncodingProvider(const std::string model_string):
+  CategoryEncodingProvider(model_string.c_str(), nullptr) {}
 
 CategoryEncodingProvider::CategoryEncodingProvider(const char* str, size_t* used_len) {
   accumulated_from_file_ = false;
@@ -406,7 +404,9 @@ CategoryEncodingProvider::CategoryEncodingProvider(const char* str, size_t* used
     size_t category_encoder_used_len = 0;
     category_encoders_.emplace_back(CatConverter::CreateFromCharPointer(str_ptr, &category_encoder_used_len, prior_weight_));
     str_ptr += category_encoder_used_len;
-    *used_len = static_cast<size_t>(str_ptr - str);
+    if (used_len != nullptr) {
+      *used_len = static_cast<size_t>(str_ptr - str);
+    }
   }
 }
 

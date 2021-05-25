@@ -448,6 +448,7 @@ bool GBDT::LoadModelFromString(const char* buffer, size_t len) {
           used_len = line_len;
         } else {
           p += line_len;
+          p = Common::SkipNewLine(p);
           category_encoding_provider_.reset(CategoryEncodingProvider::RecoverFromCharPointer(p, &used_len));
         }
       } else if (!Common::StartsWith(cur_line, "Tree=")) {
