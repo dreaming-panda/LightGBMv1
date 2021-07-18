@@ -340,6 +340,9 @@ __global__ void FillDataIndicesBeforeTrainKernel(const data_size_t* cuda_num_dat
 
 void CUDADataPartition::LaunchFillDataIndicesBeforeTrain() {
   const int num_blocks = (num_data_ + FILL_INDICES_BLOCK_SIZE_DATA_PARTITION - 1) / FILL_INDICES_BLOCK_SIZE_DATA_PARTITION;
+  data_size_t cuda_num_data = 0;
+  CopyFromCUDADeviceToHost<data_size_t>(&cuda_num_data, cuda_num_data_, 1);
+  Log::Warning("cuda_num_data = %d, num_data_ = %d", cuda_num_data, num_data_);
   FillDataIndicesBeforeTrainKernel<<<num_blocks, FILL_INDICES_BLOCK_SIZE_DATA_PARTITION>>>(cuda_num_data_, cuda_data_indices_, cuda_data_index_to_leaf_index_);
 }
 
@@ -2535,8 +2538,7 @@ __global__ void SplitTreeStructureKernel(const int* leaf_index, data_size_t* blo
   const int* cuda_num_total_bin,
   hist_t* cuda_hist, hist_t** cuda_hist_pool, const int split_indices_block_size_data_partition,
 
-  const double* cuda_bin_upper_bounds, const int* cuda_feature_num_bin_offsets,
-  int* tree_split_leaf_index, int* tree_inner_feature_index, uint32_t* tree_threshold, double* tree_threshold_real,
+  int* tree_split_leaf_index, int* tree_inner_feature_index, uint32_t* tree_threshold,
   double* tree_left_output, double* tree_right_output, data_size_t* tree_left_count, data_size_t* tree_right_count,
   double* tree_left_sum_hessian, double* tree_right_sum_hessian, double* tree_gain, uint8_t* tree_default_left,
   double* data_partition_leaf_output,
@@ -2593,12 +2595,7 @@ __global__ void SplitTreeStructureKernel(const int* leaf_index, data_size_t* blo
     best_split_found[leaf_index_ref] = 0;
   } else if (global_thread_index == 22) {
     best_split_found[cur_max_leaf_index] = 0;
-  } else if (global_thread_index == 23) {
-    const uint32_t threshold_int = best_split_threshold[leaf_index_ref];
-    const int split_inner_feature_index = best_split_feature[leaf_index_ref];
-    const double threshold_real = cuda_bin_upper_bounds[cuda_feature_num_bin_offsets[split_inner_feature_index] + threshold_int];
-    tree_threshold_real[cur_max_leaf_index - 1] = threshold_real;
-  } 
+  }
 
   if (cuda_leaf_num_data[leaf_index_ref] < cuda_leaf_num_data[cur_max_leaf_index]) {
     if (global_thread_index == 0) {
@@ -3006,13 +3003,10 @@ void CUDADataPartition::LaunchSplitInnerKernel(const int* leaf_index, const data
     cuda_hist_,
     cuda_hist_pool_, split_indices_block_size_data_partition_aligned,
 
-    cuda_bin_upper_bounds_, cuda_feature_num_bin_offsets_,
-
-    tree_split_leaf_index_, tree_inner_feature_index_, tree_threshold_, tree_threshold_real_,
+    tree_split_leaf_index_, tree_inner_feature_index_, tree_threshold_,
     tree_left_output_, tree_right_output_, tree_left_count_, tree_right_count_,
     tree_left_sum_hessian_, tree_right_sum_hessian_, tree_gain_, tree_default_left_,
     data_partition_leaf_output_, cuda_split_info_buffer_);
-  //SynchronizeCUDADevice();
   global_timer.Stop("CUDADataPartition::SplitTreeStructureKernel");
   std::vector<int> cpu_split_info_buffer(12);
   const double* cpu_sum_hessians_info = reinterpret_cast<const double*>(cpu_split_info_buffer.data() + 8);
@@ -3159,9 +3153,7 @@ void CUDADataPartition::LaunchSplitInnerKernel2(const int* leaf_index, const dat
     cuda_hist_,
     cuda_hist_pool_, block_dim,
 
-    cuda_bin_upper_bounds_, cuda_feature_num_bin_offsets_,
-
-    tree_split_leaf_index_, tree_inner_feature_index_, tree_threshold_, tree_threshold_real_,
+    tree_split_leaf_index_, tree_inner_feature_index_, tree_threshold_,
     tree_left_output_, tree_right_output_, tree_left_count_, tree_right_count_,
     tree_left_sum_hessian_, tree_right_sum_hessian_, tree_gain_, tree_default_left_,
     data_partition_leaf_output_, cuda_split_info_buffer_);
@@ -3241,11 +3233,23 @@ __global__ void AddPredictionToScoreKernel(const double* data_partition_leaf_out
 
 void CUDADataPartition::LaunchAddPredictionToScoreKernel(const double learning_rate, double* cuda_scores) {
   global_timer.Start("CUDADataPartition::AddPredictionToScoreKernel");
+  //const int leaf_check_size = 10500000;
+  //std::vector<int> cpu_leaf_predict(leaf_check_size);
+  //std::vector<double> cpu_predict_value(leaf_check_size);
+  //CopyFromCUDADeviceToHost<int>(cpu_leaf_predict.data(), cuda_data_index_to_leaf_index_, leaf_check_size);
   const int num_blocks = (num_data_ + FILL_INDICES_BLOCK_SIZE_DATA_PARTITION - 1) / FILL_INDICES_BLOCK_SIZE_DATA_PARTITION;
   AddPredictionToScoreKernel<<<num_blocks, FILL_INDICES_BLOCK_SIZE_DATA_PARTITION>>>(data_partition_leaf_output_,
     cuda_leaf_num_data_, cuda_data_indices_, cuda_leaf_data_start_, learning_rate, cuda_scores, cuda_data_index_to_leaf_index_, num_data_);
-  SynchronizeCUDADevice();
-  global_timer.Stop("CUDADataPartition::AddPredictionToScoreKernel");
+  //SynchronizeCUDADevice();
+  //global_timer.Stop("CUDADataPartition::AddPredictionToScoreKernel");
+  /*for (int i = 0; i < leaf_check_size; ++i) {
+    Log::Warning("cpu_leaf_predict[%d] = %d", i, cpu_leaf_predict[i]);
+  }*/
+  //static int iter = 0;
+  //if (iter == 0) {
+  //  OutputToFile("cuda_data_partition.txt", cpu_leaf_predict);
+  //}
+  //++iter;
 }
 
 __global__ void CopyColWiseDataKernel(const uint8_t* row_wise_data,

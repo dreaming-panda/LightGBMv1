@@ -7,7 +7,7 @@
 #ifdef USE_CUDA
 
 #include "cuda_regression_objective.hpp"
-
+/*
 namespace LightGBM {
 
 CUDARegressionObjective::CUDARegressionObjective(const data_size_t num_data, const label_t* cuda_labels):
@@ -27,5 +27,5 @@ void CUDARegressionObjective::CalcInitScore() {
 }
 
 }  // namespace LightGBM
-
+*/
 #endif  // USE_CUDA

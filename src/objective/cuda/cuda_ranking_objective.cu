@@ -5,7 +5,7 @@
  */
 
 #ifdef USE_CUDA
-
+/*
 #include "cuda_ranking_objective.hpp"
 
 namespace LightGBM {
@@ -297,16 +297,6 @@ __global__ void GetGradientsKernel_Ranking(const double* cuda_scores, const labe
   }
 }
 
-/*__device__ void ReduceSumRanking(double* array, const size_t size) {
-  //const unsigned int threadIdx_x = threadIdx.x;
-  for (int s = 1; s < size; s <<= 1) {
-    if (threadIdx.x; % (2 * s) == 0 && (threadIdx.x; + s) < size) {
-      array[threadIdx.x;] += array[threadIdx.x; + s];
-    }
-    __syncthreads();
-  }
-}*/
-
 __global__ void GetGradientsKernel_Ranking_2048(const double* cuda_scores, const label_t* cuda_labels, const data_size_t num_data,
   const data_size_t num_queries, const data_size_t* cuda_query_boundaries, const double* cuda_inverse_max_dcgs,
   const bool norm, const double sigmoid, const int truncation_level,
@@ -578,5 +568,5 @@ void CUDARankingObjective::LaunchCalcInverseMaxDCGKernel() {
 }
 
 }  // namespace LightGBM
-
+*/
 #endif  // USE_CUDA

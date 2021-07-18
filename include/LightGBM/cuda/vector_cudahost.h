@@ -33,7 +33,7 @@ class LGBM_config_ {
   static int current_learner;  // Default: use_cpu_learner
 };
 
-
+// CUDA host memory allocator
 template <class T>
 struct CHAllocator {
   typedef T value_type;
@@ -83,10 +83,65 @@ struct CHAllocator {
     #endif
   }
 };
+
+// CUDA device memory allocator
+template <class T>
+struct CDAllocator {
+  typedef T value_type;
+  CDAllocator() {}
+  template <class U> CDAllocator(const CDAllocator<U>& other);
+  T* allocate(std::size_t n) {
+    T* ptr;
+    if (n == 0) return NULL;
+    n = (n + kAlignedSize - 1) & -kAlignedSize;
+    #ifdef USE_CUDA
+      if (LGBM_config_::current_device == lgbm_device_cuda) {
+        cudaError_t ret = cudaMalloc(&ptr, n*sizeof(T));
+        if (ret != cudaSuccess) {
+          Log::Fatal("Allocating CUDA device memory failed");
+        }
+      } else {
+        Log::Fatal("Using CDAllocator when CUDA is not enabled.");
+      }
+    #else
+      Log::Fatal("Using CDAllocator when CUDA is not enabled.");
+    #endif
+    return ptr;
+  }
+
+  void deallocate(T* p, std::size_t n) {
+    (void)n;  // UNUSED
+    if (p == NULL) return;
+    #ifdef USE_CUDA
+      if (LGBM_config_::current_device == lgbm_device_cuda) {
+        cudaPointerAttributes attributes;
+        cudaPointerGetAttributes(&attributes, p);
+        #if CUDA_VERSION >= 10000
+          if ((attributes.type == cudaMemoryTypeDevice) && (attributes.devicePointer != NULL)) {
+            cudaFree(p);
+          }
+        #else
+          if ((attributes.memoryType == cudaMemoryTypeDevice) && (attributes.devicePointer != NULL)) {
+            cudaFree(p);
+          }
+        #endif
+      } else {
+        Log::Fatal("Using CDAllocator when CUDA is not enabled.");
+      }
+    #else
+      Log::Fatal("Using CDAllocator when CUDA is not enabled.");
+    #endif
+  }
+};
+
 template <class T, class U>
 bool operator==(const CHAllocator<T>&, const CHAllocator<U>&);
 template <class T, class U>
 bool operator!=(const CHAllocator<T>&, const CHAllocator<U>&);
+template <class T, class U>
+bool operator==(const CDAllocator<T>&, const CDAllocator<U>&);
+template <class T, class U>
+bool operator!=(const CDAllocator<T>&, const CDAllocator<U>&);
 
 }  // namespace LightGBM
 

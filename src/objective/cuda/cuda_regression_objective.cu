@@ -5,7 +5,7 @@
  */
 
 #ifdef USE_CUDA
-
+/*
 #include "cuda_regression_objective.hpp"
 
 namespace LightGBM {
@@ -65,5 +65,5 @@ void CUDARegressionObjective::LaunchGetGradientsKernel(const double* cuda_scores
 }
 
 }  // namespace LightGBM
-
+*/
 #endif  // USE_CUDA

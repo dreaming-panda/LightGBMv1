@@ -6,6 +6,7 @@
 
 #ifdef USE_CUDA
 
+#include <LightGBM/cuda/cuda_utils.h>
 #include "cuda_data_partition.hpp"
 
 namespace LightGBM {
@@ -30,8 +31,6 @@ CUDADataPartition::CUDADataPartition(const data_size_t num_data, const int num_f
   feature_missing_is_na_.resize(train_data->num_features());
   feature_mfb_is_zero_.resize(train_data->num_features());
   feature_mfb_is_na_.resize(train_data->num_features());
-  bin_upper_bounds_.resize(train_data->num_features());
-  feature_num_bins_.resize(train_data->num_features());
   int cur_group = 0;
   uint32_t prev_group_bins = 0;
   for (int feature_index = 0; feature_index < num_features_; ++feature_index) {
@@ -45,8 +44,6 @@ CUDADataPartition::CUDADataPartition(const data_size_t num_data, const int num_f
     feature_most_freq_bins_[feature_index] = bin_mapper->GetMostFreqBin();
     feature_min_bins_[feature_index] = train_data->feature_min_bin(feature_index);
     feature_max_bins_[feature_index] = train_data->feature_max_bin(feature_index);
-    bin_upper_bounds_[feature_index] = bin_mapper->bin_upper_bound();
-    feature_num_bins_[feature_index] = bin_mapper->num_bin();
     const MissingType missing_type = bin_mapper->missing_type();
     if (missing_type == MissingType::None) {
       feature_missing_is_zero_[feature_index] = 0;
@@ -111,7 +108,6 @@ void CUDADataPartition::Init(const Dataset* train_data) {
   AllocateCUDAMemory<int>(static_cast<size_t>(num_leaves_), &tree_split_leaf_index_);
   AllocateCUDAMemory<int>(static_cast<size_t>(num_leaves_), &tree_inner_feature_index_);
   AllocateCUDAMemory<uint32_t>(static_cast<size_t>(num_leaves_), &tree_threshold_);
-  AllocateCUDAMemory<double>(static_cast<size_t>(num_leaves_), &tree_threshold_real_);
   AllocateCUDAMemory<double>(static_cast<size_t>(num_leaves_), &tree_left_output_);
   AllocateCUDAMemory<double>(static_cast<size_t>(num_leaves_), &tree_right_output_);
   AllocateCUDAMemory<data_size_t>(static_cast<size_t>(num_leaves_), &tree_left_count_);
@@ -137,21 +133,6 @@ void CUDADataPartition::Init(const Dataset* train_data) {
   const size_t max_num_blocks_in_debug = static_cast<size_t>((num_data_ + 1023) / 1024);
   AllocateCUDAMemory<double>(max_num_blocks_in_debug, &cuda_gradients_sum_buffer_);
   AllocateCUDAMemory<double>(max_num_blocks_in_debug, &cuda_hessians_sum_buffer_);
-
-  std::vector<double> flatten_bin_upper_bounds;
-  std::vector<int> feature_num_bin_offsets;
-  int offset = 0;
-  feature_num_bin_offsets.emplace_back(offset);
-  for (size_t i = 0; i < bin_upper_bounds_.size(); ++i) {
-    CHECK_EQ(static_cast<size_t>(feature_num_bins_[i]), bin_upper_bounds_[i].size());
-    for (const auto value : bin_upper_bounds_[i]) {
-      flatten_bin_upper_bounds.emplace_back(value);
-    }
-    offset += feature_num_bins_[i];
-    feature_num_bin_offsets.emplace_back(offset);
-  }
-  InitCUDAMemoryFromHostMemory<int>(&cuda_feature_num_bin_offsets_, feature_num_bin_offsets.data(), feature_num_bin_offsets.size());
-  InitCUDAMemoryFromHostMemory<double>(&cuda_bin_upper_bounds_, flatten_bin_upper_bounds.data(), flatten_bin_upper_bounds.size());
 }
 
 void CUDADataPartition::CopyColWiseData(const Dataset* train_data) {
@@ -178,17 +159,18 @@ void CUDADataPartition::CopyColWiseData(const Dataset* train_data) {
     }
 
     if (!train_data->IsMultiGroup(feature_group_index)) {
-      uint8_t bit_type = 0;
+      int8_t bit_type = 0;
       bool is_sparse = false;
       std::vector<BinIterator*> bin_iterator;
-      const uint8_t* column_data = train_data->GetColWiseData(feature_group_index, -1, &bit_type, &is_sparse, &bin_iterator, num_threads_);
+      const void* column_data = train_data->GetColWiseData(feature_group_index, -1, &bit_type, &is_sparse, &bin_iterator, num_threads_);
       if (column_data != nullptr) {
         CHECK(!is_sparse);
         if (bit_type == 4) {
           std::vector<uint8_t> true_column_data(num_data_, 0);
+          const uint8_t* true_column_data_pointer = reinterpret_cast<const uint8_t*>(column_data);
           #pragma omp parallel for schedule(static) num_threads(num_threads_)
           for (data_size_t i = 0; i < num_data_; ++i) {
-            true_column_data[i] = static_cast<uint8_t>((column_data[i >> 1] >> ((i & 1) << 2)) & 0xf);
+            true_column_data[i] = static_cast<uint8_t>((true_column_data_pointer[i >> 1] >> ((i & 1) << 2)) & 0xf);
           }
           bit_type = 8;
           uint8_t* cuda_true_column_data = nullptr;
@@ -196,7 +178,8 @@ void CUDADataPartition::CopyColWiseData(const Dataset* train_data) {
           cuda_data_by_column_.emplace_back(cuda_true_column_data);
         } else if (bit_type == 8) {
           uint8_t* cuda_true_column_data = nullptr;
-          InitCUDAMemoryFromHostMemory<uint8_t>(&cuda_true_column_data, column_data, static_cast<size_t>(num_data_));
+          const uint8_t* true_column_data_pointer = reinterpret_cast<const uint8_t*>(column_data);
+          InitCUDAMemoryFromHostMemory<uint8_t>(&cuda_true_column_data, true_column_data_pointer, static_cast<size_t>(num_data_));
           cuda_data_by_column_.emplace_back(cuda_true_column_data);
         } else if (bit_type == 16) {
           uint16_t* cuda_true_column_data = nullptr;
@@ -258,17 +241,18 @@ void CUDADataPartition::CopyColWiseData(const Dataset* train_data) {
       column_bit_type_.emplace_back(bit_type);
     } else {
       for (int sub_feature_index = 0; sub_feature_index < static_cast<int>(features_in_group[feature_group_index].size()); ++sub_feature_index) {
-        uint8_t bit_type = 0;
+        int8_t bit_type = 0;
         bool is_sparse = false;
         std::vector<BinIterator*> bin_iterator;
-        const uint8_t* column_data = train_data->GetColWiseData(feature_group_index, sub_feature_index, &bit_type, &is_sparse, &bin_iterator, num_threads_);
+        const void* column_data = train_data->GetColWiseData(feature_group_index, sub_feature_index, &bit_type, &is_sparse, &bin_iterator, num_threads_);
         if (column_data != nullptr) {
           CHECK(!is_sparse);
           if (bit_type == 4) {
             std::vector<uint8_t> true_column_data(num_data_, 0);
+            const uint8_t* true_column_data_pointer = reinterpret_cast<const uint8_t*>(column_data);
             #pragma omp parallel for schedule(static) num_threads(num_threads_)
             for (data_size_t i = 0; i < num_data_; ++i) {
-              true_column_data[i] = static_cast<uint8_t>((column_data[i >> 1] >> ((i & 1) << 2)) & 0xf);
+              true_column_data[i] = static_cast<uint8_t>((true_column_data_pointer[i >> 1] >> ((i & 1) << 2)) & 0xf);
             }
             bit_type = 8;
             uint8_t* cuda_true_column_data = nullptr;
@@ -276,7 +260,8 @@ void CUDADataPartition::CopyColWiseData(const Dataset* train_data) {
             cuda_data_by_column_.emplace_back(reinterpret_cast<void*>(cuda_true_column_data));
           } else if (bit_type == 8) {
             uint8_t* cuda_true_column_data = nullptr;
-            InitCUDAMemoryFromHostMemory<uint8_t>(&cuda_true_column_data, column_data, static_cast<size_t>(num_data_));
+            const uint8_t* true_column_data_pointer = reinterpret_cast<const uint8_t*>(column_data);
+            InitCUDAMemoryFromHostMemory<uint8_t>(&cuda_true_column_data, true_column_data_pointer, static_cast<size_t>(num_data_));
             cuda_data_by_column_.emplace_back(reinterpret_cast<void*>(cuda_true_column_data));
           } else if (bit_type == 16) {
             uint16_t* cuda_true_column_data = nullptr;
@@ -345,9 +330,10 @@ void CUDADataPartition::BeforeTrain(const data_size_t* data_indices) {
   if (data_indices == nullptr) {
     // no bagging
     LaunchFillDataIndicesBeforeTrain();
-    SetCUDAMemory<data_size_t>(cuda_leaf_num_data_, 0, static_cast<size_t>(num_leaves_));
-    SetCUDAMemory<data_size_t>(cuda_leaf_data_start_, 0, static_cast<size_t>(num_leaves_));
-    SetCUDAMemory<data_size_t>(cuda_leaf_data_end_, 0, static_cast<size_t>(num_leaves_));
+    SynchronizeCUDADevice();
+    SetCUDAMemoryOuter<data_size_t>(cuda_leaf_num_data_, 0, static_cast<size_t>(num_leaves_), __FILE__, __LINE__);
+    SetCUDAMemoryOuter<data_size_t>(cuda_leaf_data_start_, 0, static_cast<size_t>(num_leaves_), __FILE__, __LINE__);
+    SetCUDAMemoryOuter<data_size_t>(cuda_leaf_data_end_, 0, static_cast<size_t>(num_leaves_), __FILE__, __LINE__);
     SynchronizeCUDADevice();
     CopyFromCUDADeviceToCUDADevice<data_size_t>(cuda_leaf_num_data_, cuda_num_data_, 1);
     CopyFromCUDADeviceToCUDADevice<data_size_t>(cuda_leaf_data_end_, cuda_num_data_, 1);

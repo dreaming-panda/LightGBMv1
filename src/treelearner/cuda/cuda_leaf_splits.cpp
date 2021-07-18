@@ -11,7 +11,6 @@
 namespace LightGBM {
 
 CUDALeafSplits::CUDALeafSplits(const data_size_t num_data, const int leaf_index,
-  const score_t* cuda_gradients, const score_t* cuda_hessians,
   const int* cuda_num_data): num_data_(num_data), leaf_index_(leaf_index) {
   cuda_sum_of_gradients_ = nullptr;
   cuda_sum_of_hessians_ = nullptr;
@@ -19,8 +18,6 @@ CUDALeafSplits::CUDALeafSplits(const data_size_t num_data, const int leaf_index,
   cuda_gain_ = nullptr;
   cuda_leaf_value_ = nullptr;
 
-  cuda_gradients_ = cuda_gradients;
-  cuda_hessians_ = cuda_hessians;
   cuda_data_indices_in_leaf_ = nullptr;
   cuda_num_data_ = cuda_num_data;
 }
@@ -72,7 +69,9 @@ void CUDALeafSplits::InitValues() {
 }
 
 void CUDALeafSplits::InitValues(const data_size_t* cuda_data_indices_in_leaf, hist_t* cuda_hist_in_leaf,
-    double* root_sum_hessians) {
+    double* root_sum_hessians, const score_t* gradients, const score_t* hessians) {
+  cuda_gradients_ = gradients;
+  cuda_hessians_ = hessians;
   SetCUDAMemory<double>(cuda_sum_of_gradients_, 0, num_blocks_init_from_gradients_);
   SetCUDAMemory<double>(cuda_sum_of_hessians_, 0, num_blocks_init_from_gradients_);
   LaunchInitValuesKernal();

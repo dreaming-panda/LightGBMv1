@@ -472,6 +472,11 @@ void Metadata::LoadQueryWeights() {
   }
 }
 
+void Metadata::CreateCUDAMetadata() {
+  cuda_metadata_.reset(new CUDAMetadata());
+  cuda_metadata_->Init(label_, weights_, query_boundaries_, query_weights_, init_score_, queries_);
+}
+
 void Metadata::LoadFromMemory(const void* memory) {
   const char* mem_ptr = reinterpret_cast<const char*>(memory);
 

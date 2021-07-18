@@ -5,7 +5,7 @@
  */
 
 #ifdef USE_CUDA
-
+/*
 #include "cuda_ranking_objective.hpp"
 
 namespace LightGBM {
@@ -93,5 +93,5 @@ void CUDARankingObjective::TestGlobalArgSort() const {
 }
 
 }  // namespace LightGBM
-
+*/
 #endif  // USE_CUDA

@@ -31,7 +31,7 @@ namespace LightGBM {
 class CUDAHistogramConstructor {
  public:
   CUDAHistogramConstructor(const Dataset* train_data, const int num_leaves, const int num_threads,
-    const score_t* cuda_gradients, const score_t* cuda_hessians, const std::vector<uint32_t>& feature_hist_offsets,
+    const std::vector<uint32_t>& feature_hist_offsets,
     const int min_data_in_leaf, const double min_sum_hessian_in_leaf);
 
   void Init(const Dataset* train_data, TrainingShareStates* share_state);
@@ -43,7 +43,7 @@ class CUDAHistogramConstructor {
     const data_size_t* cuda_leaf_num_data, const data_size_t num_data_in_smaller_leaf, const data_size_t num_data_in_larger_leaf,
     const double sum_hessians_in_smaller_leaf, const double sum_hessians_in_larger_leaf);
 
-  void BeforeTrain();
+  void BeforeTrain(const score_t* gradients, const score_t* hessians);
 
   const hist_t* cuda_hist() const { return cuda_hist_; }
 
@@ -52,6 +52,12 @@ class CUDAHistogramConstructor {
   hist_t* cuda_hist_pointer() { return cuda_hist_; }
 
   const uint8_t* cuda_data() const { return cuda_data_uint8_t_; }
+
+  const uint8_t* cuda_data_uint8_t() const { return cuda_data_uint8_t_; }
+
+  const uint16_t* cuda_data_uint16_t() const { return cuda_data_uint16_t_; }
+
+  const uint32_t* cuda_data_uint32_t() const { return cuda_data_uint32_t_; }
 
   void TestAfterInit() {
     /*std::vector<uint8_t> test_data(data_.size(), 0);
@@ -144,8 +150,8 @@ class CUDAHistogramConstructor {
   bool is_sparse_;
   int num_feature_partitions_;
   int max_num_column_per_partition_;
-  uint8_t data_ptr_bit_type_;
-  uint8_t bit_type_;
+  int8_t data_ptr_bit_type_;
+  int8_t bit_type_;
   const Dataset* train_data_;
   std::vector<cudaStream_t> cuda_streams_;
   std::vector<int> need_fix_histogram_features_;

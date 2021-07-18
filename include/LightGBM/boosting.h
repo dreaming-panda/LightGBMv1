@@ -6,7 +6,9 @@
 #define LIGHTGBM_BOOSTING_H_
 
 #include <LightGBM/config.h>
+#include <LightGBM/cuda/cuda_tree.hpp>
 #include <LightGBM/meta.h>
+#include <LightGBM/tree.h>
 
 #include <string>
 #include <map>
@@ -314,6 +316,8 @@ class LIGHTGBM_EXPORT Boosting {
   static Boosting* CreateBoosting(const std::string& type, const char* filename);
 
   virtual bool IsLinear() const { return false; }
+
+  virtual void GetCUDAModel(std::vector<std::unique_ptr<CUDATree>>* /*cuda_models*/) const {}
 };
 
 class GBDTBase : public Boosting {

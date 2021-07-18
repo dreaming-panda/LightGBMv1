@@ -6,6 +6,7 @@
 #define LIGHTGBM_BOOSTING_GBDT_H_
 
 #include <LightGBM/boosting.h>
+#include <LightGBM/cuda/cuda_tree.hpp>
 #include <LightGBM/objective_function.h>
 #include <LightGBM/prediction_early_stop.h>
 #include <LightGBM/cuda/vector_cudahost.h>
@@ -440,7 +441,7 @@ class GBDT : public GBDTBase {
   * \brief eval results for one metric
 
   */
-  virtual std::vector<double> EvalOneMetric(const Metric* metric, const double* score) const;
+  virtual std::vector<double> EvalOneMetric(const Metric* metric, const double* score, const data_size_t num_data) const;
 
   /*!
   * \brief Print metric result of current iteration
@@ -450,6 +451,8 @@ class GBDT : public GBDTBase {
   std::string OutputMetric(int iter);
 
   double BoostFromAverage(int class_id, bool update_scorer);
+
+  void GetCUDAModel(std::vector<std::unique_ptr<CUDATree>>* cuda_models) const override;
 
   /*! \brief current iteration */
   int iter_;
@@ -495,6 +498,9 @@ class GBDT : public GBDTBase {
   /*! \brief Second order derivative of training data */
   std::vector<score_t, Common::AlignmentAllocator<score_t, kAlignedSize>> hessians_;
 #endif
+
+  score_t* gradients_pointer_;
+  score_t* hessians_pointer_;
 
   /*! \brief Store the indices of in-bag data */
   std::vector<data_size_t, Common::AlignmentAllocator<data_size_t, kAlignedSize>> bag_data_indices_;

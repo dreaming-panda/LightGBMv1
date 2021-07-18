@@ -10,7 +10,7 @@
 
 namespace LightGBM {
 
-__global__ void CalcInitScoreKernel_1_Binary(const label_t* cuda_labels, const data_size_t num_data, double* out_cuda_init_score) {
+__global__ void BoostFromScoreKernel_1_BinaryLogloss(const label_t* cuda_labels, const data_size_t num_data, double* out_cuda_init_score) {
   __shared__ label_t shared_label[CALC_INIT_SCORE_BLOCK_SIZE_BINARY];
   const unsigned int tid = threadIdx.x;
   const unsigned int i = (blockIdx.x * blockDim.x + tid) * NUM_DATA_THREAD_ADD_CALC_INIT_SCORE_BINARY;
@@ -33,24 +33,27 @@ __global__ void CalcInitScoreKernel_1_Binary(const label_t* cuda_labels, const d
   }
 }
 
-__global__ void CalcInitScoreKernel_2_Binary(double* out_cuda_init_score, const data_size_t num_data, const double sigmoid) {
+__global__ void BoostFromScoreKernel_2_BinaryLogloss(double* out_cuda_init_score, const data_size_t num_data, const double sigmoid) {
   const double suml = *out_cuda_init_score;
   const double sumw = static_cast<double>(num_data);
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    printf("******************************************* suml = %f sumw = %f *******************************************\n", suml, sumw);
+  }
   const double pavg = suml / sumw;
   const double init_score = log(pavg / (1.0f - pavg)) / sigmoid;
   *out_cuda_init_score = init_score;
 }
 
-void CUDABinaryObjective::LaunchCalcInitScoreKernel() {
+void CUDABinaryLogloss::LaunchBoostFromScoreKernel() const {
   const data_size_t num_data_per_block = CALC_INIT_SCORE_BLOCK_SIZE_BINARY * NUM_DATA_THREAD_ADD_CALC_INIT_SCORE_BINARY;
   const int num_blocks = (num_data_ + num_data_per_block - 1) / num_data_per_block;
-  CalcInitScoreKernel_1_Binary<<<num_blocks, CALC_INIT_SCORE_BLOCK_SIZE_BINARY>>>(cuda_labels_, num_data_, cuda_init_score_);
-  SynchronizeCUDADevice();
-  CalcInitScoreKernel_2_Binary<<<1, 1>>>(cuda_init_score_, num_data_, sigmoid_);
-  SynchronizeCUDADevice();
+  BoostFromScoreKernel_1_BinaryLogloss<<<num_blocks, CALC_INIT_SCORE_BLOCK_SIZE_BINARY>>>(cuda_label_, num_data_, cuda_boost_from_score_);
+  SynchronizeCUDADeviceOuter(__FILE__, __LINE__);
+  BoostFromScoreKernel_2_BinaryLogloss<<<1, 1>>>(cuda_boost_from_score_, num_data_, sigmoid_);
+  SynchronizeCUDADeviceOuter(__FILE__, __LINE__);
 }
 
-__global__ void GetGradientsKernel_Binary(const double* cuda_scores, const label_t* cuda_labels,
+__global__ void GetGradientsKernel_BinaryLogloss(const double* cuda_scores, const label_t* cuda_labels,
   const double sigmoid, const data_size_t num_data,
   score_t* cuda_out_gradients, score_t* cuda_out_hessians) {
   const data_size_t data_index = static_cast<data_size_t>(blockDim.x * blockIdx.x + threadIdx.x);
@@ -64,10 +67,15 @@ __global__ void GetGradientsKernel_Binary(const double* cuda_scores, const label
   }
 }
 
-void CUDABinaryObjective::LaunchGetGradientsKernel(const double* cuda_scores, score_t* cuda_out_gradients, score_t* cuda_out_hessians) {
+void CUDABinaryLogloss::LaunchGetGradientsKernel(const double* scores, score_t* gradients, score_t* hessians) const {
   const int num_blocks = (num_data_ + GET_GRADIENTS_BLOCK_SIZE_BINARY - 1) / GET_GRADIENTS_BLOCK_SIZE_BINARY;
-  GetGradientsKernel_Binary<<<num_blocks, GET_GRADIENTS_BLOCK_SIZE_BINARY>>>(cuda_scores, cuda_labels_, sigmoid_, num_data_,
-    cuda_out_gradients, cuda_out_hessians);
+  GetGradientsKernel_BinaryLogloss<<<num_blocks, GET_GRADIENTS_BLOCK_SIZE_BINARY>>>(
+    scores,
+    cuda_label_,
+    sigmoid_,
+    num_data_,
+    gradients,
+    hessians);
 }
 
 }  // namespace LightGBM

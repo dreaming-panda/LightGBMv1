@@ -22,7 +22,6 @@ namespace LightGBM {
 class CUDALeafSplits {
  public:
   CUDALeafSplits(const data_size_t num_data, const int leaf_index,
-    const score_t* cuda_gradients, const score_t* cuda_hessians,
     const int* cuda_num_data);
 
   CUDALeafSplits();
@@ -34,7 +33,7 @@ class CUDALeafSplits {
     hist_t* cuda_hist_in_leaf, const double* cuda_gain, const double* cuda_leaf_value);
 
   void InitValues(const data_size_t* cuda_data_indices_in_leaf, hist_t* cuda_hist_in_leaf,
-    double* root_sum_hessians);
+    double* root_sum_hessians, const score_t* gradients, const score_t* hessians);
 
   void InitValues();
 

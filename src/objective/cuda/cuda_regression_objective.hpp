@@ -8,7 +8,7 @@
 #define LIGHTGBM_NEW_CUDA_REGRESSION_OBJECTIVE_HPP_
 
 #ifdef USE_CUDA
-
+/*
 #define GET_GRADIENTS_BLOCK_SIZE_REGRESSION (1024)
 #define CALC_INIT_SCORE_BLOCK_SIZE_REGRESSION (1024)
 #define NUM_DATA_THREAD_ADD_CALC_INIT_SCORE_REGRESSION (6)
@@ -41,6 +41,6 @@ class CUDARegressionObjective : public CUDAObjective {
 };
 
 }  // namespace LightGBM
-
+*/
 #endif  // USE_CUDA
 #endif  // LIGHTGBM_NEW_CUDA_REGRESSION_OBJECTIVE_HPP_

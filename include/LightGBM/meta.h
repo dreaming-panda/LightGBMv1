@@ -62,6 +62,9 @@ std::function<void(const std::vector<std::pair<int, double>>&, double* output)>;
 using PredictSparseFunction =
 std::function<void(const std::vector<std::pair<int, double>>&, std::vector<std::unordered_map<int, double>>* output)>;
 
+using BatchPredictFunction =
+std::function<void(const double* data, const data_size_t num_data, double* output)>;
+
 typedef void(*ReduceFunction)(const char* input, char* output, int type_size, comm_size_t array_size);
 
 

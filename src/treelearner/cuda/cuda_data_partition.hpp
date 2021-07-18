@@ -14,6 +14,8 @@
 #include "new_cuda_utils.hpp"
 #include "cuda_leaf_splits.hpp"
 
+#include <fstream>
+
 #define FILL_INDICES_BLOCK_SIZE_DATA_PARTITION (1024)
 #define SPLIT_INDICES_BLOCK_SIZE_DATA_PARTITION (512)
 #define NUM_BANKS_DATA_PARTITION (32)
@@ -155,8 +157,6 @@ class CUDADataPartition {
 
   const data_size_t* cuda_leaf_num_data() const { return cuda_leaf_num_data_; }
 
-  //const data_size_t* cuda_leaf_num_data_offsets() const { return cuda_leaf_num_data_offsets_; }
-
   const data_size_t* cuda_data_indices() const { return cuda_data_indices_; }
 
   const int* cuda_cur_num_leaves() const { return cuda_cur_num_leaves_; }
@@ -166,8 +166,6 @@ class CUDADataPartition {
   const int* tree_inner_feature_index() const { return tree_inner_feature_index_; }
 
   const uint32_t* tree_threshold() const { return tree_threshold_; }
-
-  const double* tree_threshold_real() const { return tree_threshold_real_; }
 
   const double* tree_left_output() const { return tree_left_output_; }
 
@@ -402,6 +400,15 @@ class CUDADataPartition {
     const score_t* gradients,
     const score_t* hessians);
 
+  template <typename DATA_TYPE>
+  void OutputToFile(const std::string filename, const std::vector<DATA_TYPE>& data) const {
+    std::ofstream fout(filename.c_str());
+    for (size_t i = 0; i < data.size(); ++i) {
+      fout << data[i] << "\n";
+    }
+    fout.close();
+  }
+
   // Host memory
   const data_size_t num_data_;
   const int num_features_;
@@ -423,8 +430,6 @@ class CUDADataPartition {
   std::vector<uint8_t> column_bit_type_;
   std::vector<int> feature_index_to_column_index_;
   const Dataset* train_data_;
-  std::vector<std::vector<double>> bin_upper_bounds_;
-  std::vector<int> feature_num_bins_;
 
   // CUDA streams
   std::vector<cudaStream_t> cuda_streams_;
@@ -457,7 +462,6 @@ class CUDADataPartition {
   int* tree_split_leaf_index_;
   int* tree_inner_feature_index_;
   uint32_t* tree_threshold_;
-  double* tree_threshold_real_;
   double* tree_left_output_;
   double* tree_right_output_;
   data_size_t* tree_left_count_;
@@ -467,8 +471,6 @@ class CUDADataPartition {
   double* tree_gain_;
   uint8_t* tree_default_left_;
   double* data_partition_leaf_output_;
-  double* cuda_bin_upper_bounds_;
-  int* cuda_feature_num_bin_offsets_;
   // for debug
   double* cuda_gradients_sum_buffer_;
   double* cuda_hessians_sum_buffer_;

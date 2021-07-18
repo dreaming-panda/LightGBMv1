@@ -1093,6 +1093,10 @@ void CUDABestSplitFinder::LaunchFindBestFromAllSplitsKernel(const int* cuda_cur_
     (*leaf_best_split_default_left)[larger_leaf_index] = static_cast<uint8_t>(cpu_leaf_best_split_info_buffer[5]);
   }
   *best_leaf_index = cpu_leaf_best_split_info_buffer[6];
+  /*if (smaller_leaf_index == 0) {
+    Log::Warning("smaller_leaf_index = %d, best_split_feature = %d, best_split_threshold = %d",
+      smaller_leaf_index, cpu_leaf_best_split_info_buffer[0], cpu_leaf_best_split_info_buffer[1]);
+  }*/
 }
 
 }  // namespace LightGBM

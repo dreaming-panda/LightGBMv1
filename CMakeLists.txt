@@ -245,14 +245,14 @@ if(USE_CUDA)
     add_library(cuda_best_split_finder OBJECT src/treelearner/cuda/cuda_best_split_finder.cu)
     set_target_properties(cuda_best_split_finder PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 
-    add_library(cuda_binary_objective OBJECT src/treelearner/cuda/cuda_binary_objective.cu)
-    set_target_properties(cuda_binary_objective PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+    #add_library(cuda_binary_objective OBJECT src/treelearner/cuda/cuda_binary_objective.cu)
+    #set_target_properties(cuda_binary_objective PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 
-    add_library(cuda_regression_objective OBJECT src/treelearner/cuda/cuda_regression_objective.cu)
-    set_target_properties(cuda_regression_objective PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+    #add_library(cuda_regression_objective OBJECT src/treelearner/cuda/cuda_regression_objective.cu)
+    #set_target_properties(cuda_regression_objective PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 
-    add_library(cuda_ranking_objective OBJECT src/treelearner/cuda/cuda_ranking_objective.cu)
-    set_target_properties(cuda_ranking_objective PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+    #add_library(cuda_ranking_objective OBJECT src/treelearner/cuda/cuda_ranking_objective.cu)
+    #set_target_properties(cuda_ranking_objective PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 
     add_library(cuda_score_updater OBJECT src/treelearner/cuda/cuda_score_updater.cu)
     set_target_properties(cuda_score_updater PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
@@ -369,6 +369,15 @@ if(USE_CUDA)
     src/treelearner/*.cu
     src/treelearner/cuda/*.cpp
     src/treelearner/cuda/*.cu
+    src/io/cuda/*.cpp
+    src/io/cuda/*.cu
+    src/application/cuda/*.cu
+    src/application/cuda/*.cpp
+    src/cuda/*.cpp
+    src/boosting/cuda/*.cu
+    src/boosting/cuda/*.cpp
+    src/objective/cuda/*.cpp
+    src/objective/cuda/*.cu
 endif(USE_CUDA)
 )
 

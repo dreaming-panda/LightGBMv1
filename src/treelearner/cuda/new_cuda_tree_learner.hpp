@@ -14,10 +14,6 @@
 #include "cuda_data_partition.hpp"
 #include "cuda_best_split_finder.hpp"
 #include "cuda_centralized_info.hpp"
-#include "cuda_score_updater.hpp"
-#include "cuda_binary_objective.hpp"
-#include "cuda_regression_objective.hpp"
-#include "cuda_ranking_objective.hpp"
 
 namespace LightGBM {
 
@@ -38,6 +34,8 @@ class NewCUDATreeLearner: public SerialTreeLearner {
 
   void AddPredictionToScore(const Tree* tree, double* out_score) const override;
 
+  void Predict(const std::string predict_file, const std::string result_file) const;
+
  protected:
   void FindBestSplits(const Tree* tree) override;
 
@@ -50,8 +48,6 @@ class NewCUDATreeLearner: public SerialTreeLearner {
   void BeforeTrain() override;
 
   Tree* BuildTree(const int num_leaves);
-
-  void InitObjective();
 
   // number of GPUs
   int num_gpus_;
@@ -70,10 +66,6 @@ class NewCUDATreeLearner: public SerialTreeLearner {
   std::unique_ptr<CUDAHistogramConstructor> cuda_histogram_constructor_;
   // for best split information finding, given the histograms
   std::unique_ptr<CUDABestSplitFinder> cuda_best_split_finder_;
-
-  std::unique_ptr<CUDAScoreUpdater> cuda_score_updater_;
-
-  std::unique_ptr<CUDAObjective> cuda_objective_;
 
   std::vector<int> leaf_best_split_feature_;
   std::vector<uint32_t> leaf_best_split_threshold_;
