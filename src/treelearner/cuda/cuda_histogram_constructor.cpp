@@ -98,6 +98,16 @@ void CUDAHistogramConstructor::ConstructHistogramForLeaf(
   SynchronizeCUDADeviceOuter(__FILE__, __LINE__);
   global_timer.Start("CUDAHistogramConstructor::ConstructHistogramForLeaf::LaunchSubtractHistogramKernel");
   LaunchSubtractHistogramKernel(cuda_smaller_leaf_splits, cuda_larger_leaf_splits);
+  /*CUDALeafSplitsStruct host_smaller_leaf_splits;
+  CopyFromCUDADeviceToHostOuter<CUDALeafSplitsStruct>(&host_smaller_leaf_splits, cuda_smaller_leaf_splits, 1, __FILE__, __LINE__);
+  const hist_t* smaller_leaf_hist_ptr = host_smaller_leaf_splits.hist_in_leaf;
+  std::vector<hist_t> host_smaller_leaf_hist(200, 0.0f);
+  Log::Warning("before copy");
+  CopyFromCUDADeviceToHostOuter<hist_t>(host_smaller_leaf_hist.data(), smaller_leaf_hist_ptr, 200, __FILE__, __LINE__);
+  for (int i = 0; i < 100; ++i) {
+    Log::Warning("host_smaller_leaf_hist[%d] = %f", i, host_smaller_leaf_hist[i]);
+  }
+  Log::Warning("after copy");*/
   global_timer.Stop("CUDAHistogramConstructor::ConstructHistogramForLeaf::LaunchSubtractHistogramKernel");
 }
 

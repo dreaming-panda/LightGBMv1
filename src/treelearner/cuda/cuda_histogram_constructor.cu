@@ -8,6 +8,7 @@
 
 #include <LightGBM/cuda/cuda_algorithms.hpp>
 #include "cuda_histogram_constructor.hpp"
+#include "cuda_fp16.h"
 
 namespace LightGBM {
 
@@ -26,6 +27,7 @@ __global__ void CUDAConstructHistogramDenseKernel(
   const data_size_t num_data_per_thread = (num_data_in_smaller_leaf + dim_y - 1) / dim_y;
   const data_size_t* data_indices_ref = smaller_leaf_splits->data_indices_in_leaf;
   __shared__ float shared_hist[SHRAE_HIST_SIZE];
+  __half local_hist[32] {0.0f};
   const unsigned int num_threads_per_block = blockDim.x * blockDim.y;
   const int partition_column_start = feature_partition_column_index_offsets[blockIdx.x];
   const int partition_column_end = feature_partition_column_index_offsets[blockIdx.x + 1];
@@ -50,23 +52,42 @@ __global__ void CUDAConstructHistogramDenseKernel(
   data_size_t inner_data_index = static_cast<data_size_t>(threadIdx_y);
   const int column_index = static_cast<int>(threadIdx.x) + partition_column_start;
   if (threadIdx.x < static_cast<unsigned int>(num_columns_in_partition)) {
-    float* shared_hist_ptr = shared_hist + (column_hist_offsets[column_index] << 1);
+    //float* shared_hist_ptr = shared_hist + (column_hist_offsets[column_index] << 1);
     for (data_size_t i = 0; i < num_iteration_this; ++i) {
       const data_size_t data_index = data_indices_ref_this_block[inner_data_index];
       const score_t grad = cuda_gradients[data_index];
       const score_t hess = cuda_hessians[data_index];
       const uint32_t bin = static_cast<uint32_t>(data_ptr[data_index * num_columns_in_partition + threadIdx.x]);
       const uint32_t pos = bin << 1;
-      float* pos_ptr = shared_hist_ptr + pos;
-      atomicAdd_block(pos_ptr, grad);
-      atomicAdd_block(pos_ptr + 1, hess);
+      //float* pos_ptr = shared_hist_ptr + pos;
+      //atomicAdd_block(pos_ptr, grad);
+      //atomicAdd_block(pos_ptr + 1, hess);
+      /*if (pos > 512 || (pos + 1 > 512)) {
+        printf("error pos = %d\n");
+      }*/
+      local_hist[pos] += __half(grad);
+      local_hist[pos + 1] += __half(hess);
       inner_data_index += blockDim.y;
     }
-  }
-  __syncthreads();
-  hist_t* feature_histogram_ptr = smaller_leaf_splits->hist_in_leaf + (partition_hist_start << 1);
-  for (unsigned int i = thread_idx; i < num_items_in_partition; i += num_threads_per_block) {
-    atomicAdd_system(feature_histogram_ptr + i, shared_hist[i]);
+    float* shared_hist_ptr = shared_hist + (column_hist_offsets[column_index] << 1);
+    const unsigned int num_items_in_column = (column_index == (partition_column_end - 1) ? (num_items_in_partition - 2 * column_hist_offsets[column_index]) :
+                                            2 * (column_hist_offsets[column_index + 1] - column_hist_offsets[column_index]));
+    //printf("column_index = %d, num_items_in_column = %d\n", column_index, num_items_in_column);
+    for (unsigned int i = 0; i < num_items_in_column; ++i) {
+      const unsigned int offset_i = (i + threadIdx_y) % num_items_in_column;
+      atomicAdd_block(shared_hist_ptr + offset_i, local_hist[offset_i]);//);
+    }
+    /*if (threadIdx.x == 0 && blockIdx.x == 0 && threadIdx.y == 0 && blockIdx.y == 0) {
+      printf("num_iteration_this = %d\n", num_iteration_this);
+      for (int i = 0; i < 100; ++i) {
+        printf("local_hist[%d] = %f\n", i, local_hist[i]);
+      }
+    }*/
+    __syncthreads();
+    hist_t* feature_histogram_ptr = smaller_leaf_splits->hist_in_leaf + (partition_hist_start << 1);
+    for (unsigned int i = thread_idx; i < num_items_in_partition; i += num_threads_per_block) {
+      atomicAdd_system(feature_histogram_ptr + i, shared_hist[i]);
+    }
   }
 }
 
