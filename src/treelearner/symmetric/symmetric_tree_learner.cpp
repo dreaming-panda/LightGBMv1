@@ -11,8 +11,13 @@ namespace LightGBM {
 
 SymmetricTreeLearner::SymmetricTreeLearner(const Config* config): 
 SerialTreeLearner(config),
-max_depth_(config->max_depth), max_num_leaves_(1 << max_depth_),
-num_threads_(OMP_NUM_THREADS()) {}
+max_depth_(config->max_depth),
+num_threads_(OMP_NUM_THREADS()) {
+  if (max_depth_ <= 0) {
+    Log::Fatal("To use symmetric_tree, please specify a positive max_depth.");
+  }
+  max_num_leaves_ = (1 << max_depth_);
+}
 
 void SymmetricTreeLearner::Init(const Dataset* train_data, bool is_constant_hessian) {
   train_data_ = train_data;

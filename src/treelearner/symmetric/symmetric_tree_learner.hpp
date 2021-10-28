@@ -64,8 +64,8 @@ class SymmetricTreeLearner : public SerialTreeLearner {
   std::vector<FeatureHistogram*> level_feature_histograms_;
   std::vector<int> leaf_indices_in_cur_level_;
   std::vector<std::unique_ptr<LeafSplits>> level_leaf_splits_;
-  const int max_depth_;
-  const int max_num_leaves_;
+  int max_depth_;
+  int max_num_leaves_;
   const int num_threads_;
 
   int cur_level_;
