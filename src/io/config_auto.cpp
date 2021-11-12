@@ -302,6 +302,8 @@ const std::unordered_set<std::string>& Config::parameter_set() {
   "gpu_platform_id",
   "gpu_device_id",
   "gpu_use_dp",
+  "gpu_use_discretized_grad",
+  "gpu_grad_discretize_bins",
   "num_gpu",
   });
   return params;
@@ -628,6 +630,10 @@ void Config::GetMembersFromString(const std::unordered_map<std::string, std::str
 
   GetBool(params, "gpu_use_dp", &gpu_use_dp);
 
+  GetBool(params, "gpu_use_discretized_grad", &gpu_use_discretized_grad);
+
+  GetInt(params, "gpu_grad_discretize_bins", &gpu_grad_discretize_bins);
+
   GetInt(params, "num_gpu", &num_gpu);
   CHECK_GT(num_gpu, 0);
 }
@@ -738,6 +744,8 @@ std::string Config::SaveMembersToString() const {
   str_buf << "[gpu_platform_id: " << gpu_platform_id << "]\n";
   str_buf << "[gpu_device_id: " << gpu_device_id << "]\n";
   str_buf << "[gpu_use_dp: " << gpu_use_dp << "]\n";
+  str_buf << "[gpu_use_discretized_grad: " << gpu_use_discretized_grad << "]\n";
+  str_buf << "[gpu_grad_discretize_bins: " << gpu_grad_discretize_bins << "]\n";
   str_buf << "[num_gpu: " << num_gpu << "]\n";
   return str_buf.str();
 }

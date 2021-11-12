@@ -5,7 +5,6 @@
  */
 
 #include <LightGBM/cuda/cuda_objective_function.hpp>
-#include "cuda_binary_objective.hpp"
 
 namespace LightGBM {
 

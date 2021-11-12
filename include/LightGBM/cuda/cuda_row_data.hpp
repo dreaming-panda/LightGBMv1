@@ -26,7 +26,7 @@ class CUDARowData {
  public:
   CUDARowData(const Dataset* train_data,
               const TrainingShareStates* train_share_state,
-              const int gpu_device_id, const bool gpu_use_dp);
+              const int gpu_device_id, const bool gpu_use_dp, const bool gpu_use_discretized_grad);
 
   ~CUDARowData();
 
@@ -100,8 +100,12 @@ class CUDARowData {
                       ROW_PTR_TYPE** cuda_row_ptr,
                       ROW_PTR_TYPE** cuda_partition_ptr);
 
+  /*! \brief CUDA device ID */
+  int gpu_device_id_;
   /*! \brief whether to use double-precision numbers in shared memory histograms */
   bool use_dp_;
+  /*! \brief whether to use discretized gradients */
+  bool gpu_use_discretized_grad_;
   /*! \brief histogram bin number in shared memory */
   int shared_hist_size_;
   /*! \brief number of threads to use */
@@ -136,8 +140,6 @@ class CUDARowData {
   uint64_t num_total_elements_;
   /*! \brief used when bagging with column subset, the size of maximum number of feature partitions */
   int cur_num_feature_partition_buffer_size_;
-  /*! \brief CUDA device ID */
-  int gpu_device_id_;
   /*! \brief index of partitions with large bins that its histogram cannot fit into shared memory, each large bin partition contains a single column */
   std::vector<int> large_bin_partitions_;
   /*! \brief index of partitions with small bins */

@@ -19,11 +19,9 @@
 
 #define NUM_DATA_PER_THREAD (400)
 #define NUM_THRADS_PER_BLOCK (504)
-#define NUM_FEATURE_PER_THREAD_GROUP (28)
 #define SUBTRACT_BLOCK_SIZE (1024)
 #define FIX_HISTOGRAM_SHARED_MEM_SIZE (1024)
 #define FIX_HISTOGRAM_BLOCK_SIZE (512)
-#define USED_HISTOGRAM_BUFFER_NUM (8)
 
 namespace LightGBM {
 
@@ -37,7 +35,8 @@ class CUDAHistogramConstructor {
     const int min_data_in_leaf,
     const double min_sum_hessian_in_leaf,
     const int gpu_device_id,
-    const bool gpu_use_dp);
+    const bool gpu_use_dp,
+    const bool gpu_use_discretized_grad);
 
   ~CUDAHistogramConstructor();
 
@@ -50,6 +49,10 @@ class CUDAHistogramConstructor {
     const data_size_t num_data_in_larger_leaf,
     const double sum_hessians_in_smaller_leaf,
     const double sum_hessians_in_larger_leaf);
+
+  void SubtractHistogramForLeaf(
+    const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
+    const CUDALeafSplitsStruct* cuda_larger_leaf_splits);
 
   void ResetTrainingData(const Dataset* train_data, TrainingShareStates* share_states);
 
@@ -79,6 +82,10 @@ class CUDAHistogramConstructor {
 
   template <typename HIST_TYPE, int SHARED_HIST_SIZE>
   void LaunchConstructHistogramKernelInner(
+    const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
+    const data_size_t num_data_in_smaller_leaf);
+
+  void LaunchConstructDiscretizedHistogramKernel(
     const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
     const data_size_t num_data_in_smaller_leaf);
 
@@ -151,6 +158,7 @@ class CUDAHistogramConstructor {
 
   const int gpu_device_id_;
   const bool gpu_use_dp_;
+  const bool gpu_use_discretized_grad_;
 };
 
 }  // namespace LightGBM

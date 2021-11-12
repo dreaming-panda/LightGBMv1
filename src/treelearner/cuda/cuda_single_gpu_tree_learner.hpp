@@ -16,6 +16,7 @@
 #include "cuda_data_partition.hpp"
 #include "cuda_best_split_finder.hpp"
 
+#include "cuda_gradient_discretizer.hpp"
 #include "../serial_tree_learner.h"
 
 namespace LightGBM {
@@ -84,6 +85,7 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
   std::unique_ptr<CUDAHistogramConstructor> cuda_histogram_constructor_;
   // for best split information finding, given the histograms
   std::unique_ptr<CUDABestSplitFinder> cuda_best_split_finder_;
+  std::unique_ptr<CUDAGradientDiscretizer> cuda_gradient_discretizer_;
 
   std::vector<int> leaf_best_split_feature_;
   std::vector<uint32_t> leaf_best_split_threshold_;
