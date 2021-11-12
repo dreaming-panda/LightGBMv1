@@ -394,6 +394,18 @@ class GBDT : public GBDTBase {
 
   bool IsLinear() const override { return linear_tree_; }
 
+  const std::vector<std::unique_ptr<Tree>>& models() const override { return models_; }
+
+  int num_tree_per_iteration() const override { return num_tree_per_iteration_; }
+
+  virtual std::function<void(data_size_t, const double*, double*)> GetCUDAConvertOutputFunc() const {
+    if (objective_function_ != nullptr) {
+      return objective_function_->GetCUDAConvertOutputFunc();
+    } else {
+      return [] (data_size_t, const double*, double*) {};
+    }
+  }
+
  protected:
   virtual bool GetIsConstHessian(const ObjectiveFunction* objective_function) {
     if (objective_function != nullptr) {

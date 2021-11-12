@@ -341,7 +341,7 @@ class RegressionHuberLoss: public RegressionL2loss {
     return "huber";
   }
 
- private:
+ protected:
   /*! \brief delta for Huber loss */
   double alpha_;
 };
@@ -386,7 +386,7 @@ class RegressionFairLoss: public RegressionL2loss {
     return false;
   }
 
- private:
+ protected:
   /*! \brief c for Fair loss */
   double c_;
 };
@@ -470,7 +470,7 @@ class RegressionPoissonLoss: public RegressionL2loss {
     return false;
   }
 
- private:
+ protected:
   /*! \brief used to safeguard optimization */
   double max_delta_step_;
 };
@@ -565,7 +565,7 @@ class RegressionQuantileloss : public RegressionL2loss {
     }
   }
 
- private:
+ protected:
   score_t alpha_;
 };
 
@@ -665,7 +665,7 @@ class RegressionMAPELOSS : public RegressionL1loss {
     return true;
   }
 
- private:
+ protected:
   std::vector<label_t> label_weight_;
 };
 
@@ -743,7 +743,7 @@ class RegressionTweedieLoss: public RegressionPoissonLoss {
     return "tweedie";
   }
 
- private:
+ protected:
   double rho_;
 };
 
