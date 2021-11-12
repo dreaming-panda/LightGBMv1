@@ -269,33 +269,11 @@ void CUDADataPartition::UpdateTrainScore(const Tree* tree, double* scores) {
     cuda_tree_ptr.reset(new CUDATree(tree));
     cuda_tree = cuda_tree_ptr.get();
   }
-  const data_size_t num_data_in_root = root_num_data();
   if (use_bagging_) {
     // we need restore the order of indices in cuda_data_indices_
     CopyFromHostToCUDADevice<data_size_t>(cuda_data_indices_, used_indices_, static_cast<size_t>(num_used_indices_), __FILE__, __LINE__);
   }
-  LaunchAddPredictionToScoreKernel(cuda_tree->cuda_leaf_value(), cuda_add_train_score_);
-  CopyFromCUDADeviceToHost<double>(add_train_score_.data(),
-    cuda_add_train_score_, static_cast<size_t>(num_data_in_root), __FILE__, __LINE__);
-  if (!use_bagging_) {
-    OMP_INIT_EX();
-    #pragma omp parallel for schedule(static) num_threads(num_threads_)
-    for (data_size_t data_index = 0; data_index < num_data_in_root; ++data_index) {
-      OMP_LOOP_EX_BEGIN();
-      scores[data_index] += add_train_score_[data_index];
-      OMP_LOOP_EX_END();
-    }
-    OMP_THROW_EX();
-  } else {
-    OMP_INIT_EX();
-    #pragma omp parallel for schedule(static) num_threads(num_threads_)
-    for (data_size_t data_index = 0; data_index < num_data_in_root; ++data_index) {
-      OMP_LOOP_EX_BEGIN();
-      scores[used_indices_[data_index]] += add_train_score_[data_index];
-      OMP_LOOP_EX_END();
-    }
-    OMP_THROW_EX();
-  }
+  LaunchAddPredictionToScoreKernel(cuda_tree->cuda_leaf_value(), scores);
 }
 
 void CUDADataPartition::CalcBlockDim(const data_size_t num_data_in_leaf) {

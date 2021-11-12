@@ -356,6 +356,8 @@ if(USE_CUDA)
     src/treelearner/cuda/*.cu
     src/objective/cuda/*.cpp
     src/objective/cuda/*.cu
+    src/boosting/cuda/*.cpp
+    src/boosting/cuda/*.cu
     src/io/cuda/*.cu
     src/io/cuda/*.cpp
     src/cuda/*.cpp

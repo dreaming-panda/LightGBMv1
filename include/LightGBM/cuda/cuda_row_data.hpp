@@ -18,7 +18,6 @@
 
 #include "../train_share_states.h"
 
-#define SHRAE_HIST_SIZE (6144)
 #define COPY_SUBROW_BLOCK_SIZE_ROW_DATA (1024)
 
 namespace LightGBM {
@@ -26,7 +25,8 @@ namespace LightGBM {
 class CUDARowData {
  public:
   CUDARowData(const Dataset* train_data,
-              const TrainingShareStates* train_share_state, const int gpu_device_id);
+              const TrainingShareStates* train_share_state,
+              const int gpu_device_id, const bool gpu_use_dp);
 
   ~CUDARowData();
 
@@ -41,6 +41,10 @@ class CUDARowData {
     const data_size_t num_used_indices, const std::vector<bool>& is_feature_used, const Dataset* train_data);
 
   int NumLargeBinPartition() const { return static_cast<int>(large_bin_partitions_.size()); }
+
+  bool use_dp() const { return use_dp_; }
+
+  int shared_hist_size() const { return shared_hist_size_; }
 
   int num_feature_partitions() const { return num_feature_partitions_; }
 
@@ -96,6 +100,10 @@ class CUDARowData {
                       ROW_PTR_TYPE** cuda_row_ptr,
                       ROW_PTR_TYPE** cuda_partition_ptr);
 
+  /*! \brief whether to use double-precision numbers in shared memory histograms */
+  bool use_dp_;
+  /*! \brief histogram bin number in shared memory */
+  int shared_hist_size_;
   /*! \brief number of threads to use */
   int num_threads_;
   /*! \brief number of training data */

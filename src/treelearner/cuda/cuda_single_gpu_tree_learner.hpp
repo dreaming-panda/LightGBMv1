@@ -40,7 +40,7 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
   void AddPredictionToScore(const Tree* tree, double* out_score) const override;
 
   void RenewTreeOutput(Tree* tree, const ObjectiveFunction* obj, std::function<double(const label_t*, int)> residual_getter,
-                       data_size_t total_num_data, const data_size_t* bag_indices, data_size_t bag_cnt) const override;
+                       const double* score, data_size_t total_num_data, const data_size_t* bag_indices, data_size_t bag_cnt) const override;
 
   void ResetConfig(const Config* config) override;
 
@@ -111,11 +111,6 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
   size_t* cuda_block_bitset_len_buffer_;
   int* cuda_categorical_bin_to_value_;
   int* cuda_categorical_bin_offsets_;
-
-  /*! \brief gradients on CUDA */
-  score_t* cuda_gradients_;
-  /*! \brief hessians on CUDA */
-  score_t* cuda_hessians_;
 };
 
 }  // namespace LightGBM

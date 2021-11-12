@@ -17,7 +17,6 @@
 
 #include "cuda_leaf_splits.hpp"
 
-#define SHRAE_HIST_SIZE (6144)
 #define NUM_DATA_PER_THREAD (400)
 #define NUM_THRADS_PER_BLOCK (504)
 #define NUM_FEATURE_PER_THREAD_GROUP (28)
@@ -37,7 +36,8 @@ class CUDAHistogramConstructor {
     const std::vector<uint32_t>& feature_hist_offsets,
     const int min_data_in_leaf,
     const double min_sum_hessian_in_leaf,
-    const int gpu_device_id);
+    const int gpu_device_id,
+    const bool gpu_use_dp);
 
   ~CUDAHistogramConstructor();
 
@@ -74,6 +74,11 @@ class CUDAHistogramConstructor {
     const data_size_t num_data_in_smaller_leaf);
 
   void LaunchConstructHistogramKernel(
+    const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
+    const data_size_t num_data_in_smaller_leaf);
+
+  template <typename HIST_TYPE, int SHARED_HIST_SIZE>
+  void LaunchConstructHistogramKernelInner(
     const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
     const data_size_t num_data_in_smaller_leaf);
 
@@ -145,6 +150,7 @@ class CUDAHistogramConstructor {
   const score_t* cuda_hessians_;
 
   const int gpu_device_id_;
+  const bool gpu_use_dp_;
 };
 
 }  // namespace LightGBM

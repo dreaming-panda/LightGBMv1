@@ -986,7 +986,7 @@ void CUDADataPartition::LaunchSplitInnerKernel(
 
 template <bool USE_BAGGING>
 __global__ void AddPredictionToScoreKernel(
-  const data_size_t* data_indices_in_leaf,
+  const data_size_t* used_data_indices,
   const double* leaf_value, double* cuda_scores,
   const int* cuda_data_index_to_leaf_index, const data_size_t num_data) {
   const unsigned int threadIdx_x = threadIdx.x;
@@ -995,14 +995,14 @@ __global__ void AddPredictionToScoreKernel(
   const data_size_t local_data_index = static_cast<data_size_t>(blockIdx_x * blockDim_x + threadIdx_x);
   if (local_data_index < num_data) {
     if (USE_BAGGING) {
-      const data_size_t global_data_index = data_indices_in_leaf[local_data_index];
+      const data_size_t global_data_index = used_data_indices[local_data_index];
       const int leaf_index = cuda_data_index_to_leaf_index[global_data_index];
       const double leaf_prediction_value = leaf_value[leaf_index];
-      cuda_scores[local_data_index] = leaf_prediction_value;
+      cuda_scores[global_data_index] += leaf_prediction_value;
     } else {
       const int leaf_index = cuda_data_index_to_leaf_index[local_data_index];
       const double leaf_prediction_value = leaf_value[leaf_index];
-      cuda_scores[local_data_index] = leaf_prediction_value;
+      cuda_scores[local_data_index] += leaf_prediction_value;
     }
   }
 }
