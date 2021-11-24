@@ -115,6 +115,97 @@ __global__ void SplitKernel(  // split information
   }
 }
 
+__global__ void SplitKernelLaunch(
+  CUDASplitInfo* const* best_split_info_pointer,
+  const MissingType* cuda_feature_missing_type,
+  const BinType* cuda_feature_bin_type,
+  const int* cuda_real_feature_index,
+  const int* cuda_numerical_bin_offsets,
+  const double* cuda_feature_real_threshold,
+  const int num_leaves,
+  int* leaf_parent,
+  int* leaf_depth,
+  int* left_child,
+  int* right_child,
+  int* split_feature_inner,
+  int* split_feature,
+  float* split_gain,
+  double* internal_weight,
+  double* internal_value,
+  data_size_t* internal_count,
+  double* leaf_weight,
+  double* leaf_value,
+  data_size_t* leaf_count,
+  int8_t* decision_type,
+  uint32_t* threshold_in_bin,
+  double* threshold) {
+  const CUDASplitInfo* best_split_info = *best_split_info_pointer;
+  const int inner_feature_index = best_split_info->inner_feature_index;
+  cudaStream_t cuda_stream;
+  cudaStreamCreateWithFlags(&cuda_stream, cudaStreamNonBlocking);
+  if (cuda_feature_bin_type[inner_feature_index] == BinType::NumericalBin) {
+    const int offset = cuda_numerical_bin_offsets[inner_feature_index];
+    SplitKernel<<<3, 5, 0, cuda_stream>>>(
+      best_split_info->leaf_index,
+      cuda_real_feature_index[inner_feature_index],
+      cuda_feature_real_threshold[offset + best_split_info->threshold],
+      cuda_feature_missing_type[inner_feature_index],
+      best_split_info,
+      num_leaves,
+      leaf_parent,
+      leaf_depth,
+      left_child,
+      right_child,
+      split_feature_inner,
+      split_feature,
+      split_gain,
+      internal_weight,
+      internal_value,
+      internal_count,
+      leaf_weight,
+      leaf_value,
+      leaf_count,
+      decision_type,
+      threshold_in_bin,
+      threshold);
+  } else {
+    // TODO
+  }
+}
+
+void CUDATree::LaunchSplitKernel(
+  CUDASplitInfo* const* best_split_info,
+  const MissingType* cuda_feature_missing_type,
+  const BinType* cuda_feature_bin_type,
+  const int* cuda_real_feature_index,
+  const int* cuda_numerical_bin_offsets,
+  const double* cuda_feature_real_threshold) {
+  SplitKernelLaunch<<<1, 1, 0, cuda_stream_>>>(
+    best_split_info,
+    cuda_feature_missing_type,
+    cuda_feature_bin_type,
+    cuda_real_feature_index,
+    cuda_numerical_bin_offsets,
+    cuda_feature_real_threshold,
+    num_leaves_,
+    cuda_leaf_parent_,
+    cuda_leaf_depth_,
+    cuda_left_child_,
+    cuda_right_child_,
+    cuda_split_feature_inner_,
+    cuda_split_feature_,
+    cuda_split_gain_,
+    cuda_internal_weight_,
+    cuda_internal_value_,
+    cuda_internal_count_,
+    cuda_leaf_weight_,
+    cuda_leaf_value_,
+    cuda_leaf_count_,
+    cuda_decision_type_,
+    cuda_threshold_in_bin_,
+    cuda_threshold_);
+}
+
 void CUDATree::LaunchSplitKernel(const int leaf_index,
                                  const int real_feature_index,
                                  const double real_threshold,

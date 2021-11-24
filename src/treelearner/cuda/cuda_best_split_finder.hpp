@@ -61,26 +61,11 @@ class CUDABestSplitFinder {
 
   void FindBestSplitsForLeaf(
     const CUDALeafSplitsStruct* smaller_leaf_splits,
-    const CUDALeafSplitsStruct* larger_leaf_splits,
-    const int smaller_leaf_index,
-    const int larger_leaf_index,
-    const data_size_t num_data_in_smaller_leaf,
-    const data_size_t num_data_in_larger_leaf,
-    const double sum_hessians_in_smaller_leaf,
-    const double sum_hessians_in_larger_leaf);
+    const CUDALeafSplitsStruct* larger_leaf_splits);
 
-  const CUDASplitInfo* FindBestFromAllSplits(
+  CUDASplitInfo* const* FindBestFromAllSplits(
     const int cur_num_leaves,
-    const int smaller_leaf_index,
-    const int larger_leaf_index,
-    int* smaller_leaf_best_split_feature,
-    uint32_t* smaller_leaf_best_split_threshold,
-    uint8_t* smaller_leaf_best_split_default_left,
-    int* larger_leaf_best_split_feature,
-    uint32_t* larger_leaf_best_split_threshold,
-    uint8_t* larger_leaf_best_split_default_left,
-    int* best_leaf_index,
-    int* num_cat_threshold);
+    int* to_continue);
 
   void ResetTrainingData(
     const hist_t* cuda_hist,
@@ -93,11 +78,7 @@ class CUDABestSplitFinder {
 
   #define LaunchFindBestSplitsForLeafKernel_PARAMS \
     const CUDALeafSplitsStruct* smaller_leaf_splits, \
-    const CUDALeafSplitsStruct* larger_leaf_splits, \
-    const int smaller_leaf_index, \
-    const int larger_leaf_index, \
-    const bool is_smaller_leaf_valid, \
-    const bool is_larger_leaf_valid
+    const CUDALeafSplitsStruct* larger_leaf_splits
 
   void LaunchFindBestSplitsForLeafKernel(LaunchFindBestSplitsForLeafKernel_PARAMS);
 
@@ -110,26 +91,13 @@ class CUDABestSplitFinder {
   template <bool USE_RAND, bool USE_L1, bool USE_SMOOTHING>
   void LaunchFindBestSplitsForLeafKernelInner2(LaunchFindBestSplitsForLeafKernel_PARAMS);
 
-  #undef LaunchFindBestSplitsForLeafKernel_PARAMS
+  void LaunchSyncBestSplitForLeafKernel(LaunchFindBestSplitsForLeafKernel_PARAMS);
 
-  void LaunchSyncBestSplitForLeafKernel(
-    const int host_smaller_leaf_index,
-    const int host_larger_leaf_index,
-    const bool is_smaller_leaf_valid,
-    const bool is_larger_leaf_valid);
+  #undef LaunchFindBestSplitsForLeafKernel_PARAMS
 
   void LaunchFindBestFromAllSplitsKernel(
     const int cur_num_leaves,
-    const int smaller_leaf_index,
-    const int larger_leaf_index,
-    int* smaller_leaf_best_split_feature,
-    uint32_t* smaller_leaf_best_split_threshold,
-    uint8_t* smaller_leaf_best_split_default_left,
-    int* larger_leaf_best_split_feature,
-    uint32_t* larger_leaf_best_split_threshold,
-    uint8_t* larger_leaf_best_split_default_left,
-    int* best_leaf_index,
-    data_size_t* num_cat_threshold);
+    int* best_leaf_index);
 
   void AllocateCatVectors(CUDASplitInfo* cuda_split_infos, uint32_t* cat_threshold_vec, int* cat_threshold_real_vec, size_t len);
 
@@ -182,6 +150,9 @@ class CUDABestSplitFinder {
   CUDASplitInfo* cuda_best_split_info_;
   // best split information buffer, to be copied to host
   int* cuda_best_split_info_buffer_;
+  // best split found
+  CUDASplitInfo** cuda_best_split_found_;
+  int* cuda_best_leaf_index_;
   // find best split task information
   CUDAVector<SplitFindTask> cuda_split_find_tasks_;
   int8_t* cuda_is_feature_used_bytree_;

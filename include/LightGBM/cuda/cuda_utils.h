@@ -58,6 +58,14 @@ void CopyFromCUDADeviceToHost(T* dst_ptr, const T* src_ptr, size_t size, const c
 }
 
 template <typename T>
+__device__ void CopyFromCUDADeviceToHostOnDevice(T* dst_ptr, const T* src_ptr, size_t size, cudaStream_t stream) {
+  void* void_dst_ptr = reinterpret_cast<void*>(dst_ptr);
+  const void* void_src_ptr = reinterpret_cast<const void*>(src_ptr);
+  size_t size_in_bytes = size * sizeof(T);
+  cudaMemcpyAsync(void_dst_ptr, void_src_ptr, size_in_bytes, cudaMemcpyDeviceToHost, stream);
+}
+
+template <typename T>
 void CopyFromCUDADeviceToHostAsync(T* dst_ptr, const T* src_ptr, size_t size, cudaStream_t stream, const char* file, const int line) {
   void* void_dst_ptr = reinterpret_cast<void*>(dst_ptr);
   const void* void_src_ptr = reinterpret_cast<const void*>(src_ptr);

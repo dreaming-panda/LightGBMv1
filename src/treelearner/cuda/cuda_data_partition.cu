@@ -404,23 +404,170 @@ void CUDADataPartition::LaunchGenDataToLeftBitVectorKernelInner3(
   }
 }
 
-void CUDADataPartition::LaunchGenDataToLeftBitVectorKernel(
-  const data_size_t num_data_in_leaf,
-  const int split_feature_index,
-  const uint32_t split_threshold,
-  const uint8_t split_default_left,
-  const data_size_t leaf_data_start,
+__device__ void CUDADataPartition::CalcBlockDim(const data_size_t num_data_in_leaf, int* grid_dim, int* block_dim) {
+  const int min_num_blocks = num_data_in_leaf <= 100 ? 1 : 80;
+  const int num_blocks = max(min_num_blocks, (num_data_in_leaf + SPLIT_INDICES_BLOCK_SIZE_DATA_PARTITION - 1) / SPLIT_INDICES_BLOCK_SIZE_DATA_PARTITION);
+  int split_indices_block_size_data_partition = (num_data_in_leaf + num_blocks - 1) / num_blocks - 1;
+  int split_indices_block_size_data_partition_aligned = 1;
+  while (split_indices_block_size_data_partition > 0) {
+    split_indices_block_size_data_partition_aligned <<= 1;
+    split_indices_block_size_data_partition >>= 1;
+  }
+  const int num_blocks_final = (num_data_in_leaf + split_indices_block_size_data_partition_aligned - 1) / split_indices_block_size_data_partition_aligned;
+  *grid_dim = num_blocks_final;
+  *block_dim = split_indices_block_size_data_partition_aligned;
+}
+
+
+__global__ void AggregateBlockOffsetKernel0(
   const int left_leaf_index,
-  const int right_leaf_index) {
-  const bool missing_is_zero = static_cast<bool>(cuda_column_data_->feature_missing_is_zero(split_feature_index));
-  const bool missing_is_na = static_cast<bool>(cuda_column_data_->feature_missing_is_na(split_feature_index));
-  const bool mfb_is_zero = static_cast<bool>(cuda_column_data_->feature_mfb_is_zero(split_feature_index));
-  const bool mfb_is_na = static_cast<bool>(cuda_column_data_->feature_mfb_is_na(split_feature_index));
-  const uint32_t default_bin = cuda_column_data_->feature_default_bin(split_feature_index);
-  const uint32_t most_freq_bin = cuda_column_data_->feature_most_freq_bin(split_feature_index);
-  const uint32_t min_bin = cuda_column_data_->feature_min_bin(split_feature_index);
-  const uint32_t max_bin = cuda_column_data_->feature_max_bin(split_feature_index);
-  uint32_t th = split_threshold + min_bin;
+  const int right_leaf_index,
+  data_size_t* block_to_left_offset_buffer,
+  data_size_t* block_to_right_offset_buffer, data_size_t* cuda_leaf_data_start,
+  data_size_t* cuda_leaf_data_end, data_size_t* cuda_leaf_num_data, const data_size_t* cuda_data_indices,
+  const data_size_t num_blocks) {
+  __shared__ uint32_t shared_mem_buffer[32];
+  __shared__ uint32_t to_left_total_count;
+  const data_size_t num_data_in_leaf = cuda_leaf_num_data[left_leaf_index];
+  const unsigned int blockDim_x = blockDim.x;
+  const unsigned int threadIdx_x = threadIdx.x;
+  const data_size_t num_blocks_plus_1 = num_blocks + 1;
+  const uint32_t num_blocks_per_thread = (num_blocks_plus_1 + blockDim_x - 1) / blockDim_x;
+  const uint32_t remain = num_blocks_plus_1 - ((num_blocks_per_thread - 1) * blockDim_x);
+  const uint32_t remain_offset = remain * num_blocks_per_thread;
+  uint32_t thread_start_block_index = 0;
+  uint32_t thread_end_block_index = 0;
+  if (threadIdx_x < remain) {
+    thread_start_block_index = threadIdx_x * num_blocks_per_thread;
+    thread_end_block_index = min(thread_start_block_index + num_blocks_per_thread, num_blocks_plus_1);
+  } else {
+    thread_start_block_index = remain_offset + (num_blocks_per_thread - 1) * (threadIdx_x - remain);
+    thread_end_block_index = min(thread_start_block_index + num_blocks_per_thread - 1, num_blocks_plus_1);
+  }
+  if (threadIdx.x == 0) {
+    block_to_right_offset_buffer[0] = 0;
+  }
+  __syncthreads();
+  for (uint32_t block_index = thread_start_block_index + 1; block_index < thread_end_block_index; ++block_index) {
+    block_to_left_offset_buffer[block_index] += block_to_left_offset_buffer[block_index - 1];
+    block_to_right_offset_buffer[block_index] += block_to_right_offset_buffer[block_index - 1];
+  }
+  __syncthreads();
+  uint32_t block_to_left_offset = 0;
+  uint32_t block_to_right_offset = 0;
+  if (thread_start_block_index < thread_end_block_index && thread_start_block_index > 1) {
+    block_to_left_offset = block_to_left_offset_buffer[thread_start_block_index - 1];
+    block_to_right_offset = block_to_right_offset_buffer[thread_start_block_index - 1];
+  }
+  block_to_left_offset = ShufflePrefixSum<uint32_t>(block_to_left_offset, shared_mem_buffer);
+  __syncthreads();
+  block_to_right_offset = ShufflePrefixSum<uint32_t>(block_to_right_offset, shared_mem_buffer);
+  if (threadIdx_x == blockDim_x - 1) {
+    to_left_total_count = block_to_left_offset + block_to_left_offset_buffer[num_blocks];
+  }
+  __syncthreads();
+  const uint32_t to_left_thread_block_offset = block_to_left_offset;
+  const uint32_t to_right_thread_block_offset = block_to_right_offset + to_left_total_count;
+  for (uint32_t block_index = thread_start_block_index; block_index < thread_end_block_index; ++block_index) {
+    block_to_left_offset_buffer[block_index] += to_left_thread_block_offset;
+    block_to_right_offset_buffer[block_index] += to_right_thread_block_offset;
+  }
+  __syncthreads();
+  if (blockIdx.x == 0 && threadIdx.x == 0) {
+    const data_size_t old_leaf_data_end = cuda_leaf_data_end[left_leaf_index];
+    cuda_leaf_data_end[left_leaf_index] = cuda_leaf_data_start[left_leaf_index] + static_cast<data_size_t>(to_left_total_count);
+    cuda_leaf_num_data[left_leaf_index] = static_cast<data_size_t>(to_left_total_count);
+    cuda_leaf_data_start[right_leaf_index] = cuda_leaf_data_end[left_leaf_index];
+    cuda_leaf_data_end[right_leaf_index] = old_leaf_data_end;
+    cuda_leaf_num_data[right_leaf_index] = num_data_in_leaf - static_cast<data_size_t>(to_left_total_count);
+  }
+}
+
+__global__ void AggregateBlockOffsetKernel1(
+  const int left_leaf_index,
+  const int right_leaf_index,
+  data_size_t* block_to_left_offset_buffer,
+  data_size_t* block_to_right_offset_buffer, data_size_t* cuda_leaf_data_start,
+  data_size_t* cuda_leaf_data_end, data_size_t* cuda_leaf_num_data, const data_size_t* cuda_data_indices,
+  const data_size_t num_blocks) {
+  __shared__ uint32_t shared_mem_buffer[32];
+  __shared__ uint32_t to_left_total_count;
+  const data_size_t num_data_in_leaf = cuda_leaf_num_data[left_leaf_index];
+  const unsigned int threadIdx_x = threadIdx.x;
+  uint32_t block_to_left_offset = 0;
+  uint32_t block_to_right_offset = 0;
+  if (threadIdx_x < static_cast<unsigned int>(num_blocks)) {
+    block_to_left_offset = block_to_left_offset_buffer[threadIdx_x + 1];
+    block_to_right_offset = block_to_right_offset_buffer[threadIdx_x + 1];
+  }
+  block_to_left_offset = ShufflePrefixSum<uint32_t>(block_to_left_offset, shared_mem_buffer);
+  __syncthreads();
+  block_to_right_offset = ShufflePrefixSum<uint32_t>(block_to_right_offset, shared_mem_buffer);
+  if (threadIdx.x == blockDim.x - 1) {
+    to_left_total_count = block_to_left_offset;
+  }
+  __syncthreads();
+  if (threadIdx_x < static_cast<unsigned int>(num_blocks)) {
+    block_to_left_offset_buffer[threadIdx_x + 1] = block_to_left_offset;
+    block_to_right_offset_buffer[threadIdx_x + 1] = block_to_right_offset + to_left_total_count;
+  }
+  if (threadIdx_x == 0) {
+    block_to_right_offset_buffer[0] = to_left_total_count;
+  }
+  __syncthreads();
+  if (blockIdx.x == 0 && threadIdx.x == 0) {
+    const data_size_t old_leaf_data_end = cuda_leaf_data_end[left_leaf_index];
+    cuda_leaf_data_end[left_leaf_index] = cuda_leaf_data_start[left_leaf_index] + static_cast<data_size_t>(to_left_total_count);
+    cuda_leaf_num_data[left_leaf_index] = static_cast<data_size_t>(to_left_total_count);
+    cuda_leaf_data_start[right_leaf_index] = cuda_leaf_data_end[left_leaf_index];
+    cuda_leaf_data_end[right_leaf_index] = old_leaf_data_end;
+    cuda_leaf_num_data[right_leaf_index] = num_data_in_leaf - static_cast<data_size_t>(to_left_total_count);
+  }
+}
+
+template <typename BIN_TYPE>
+__global__ void GenDataToLeftBitVectorKernelLaunch(
+  // data
+  const BIN_TYPE* column_data,
+  const data_size_t* cuda_data_indices,
+  data_size_t* cuda_leaf_data_start,
+  const uint8_t* cuda_feature_missing_is_zero,
+  const uint8_t* cuda_feature_missing_is_na,
+  const uint8_t* cuda_feature_mfb_is_zero,
+  const uint8_t* cuda_feature_mfb_is_na,
+  const uint32_t* cuda_feature_default_bin,
+  const uint32_t* cuda_feature_most_freq_bin,
+  const uint32_t* cuda_feature_max_bin,
+  const uint32_t* cuda_feature_min_bin,
+  // input best split info
+  const CUDASplitInfo* best_split_info,
+  const int right_leaf_index,
+  const uint32_t* categorical_bitset,
+  const int categorical_bitset_len,
+  // for leaf information update
+  CUDALeafSplitsStruct* smaller_leaf_splits,
+  CUDALeafSplitsStruct* larger_leaf_splits,
+  // members of CUDADataPartition
+  uint16_t* block_to_left_offset,
+  data_size_t* block_to_left_offset_buffer,
+  data_size_t* block_to_right_offset_buffer,
+  int* cuda_data_index_to_leaf_index,
+  data_size_t* cuda_leaf_data_end,
+  data_size_t* cuda_leaf_num_data) {
+  const data_size_t num_data_in_leaf = best_split_info->left_count + best_split_info->right_count;
+  const int left_leaf_index = best_split_info->leaf_index;
+  const data_size_t data_start = cuda_leaf_data_start[left_leaf_index];
+  const data_size_t* data_indices_in_leaf = cuda_data_indices + data_start;
+  const int inner_feature_index = best_split_info->inner_feature_index;
+  const bool missing_is_zero = static_cast<bool>(cuda_feature_missing_is_zero[inner_feature_index]);
+  const bool missing_is_na = static_cast<bool>(cuda_feature_missing_is_na[inner_feature_index]);
+  const bool mfb_is_zero = static_cast<bool>(cuda_feature_mfb_is_zero[inner_feature_index]);
+  const bool mfb_is_na = static_cast<bool>(cuda_feature_mfb_is_na[inner_feature_index]);
+  const uint32_t default_bin = cuda_feature_default_bin[inner_feature_index];
+  const uint32_t most_freq_bin = cuda_feature_most_freq_bin[inner_feature_index];
+  const uint32_t max_bin = cuda_feature_max_bin[inner_feature_index];
+  const uint32_t min_bin = cuda_feature_min_bin[inner_feature_index];
+  uint32_t th = best_split_info->threshold + min_bin;
   uint32_t t_zero_bin = min_bin + default_bin;
   if (most_freq_bin == 0) {
     --th;
@@ -430,73 +577,916 @@ void CUDADataPartition::LaunchGenDataToLeftBitVectorKernel(
   uint8_t split_missing_default_to_left = 0;
   int default_leaf_index = right_leaf_index;
   int missing_default_leaf_index = right_leaf_index;
-  if (most_freq_bin <= split_threshold) {
+  if (most_freq_bin <= best_split_info->threshold) {
     split_default_to_left = 1;
     default_leaf_index = left_leaf_index;
   }
   if (missing_is_zero || missing_is_na) {
-    if (split_default_left) {
+    if (best_split_info->default_left) {
       split_missing_default_to_left = 1;
       missing_default_leaf_index = left_leaf_index;
     }
   }
-  const int column_index = cuda_column_data_->feature_to_column(split_feature_index);
-  const uint8_t bit_type = cuda_column_data_->column_bit_type(column_index);
-
   const bool max_bin_to_left = (max_bin <= th);
+  const bool min_is_max = (min_bin == max_bin);
 
-  const data_size_t* data_indices_in_leaf = cuda_data_indices_ + leaf_data_start;
-  const void* column_data_pointer = cuda_column_data_->GetColumnData(column_index);
+  cudaStream_t gen_bit_stream;
+  cudaStream_t update_leaf_index_stream;
+  cudaStreamCreateWithFlags(&gen_bit_stream, cudaStreamNonBlocking);
+  cudaStreamCreateWithFlags(&update_leaf_index_stream, cudaStreamNonBlocking);
 
+  int grid_dim = 0;
+  int block_dim = 0;
+  CUDADataPartition::CalcBlockDim(num_data_in_leaf, &grid_dim, &block_dim);
+  if (!min_is_max && !missing_is_zero && !missing_is_na && !mfb_is_zero && !mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, false, false, false, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, false, false, false, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && !missing_is_zero && !missing_is_na && !mfb_is_zero && !mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, false, false, false, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, false, false, false, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && !missing_is_zero && !missing_is_na && !mfb_is_zero && mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, false, false, false, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, false, false, false, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && !missing_is_zero && !missing_is_na && !mfb_is_zero && mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, false, false, false, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, false, false, false, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && !missing_is_zero && !missing_is_na && mfb_is_zero && !mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, false, false, true, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, false, false, true, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && !missing_is_zero && !missing_is_na && mfb_is_zero && !mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, false, false, true, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, false, false, true, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && !missing_is_zero && !missing_is_na && mfb_is_zero && mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, false, false, true, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, false, false, true, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && !missing_is_zero && !missing_is_na && mfb_is_zero && mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, false, false, true, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, false, false, true, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && !missing_is_zero && missing_is_na && !mfb_is_zero && !mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, false, true, false, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, false, true, false, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && !missing_is_zero && missing_is_na && !mfb_is_zero && !mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, false, true, false, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, false, true, false, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && !missing_is_zero && missing_is_na && !mfb_is_zero && mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, false, true, false, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, false, true, false, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && !missing_is_zero && missing_is_na && !mfb_is_zero && mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, false, true, false, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, false, true, false, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && !missing_is_zero && missing_is_na && mfb_is_zero && !mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, false, true, true, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, false, true, true, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && !missing_is_zero && missing_is_na && mfb_is_zero && !mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, false, true, true, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, false, true, true, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && !missing_is_zero && missing_is_na && mfb_is_zero && mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, false, true, true, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, false, true, true, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && !missing_is_zero && missing_is_na && mfb_is_zero && mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, false, true, true, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, false, true, true, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && missing_is_zero && !missing_is_na && !mfb_is_zero && !mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, true, false, false, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, true, false, false, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && missing_is_zero && !missing_is_na && !mfb_is_zero && !mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, true, false, false, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, true, false, false, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && missing_is_zero && !missing_is_na && !mfb_is_zero && mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, true, false, false, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, true, false, false, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && missing_is_zero && !missing_is_na && !mfb_is_zero && mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, true, false, false, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, true, false, false, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && missing_is_zero && !missing_is_na && mfb_is_zero && !mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, true, false, true, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, true, false, true, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && missing_is_zero && !missing_is_na && mfb_is_zero && !mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, true, false, true, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, true, false, true, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && missing_is_zero && !missing_is_na && mfb_is_zero && mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, true, false, true, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, true, false, true, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && missing_is_zero && !missing_is_na && mfb_is_zero && mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, true, false, true, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, true, false, true, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && missing_is_zero && missing_is_na && !mfb_is_zero && !mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, true, true, false, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, true, true, false, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && missing_is_zero && missing_is_na && !mfb_is_zero && !mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, true, true, false, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, true, true, false, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && missing_is_zero && missing_is_na && !mfb_is_zero && mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, true, true, false, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, true, true, false, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && missing_is_zero && missing_is_na && !mfb_is_zero && mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, true, true, false, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, true, true, false, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && missing_is_zero && missing_is_na && mfb_is_zero && !mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, true, true, true, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, true, true, true, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && missing_is_zero && missing_is_na && mfb_is_zero && !mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, true, true, true, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, true, true, true, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && missing_is_zero && missing_is_na && mfb_is_zero && mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, true, true, true, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, true, true, true, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (!min_is_max && missing_is_zero && missing_is_na && mfb_is_zero && mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<false, true, true, true, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<false, true, true, true, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && !missing_is_zero && !missing_is_na && !mfb_is_zero && !mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, false, false, false, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, false, false, false, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && !missing_is_zero && !missing_is_na && !mfb_is_zero && !mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, false, false, false, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, false, false, false, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && !missing_is_zero && !missing_is_na && !mfb_is_zero && mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, false, false, false, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, false, false, false, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && !missing_is_zero && !missing_is_na && !mfb_is_zero && mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, false, false, false, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, false, false, false, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && !missing_is_zero && !missing_is_na && mfb_is_zero && !mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, false, false, true, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, false, false, true, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && !missing_is_zero && !missing_is_na && mfb_is_zero && !mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, false, false, true, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, false, false, true, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && !missing_is_zero && !missing_is_na && mfb_is_zero && mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, false, false, true, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, false, false, true, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && !missing_is_zero && !missing_is_na && mfb_is_zero && mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, false, false, true, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, false, false, true, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && !missing_is_zero && missing_is_na && !mfb_is_zero && !mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, false, true, false, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, false, true, false, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && !missing_is_zero && missing_is_na && !mfb_is_zero && !mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, false, true, false, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, false, true, false, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && !missing_is_zero && missing_is_na && !mfb_is_zero && mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, false, true, false, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, false, true, false, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && !missing_is_zero && missing_is_na && !mfb_is_zero && mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, false, true, false, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, false, true, false, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && !missing_is_zero && missing_is_na && mfb_is_zero && !mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, false, true, true, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, false, true, true, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && !missing_is_zero && missing_is_na && mfb_is_zero && !mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, false, true, true, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, false, true, true, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && !missing_is_zero && missing_is_na && mfb_is_zero && mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, false, true, true, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, false, true, true, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && !missing_is_zero && missing_is_na && mfb_is_zero && mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, false, true, true, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, false, true, true, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && missing_is_zero && !missing_is_na && !mfb_is_zero && !mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, true, false, false, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, true, false, false, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && missing_is_zero && !missing_is_na && !mfb_is_zero && !mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, true, false, false, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, true, false, false, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && missing_is_zero && !missing_is_na && !mfb_is_zero && mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, true, false, false, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, true, false, false, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && missing_is_zero && !missing_is_na && !mfb_is_zero && mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, true, false, false, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, true, false, false, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && missing_is_zero && !missing_is_na && mfb_is_zero && !mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, true, false, true, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, true, false, true, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && missing_is_zero && !missing_is_na && mfb_is_zero && !mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, true, false, true, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, true, false, true, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && missing_is_zero && !missing_is_na && mfb_is_zero && mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, true, false, true, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, true, false, true, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && missing_is_zero && !missing_is_na && mfb_is_zero && mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, true, false, true, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, true, false, true, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && missing_is_zero && missing_is_na && !mfb_is_zero && !mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, true, true, false, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, true, true, false, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && missing_is_zero && missing_is_na && !mfb_is_zero && !mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, true, true, false, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, true, true, false, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && missing_is_zero && missing_is_na && !mfb_is_zero && mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, true, true, false, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, true, true, false, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && missing_is_zero && missing_is_na && !mfb_is_zero && mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, true, true, false, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, true, true, false, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && missing_is_zero && missing_is_na && mfb_is_zero && !mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, true, true, true, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, true, true, true, false, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && missing_is_zero && missing_is_na && mfb_is_zero && !mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, true, true, true, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, true, true, true, false, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && missing_is_zero && missing_is_na && mfb_is_zero && mfb_is_na && !max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, true, true, true, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, true, true, true, true, false, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  } else if (min_is_max && missing_is_zero && missing_is_na && mfb_is_zero && mfb_is_na && max_bin_to_left) {
+    GenDataToLeftBitVectorKernel<true, true, true, true, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, gen_bit_stream>>>(
+        GenBitVector_ARGS,
+        block_to_left_offset,
+        block_to_left_offset_buffer,
+        block_to_right_offset_buffer);
+    UpdateDataIndexToLeafIndexKernel<true, true, true, true, true, true, BIN_TYPE>
+      <<<grid_dim, block_dim, 0, update_leaf_index_stream>>>(
+        UpdateDataIndexToLeafIndex_ARGS,
+        cuda_data_index_to_leaf_index);
+  }
+
+  int num_blocks_final_ref = grid_dim - 1;
+  int num_blocks_final_aligned = 1;
+  while (num_blocks_final_ref > 0) {
+    num_blocks_final_aligned <<= 1;
+    num_blocks_final_ref >>= 1;
+  }
+  if (grid_dim > AGGREGATE_BLOCK_SIZE_DATA_PARTITION) {
+    AggregateBlockOffsetKernel0<<<1, AGGREGATE_BLOCK_SIZE_DATA_PARTITION, 0, gen_bit_stream>>>(
+      left_leaf_index,
+      right_leaf_index,
+      block_to_left_offset_buffer,
+      block_to_right_offset_buffer, cuda_leaf_data_start, cuda_leaf_data_end,
+      cuda_leaf_num_data, cuda_data_indices,
+      grid_dim);
+  } else {
+    AggregateBlockOffsetKernel1<<<1, num_blocks_final_aligned, 0, gen_bit_stream>>>(
+      left_leaf_index,
+      right_leaf_index,
+      block_to_left_offset_buffer,
+      block_to_right_offset_buffer, cuda_leaf_data_start, cuda_leaf_data_end,
+      cuda_leaf_num_data, cuda_data_indices,
+      grid_dim);
+  }
+
+  cudaStreamDestroy(gen_bit_stream);
+  cudaStreamDestroy(update_leaf_index_stream);
+}
+
+__global__ void GenDataToLeftBitVectorKernelLaunchOuter(
+  // data
+  const int* cuda_feature_to_column,
+  const uint8_t* cuda_column_bit_type,
+  void* const* cuda_data_by_column,
+  const data_size_t* cuda_data_indices,
+  data_size_t* cuda_leaf_data_start,
+  const uint8_t* cuda_feature_missing_is_zero,
+  const uint8_t* cuda_feature_missing_is_na,
+  const uint8_t* cuda_feature_mfb_is_zero,
+  const uint8_t* cuda_feature_mfb_is_na,
+  const uint32_t* cuda_feature_default_bin,
+  const uint32_t* cuda_feature_most_freq_bin,
+  const uint32_t* cuda_feature_max_bin,
+  const uint32_t* cuda_feature_min_bin,
+  // input best split info
+  CUDASplitInfo* const* best_split_info_pointer,
+  const int right_leaf_index,
+  const uint32_t* categorical_bitset,
+  const int categorical_bitset_len,
+  // for leaf information update
+  CUDALeafSplitsStruct* smaller_leaf_splits,
+  CUDALeafSplitsStruct* larger_leaf_splits,
+  // members of CUDADataPartition
+  uint16_t* block_to_left_offset,
+  data_size_t* block_to_left_offset_buffer,
+  data_size_t* block_to_right_offset_buffer,
+  int* cuda_data_index_to_leaf_index,
+  data_size_t* cuda_leaf_data_end,
+  data_size_t* cuda_leaf_num_data) {
+  const CUDASplitInfo* best_split_info = *best_split_info_pointer;
+  const int inner_feature_index = best_split_info->inner_feature_index;
+  const int column_index = cuda_feature_to_column[inner_feature_index];
+  const uint8_t bit_type = cuda_column_bit_type[column_index];
+  const void* column_data_pointer = cuda_data_by_column[column_index];
+  cudaStream_t cuda_stream;
+  cudaStreamCreateWithFlags(&cuda_stream, cudaStreamNonBlocking);
   if (bit_type == 8) {
     const uint8_t* column_data = reinterpret_cast<const uint8_t*>(column_data_pointer);
-    LaunchGenDataToLeftBitVectorKernelInner<uint8_t>(
-      GenBitVector_ARGS,
-      missing_is_zero,
-      missing_is_na,
-      mfb_is_zero,
-      mfb_is_na,
-      max_bin_to_left);
-    LaunchUpdateDataIndexToLeafIndexKernel<uint8_t>(
-      UpdateDataIndexToLeafIndex_ARGS,
-      missing_is_zero,
-      missing_is_na,
-      mfb_is_zero,
-      mfb_is_na,
-      max_bin_to_left);
+    GenDataToLeftBitVectorKernelLaunch<uint8_t><<<1, 1, 0, cuda_stream>>>(
+      column_data,
+      cuda_data_indices,
+      cuda_leaf_data_start,
+      cuda_feature_missing_is_zero,
+      cuda_feature_missing_is_na,
+      cuda_feature_mfb_is_zero,
+      cuda_feature_mfb_is_na,
+      cuda_feature_default_bin,
+      cuda_feature_most_freq_bin,
+      cuda_feature_max_bin,
+      cuda_feature_min_bin,
+      best_split_info,
+      right_leaf_index,
+      categorical_bitset,
+      categorical_bitset_len,
+      smaller_leaf_splits,
+      larger_leaf_splits,
+      block_to_left_offset,
+      block_to_left_offset_buffer,
+      block_to_right_offset_buffer,
+      cuda_data_index_to_leaf_index,
+      cuda_leaf_data_end,
+      cuda_leaf_num_data);
   } else if (bit_type == 16) {
     const uint16_t* column_data = reinterpret_cast<const uint16_t*>(column_data_pointer);
-    LaunchGenDataToLeftBitVectorKernelInner<uint16_t>(
-      GenBitVector_ARGS,
-      missing_is_zero,
-      missing_is_na,
-      mfb_is_zero,
-      mfb_is_na,
-      max_bin_to_left);
-    LaunchUpdateDataIndexToLeafIndexKernel<uint16_t>(
-      UpdateDataIndexToLeafIndex_ARGS,
-      missing_is_zero,
-      missing_is_na,
-      mfb_is_zero,
-      mfb_is_na,
-      max_bin_to_left);
+    GenDataToLeftBitVectorKernelLaunch<uint16_t><<<1, 1, 0, cuda_stream>>>(
+      column_data,
+      cuda_data_indices,
+      cuda_leaf_data_start,
+      cuda_feature_missing_is_zero,
+      cuda_feature_missing_is_na,
+      cuda_feature_mfb_is_zero,
+      cuda_feature_mfb_is_na,
+      cuda_feature_default_bin,
+      cuda_feature_most_freq_bin,
+      cuda_feature_max_bin,
+      cuda_feature_min_bin,
+      best_split_info,
+      right_leaf_index,
+      categorical_bitset,
+      categorical_bitset_len,
+      smaller_leaf_splits,
+      larger_leaf_splits,
+      block_to_left_offset,
+      block_to_left_offset_buffer,
+      block_to_right_offset_buffer,
+      cuda_data_index_to_leaf_index,
+      cuda_leaf_data_end,
+      cuda_leaf_num_data);
   } else if (bit_type == 32) {
     const uint32_t* column_data = reinterpret_cast<const uint32_t*>(column_data_pointer);
-    LaunchGenDataToLeftBitVectorKernelInner<uint32_t>(
-      GenBitVector_ARGS,
-      missing_is_zero,
-      missing_is_na,
-      mfb_is_zero,
-      mfb_is_na,
-      max_bin_to_left);
-    LaunchUpdateDataIndexToLeafIndexKernel<uint32_t>(
-      UpdateDataIndexToLeafIndex_ARGS,
-      missing_is_zero,
-      missing_is_na,
-      mfb_is_zero,
-      mfb_is_na,
-      max_bin_to_left);
+    GenDataToLeftBitVectorKernelLaunch<uint32_t><<<1, 1, 0, cuda_stream>>>(
+      column_data,
+      cuda_data_indices,
+      cuda_leaf_data_start,
+      cuda_feature_missing_is_zero,
+      cuda_feature_missing_is_na,
+      cuda_feature_mfb_is_zero,
+      cuda_feature_mfb_is_na,
+      cuda_feature_default_bin,
+      cuda_feature_most_freq_bin,
+      cuda_feature_max_bin,
+      cuda_feature_min_bin,
+      best_split_info,
+      right_leaf_index,
+      categorical_bitset,
+      categorical_bitset_len,
+      smaller_leaf_splits,
+      larger_leaf_splits,
+      block_to_left_offset,
+      block_to_left_offset_buffer,
+      block_to_right_offset_buffer,
+      cuda_data_index_to_leaf_index,
+      cuda_leaf_data_end,
+      cuda_leaf_num_data);
   }
+  cudaStreamDestroy(cuda_stream);
+}
+
+void CUDADataPartition::LaunchGenDataToLeftBitVectorKernel(
+  // input best split info
+  CUDASplitInfo* const* best_split_info,
+  const int right_leaf_index,
+  const uint32_t* categorical_bitset,
+  const int categorical_bitset_len,
+  // for leaf information update
+  CUDALeafSplitsStruct* smaller_leaf_splits,
+  CUDALeafSplitsStruct* larger_leaf_splits) {
+  GenDataToLeftBitVectorKernelLaunchOuter<<<1, 1, 0, cuda_streams_[0]>>>(
+    cuda_column_data_->cuda_feature_to_column(),
+    cuda_column_data_->cuda_column_bit_type(),
+    cuda_column_data_->cuda_data_by_column(),
+    cuda_data_indices_,
+    cuda_leaf_data_start_,
+    cuda_column_data_->cuda_feature_missing_is_zero(),
+    cuda_column_data_->cuda_feature_missing_is_na(),
+    cuda_column_data_->cuda_feature_mfb_is_zero(),
+    cuda_column_data_->cuda_feature_mfb_is_na(),
+    cuda_column_data_->cuda_feature_default_bin(),
+    cuda_column_data_->cuda_feature_most_freq_bin(),
+    cuda_column_data_->cuda_feature_max_bin(),
+    cuda_column_data_->cuda_feature_min_bin(),
+    best_split_info,
+    right_leaf_index,
+    categorical_bitset,
+    categorical_bitset_len,
+    smaller_leaf_splits,
+    larger_leaf_splits,
+    cuda_block_to_left_offset_,
+    cuda_block_data_to_left_offset_,
+    cuda_block_data_to_right_offset_,
+    cuda_data_index_to_leaf_index_,
+    cuda_leaf_data_end_,
+    cuda_leaf_num_data_);
+  SynchronizeCUDADevice(__FILE__, __LINE__);
 }
 
 #undef UpdateDataIndexToLeafIndexKernel_PARAMS
@@ -629,111 +1619,6 @@ void CUDADataPartition::LaunchGenDataToLeftBitVectorCategoricalKernel(
 #undef GenBitVector_Categorical_ARGS
 #undef UpdateDataIndexToLeafIndex_Categorical_ARGS
 
-__global__ void AggregateBlockOffsetKernel0(
-  const int left_leaf_index,
-  const int right_leaf_index,
-  data_size_t* block_to_left_offset_buffer,
-  data_size_t* block_to_right_offset_buffer, data_size_t* cuda_leaf_data_start,
-  data_size_t* cuda_leaf_data_end, data_size_t* cuda_leaf_num_data, const data_size_t* cuda_data_indices,
-  const data_size_t num_blocks) {
-  __shared__ uint32_t shared_mem_buffer[32];
-  __shared__ uint32_t to_left_total_count;
-  const data_size_t num_data_in_leaf = cuda_leaf_num_data[left_leaf_index];
-  const unsigned int blockDim_x = blockDim.x;
-  const unsigned int threadIdx_x = threadIdx.x;
-  const data_size_t num_blocks_plus_1 = num_blocks + 1;
-  const uint32_t num_blocks_per_thread = (num_blocks_plus_1 + blockDim_x - 1) / blockDim_x;
-  const uint32_t remain = num_blocks_plus_1 - ((num_blocks_per_thread - 1) * blockDim_x);
-  const uint32_t remain_offset = remain * num_blocks_per_thread;
-  uint32_t thread_start_block_index = 0;
-  uint32_t thread_end_block_index = 0;
-  if (threadIdx_x < remain) {
-    thread_start_block_index = threadIdx_x * num_blocks_per_thread;
-    thread_end_block_index = min(thread_start_block_index + num_blocks_per_thread, num_blocks_plus_1);
-  } else {
-    thread_start_block_index = remain_offset + (num_blocks_per_thread - 1) * (threadIdx_x - remain);
-    thread_end_block_index = min(thread_start_block_index + num_blocks_per_thread - 1, num_blocks_plus_1);
-  }
-  if (threadIdx.x == 0) {
-    block_to_right_offset_buffer[0] = 0;
-  }
-  __syncthreads();
-  for (uint32_t block_index = thread_start_block_index + 1; block_index < thread_end_block_index; ++block_index) {
-    block_to_left_offset_buffer[block_index] += block_to_left_offset_buffer[block_index - 1];
-    block_to_right_offset_buffer[block_index] += block_to_right_offset_buffer[block_index - 1];
-  }
-  __syncthreads();
-  uint32_t block_to_left_offset = 0;
-  uint32_t block_to_right_offset = 0;
-  if (thread_start_block_index < thread_end_block_index && thread_start_block_index > 1) {
-    block_to_left_offset = block_to_left_offset_buffer[thread_start_block_index - 1];
-    block_to_right_offset = block_to_right_offset_buffer[thread_start_block_index - 1];
-  }
-  block_to_left_offset = ShufflePrefixSum<uint32_t>(block_to_left_offset, shared_mem_buffer);
-  __syncthreads();
-  block_to_right_offset = ShufflePrefixSum<uint32_t>(block_to_right_offset, shared_mem_buffer);
-  if (threadIdx_x == blockDim_x - 1) {
-    to_left_total_count = block_to_left_offset + block_to_left_offset_buffer[num_blocks];
-  }
-  __syncthreads();
-  const uint32_t to_left_thread_block_offset = block_to_left_offset;
-  const uint32_t to_right_thread_block_offset = block_to_right_offset + to_left_total_count;
-  for (uint32_t block_index = thread_start_block_index; block_index < thread_end_block_index; ++block_index) {
-    block_to_left_offset_buffer[block_index] += to_left_thread_block_offset;
-    block_to_right_offset_buffer[block_index] += to_right_thread_block_offset;
-  }
-  __syncthreads();
-  if (blockIdx.x == 0 && threadIdx.x == 0) {
-    const data_size_t old_leaf_data_end = cuda_leaf_data_end[left_leaf_index];
-    cuda_leaf_data_end[left_leaf_index] = cuda_leaf_data_start[left_leaf_index] + static_cast<data_size_t>(to_left_total_count);
-    cuda_leaf_num_data[left_leaf_index] = static_cast<data_size_t>(to_left_total_count);
-    cuda_leaf_data_start[right_leaf_index] = cuda_leaf_data_end[left_leaf_index];
-    cuda_leaf_data_end[right_leaf_index] = old_leaf_data_end;
-    cuda_leaf_num_data[right_leaf_index] = num_data_in_leaf - static_cast<data_size_t>(to_left_total_count);
-  }
-}
-
-__global__ void AggregateBlockOffsetKernel1(
-  const int left_leaf_index,
-  const int right_leaf_index,
-  data_size_t* block_to_left_offset_buffer,
-  data_size_t* block_to_right_offset_buffer, data_size_t* cuda_leaf_data_start,
-  data_size_t* cuda_leaf_data_end, data_size_t* cuda_leaf_num_data, const data_size_t* cuda_data_indices,
-  const data_size_t num_blocks) {
-  __shared__ uint32_t shared_mem_buffer[32];
-  __shared__ uint32_t to_left_total_count;
-  const data_size_t num_data_in_leaf = cuda_leaf_num_data[left_leaf_index];
-  const unsigned int threadIdx_x = threadIdx.x;
-  uint32_t block_to_left_offset = 0;
-  uint32_t block_to_right_offset = 0;
-  if (threadIdx_x < static_cast<unsigned int>(num_blocks)) {
-    block_to_left_offset = block_to_left_offset_buffer[threadIdx_x + 1];
-    block_to_right_offset = block_to_right_offset_buffer[threadIdx_x + 1];
-  }
-  block_to_left_offset = ShufflePrefixSum<uint32_t>(block_to_left_offset, shared_mem_buffer);
-  __syncthreads();
-  block_to_right_offset = ShufflePrefixSum<uint32_t>(block_to_right_offset, shared_mem_buffer);
-  if (threadIdx.x == blockDim.x - 1) {
-    to_left_total_count = block_to_left_offset;
-  }
-  __syncthreads();
-  if (threadIdx_x < static_cast<unsigned int>(num_blocks)) {
-    block_to_left_offset_buffer[threadIdx_x + 1] = block_to_left_offset;
-    block_to_right_offset_buffer[threadIdx_x + 1] = block_to_right_offset + to_left_total_count;
-  }
-  if (threadIdx_x == 0) {
-    block_to_right_offset_buffer[0] = to_left_total_count;
-  }
-  __syncthreads();
-  if (blockIdx.x == 0 && threadIdx.x == 0) {
-    const data_size_t old_leaf_data_end = cuda_leaf_data_end[left_leaf_index];
-    cuda_leaf_data_end[left_leaf_index] = cuda_leaf_data_start[left_leaf_index] + static_cast<data_size_t>(to_left_total_count);
-    cuda_leaf_num_data[left_leaf_index] = static_cast<data_size_t>(to_left_total_count);
-    cuda_leaf_data_start[right_leaf_index] = cuda_leaf_data_end[left_leaf_index];
-    cuda_leaf_data_end[right_leaf_index] = old_leaf_data_end;
-    cuda_leaf_num_data[right_leaf_index] = num_data_in_leaf - static_cast<data_size_t>(to_left_total_count);
-  }
-}
 
 __global__ void SplitTreeStructureKernel(const int left_leaf_index,
   const int right_leaf_index,
@@ -746,33 +1631,13 @@ __global__ void SplitTreeStructureKernel(const int left_leaf_index,
   CUDALeafSplitsStruct* larger_leaf_splits,
   const int num_total_bin,
   hist_t* cuda_hist, hist_t** cuda_hist_pool,
-  double* cuda_leaf_output,
-  int* cuda_split_info_buffer) {
+  double* cuda_leaf_output) {
   const unsigned int to_left_total_cnt = cuda_leaf_num_data[left_leaf_index];
-  double* cuda_split_info_buffer_for_hessians = reinterpret_cast<double*>(cuda_split_info_buffer + 8);
   const unsigned int global_thread_index = blockIdx.x * blockDim.x + threadIdx.x;
   if (global_thread_index == 0) {
     cuda_leaf_output[left_leaf_index] = best_split_info->left_value;
   } else if (global_thread_index == 1) {
     cuda_leaf_output[right_leaf_index] = best_split_info->right_value;
-  } else if (global_thread_index == 2) {
-    cuda_split_info_buffer[0] = left_leaf_index;
-  } else if (global_thread_index == 3) {
-    cuda_split_info_buffer[1] = cuda_leaf_num_data[left_leaf_index];
-  } else if (global_thread_index == 4) {
-    cuda_split_info_buffer[2] = cuda_leaf_data_start[left_leaf_index];
-  } else if (global_thread_index == 5) {
-    cuda_split_info_buffer[3] = right_leaf_index;
-  } else if (global_thread_index == 6) {
-    cuda_split_info_buffer[4] = cuda_leaf_num_data[right_leaf_index];
-  } else if (global_thread_index == 7) {
-    cuda_split_info_buffer[5] = cuda_leaf_data_start[right_leaf_index];
-  } else if (global_thread_index == 8) {
-    cuda_split_info_buffer_for_hessians[0] = best_split_info->left_sum_hessians;
-    cuda_split_info_buffer_for_hessians[2] = best_split_info->left_sum_gradients;
-  } else if (global_thread_index == 9) {
-    cuda_split_info_buffer_for_hessians[1] = best_split_info->right_sum_hessians;
-    cuda_split_info_buffer_for_hessians[3] = best_split_info->right_sum_gradients;
   }
 
   if (cuda_leaf_num_data[left_leaf_index] < cuda_leaf_num_data[right_leaf_index]) {
@@ -809,10 +1674,6 @@ __global__ void SplitTreeStructureKernel(const int left_leaf_index,
     } else if (global_thread_index == 13) {
       larger_leaf_splits->data_indices_in_leaf = cuda_data_indices + cuda_leaf_num_data[left_leaf_index];
     } else if (global_thread_index == 14) {
-      cuda_split_info_buffer[6] = left_leaf_index;
-    } else if (global_thread_index == 15) {
-      cuda_split_info_buffer[7] = right_leaf_index;
-    } else if (global_thread_index == 16) {
       smaller_leaf_splits->leaf_index = left_leaf_index;
     }
   } else {
@@ -849,12 +1710,38 @@ __global__ void SplitTreeStructureKernel(const int left_leaf_index,
       smaller_leaf_splits->hist_in_leaf = cuda_hist_pool[right_leaf_index];
     } else if (global_thread_index == 15) {
       larger_leaf_splits->hist_in_leaf = cuda_hist_pool[left_leaf_index];
-    } else if (global_thread_index == 16) {
-      cuda_split_info_buffer[6] = right_leaf_index;
-    } else if (global_thread_index == 17) {
-      cuda_split_info_buffer[7] = left_leaf_index;
     }
   }
+}
+
+__global__ void SplitTreeStructureKernelLaunch(
+  CUDASplitInfo* const* best_split_info_pointer,
+  const int right_leaf_index,
+  data_size_t* block_to_left_offset_buffer,
+  data_size_t* block_to_right_offset_buffer, data_size_t* cuda_leaf_data_start,
+  data_size_t* cuda_leaf_data_end, data_size_t* cuda_leaf_num_data, const data_size_t* cuda_data_indices,
+  // for leaf splits information update
+  CUDALeafSplitsStruct* smaller_leaf_splits,
+  CUDALeafSplitsStruct* larger_leaf_splits,
+  const int num_total_bin,
+  hist_t* cuda_hist, hist_t** cuda_hist_pool,
+  double* cuda_leaf_output) {
+  const CUDASplitInfo* best_split_info = *best_split_info_pointer;
+  const int left_leaf_index = best_split_info->leaf_index;
+  cudaStream_t cuda_stream;
+  cudaStreamCreateWithFlags(&cuda_stream, cudaStreamNonBlocking);
+  SplitTreeStructureKernel<<<4, 4, 0, cuda_stream>>>(left_leaf_index, right_leaf_index,
+    block_to_left_offset_buffer,
+    block_to_right_offset_buffer, cuda_leaf_data_start, cuda_leaf_data_end,
+    cuda_leaf_num_data, cuda_data_indices,
+    best_split_info,
+    smaller_leaf_splits,
+    larger_leaf_splits,
+    num_total_bin,
+    cuda_hist,
+    cuda_hist_pool,
+    cuda_leaf_output);
+  cudaStreamDestroy(cuda_stream);
 }
 
 __global__ void SplitInnerKernel(const int left_leaf_index, const int right_leaf_index,
@@ -885,6 +1772,34 @@ __global__ void SplitInnerKernel(const int left_leaf_index, const int right_leaf
   }
 }
 
+__global__ void SplitInnerKernelLaunch(
+  CUDASplitInfo* const* best_split_info_pointer,
+  const int right_leaf_index,
+  const data_size_t* cuda_leaf_data_start, const data_size_t* cuda_leaf_num_data,
+  const data_size_t* cuda_data_indices,
+  const data_size_t* block_to_left_offset_buffer, const data_size_t* block_to_right_offset_buffer,
+  const uint16_t* block_to_left_offset, data_size_t* out_data_indices_in_leaf) {
+  const CUDASplitInfo* best_split_info = *best_split_info_pointer;
+  const int left_leaf_index = best_split_info->leaf_index;
+  const data_size_t num_data_in_leaf = cuda_leaf_num_data[left_leaf_index] + cuda_leaf_num_data[right_leaf_index];
+  int grid_dim = 0;
+  int block_dim = 0;
+  cudaStream_t cuda_stream;
+  cudaStreamCreateWithFlags(&cuda_stream, cudaStreamNonBlocking);
+  CUDADataPartition::CalcBlockDim(num_data_in_leaf, &grid_dim, &block_dim);
+  SplitInnerKernel<<<grid_dim, block_dim, 0, cuda_stream>>>(
+    left_leaf_index,
+    right_leaf_index,
+    cuda_leaf_data_start,
+    cuda_leaf_num_data,
+    cuda_data_indices,
+    block_to_left_offset_buffer,
+    block_to_right_offset_buffer,
+    block_to_left_offset,
+    out_data_indices_in_leaf);
+  cudaStreamDestroy(cuda_stream);
+}
+
 __global__ void CopyDataIndicesKernel(
   const data_size_t num_data_in_leaf,
   const data_size_t* out_data_indices_in_leaf,
@@ -896,92 +1811,65 @@ __global__ void CopyDataIndicesKernel(
   }
 }
 
-void CUDADataPartition::LaunchSplitInnerKernel(
-  const data_size_t num_data_in_leaf,
-  const CUDASplitInfo* best_split_info,
-  const int left_leaf_index,
-  const int right_leaf_index,
-  // for leaf splits information update
-  CUDALeafSplitsStruct* smaller_leaf_splits,
-  CUDALeafSplitsStruct* larger_leaf_splits,
-  data_size_t* left_leaf_num_data_ref,
-  data_size_t* right_leaf_num_data_ref,
-  data_size_t* left_leaf_start_ref,
-  data_size_t* right_leaf_start_ref,
-  double* left_leaf_sum_of_hessians_ref,
-  double* right_leaf_sum_of_hessians_ref,
-  double* left_leaf_sum_of_gradients_ref,
-  double* right_leaf_sum_of_gradients_ref) {
-  int num_blocks_final_ref = grid_dim_ - 1;
-  int num_blocks_final_aligned = 1;
-  while (num_blocks_final_ref > 0) {
-    num_blocks_final_aligned <<= 1;
-    num_blocks_final_ref >>= 1;
-  }
-  global_timer.Start("CUDADataPartition::AggregateBlockOffsetKernel");
+__global__ void CopyDataIndicesKernelLaunch(
+  CUDASplitInfo* const* best_split_info_pointer,
+  const data_size_t* cuda_leaf_data_start,
+  const data_size_t* out_data_indices_in_leaf,
+  data_size_t* cuda_data_indices) {
+  const CUDASplitInfo* best_split_info = *best_split_info_pointer;
+  const int left_leaf_index = best_split_info->leaf_index;
+  const data_size_t num_data_in_leaf = best_split_info->left_count + best_split_info->right_count;
+  int grid_dim = 0;
+  int block_dim = 0;
+  cudaStream_t cuda_stream;
+  cudaStreamCreateWithFlags(&cuda_stream, cudaStreamNonBlocking);
+  CUDADataPartition::CalcBlockDim(num_data_in_leaf, &grid_dim, &block_dim);
+  CopyDataIndicesKernel<<<grid_dim, block_dim, 0, cuda_stream>>>(
+    num_data_in_leaf,
+    out_data_indices_in_leaf,
+    cuda_data_indices + cuda_leaf_data_start[left_leaf_index]);
+  cudaStreamDestroy(cuda_stream);
+}
 
-  if (grid_dim_ > AGGREGATE_BLOCK_SIZE_DATA_PARTITION) {
-    AggregateBlockOffsetKernel0<<<1, AGGREGATE_BLOCK_SIZE_DATA_PARTITION, 0, cuda_streams_[0]>>>(
-      left_leaf_index,
-      right_leaf_index,
-      cuda_block_data_to_left_offset_,
-      cuda_block_data_to_right_offset_, cuda_leaf_data_start_, cuda_leaf_data_end_,
-      cuda_leaf_num_data_, cuda_data_indices_,
-      grid_dim_);
-  } else {
-    AggregateBlockOffsetKernel1<<<1, num_blocks_final_aligned, 0, cuda_streams_[0]>>>(
-      left_leaf_index,
-      right_leaf_index,
-      cuda_block_data_to_left_offset_,
-      cuda_block_data_to_right_offset_, cuda_leaf_data_start_, cuda_leaf_data_end_,
-      cuda_leaf_num_data_, cuda_data_indices_,
-      grid_dim_);
-  }
-  SynchronizeCUDADevice(__FILE__, __LINE__);
-  global_timer.Stop("CUDADataPartition::AggregateBlockOffsetKernel");
+void CUDADataPartition::LaunchSplitInnerKernel(
+  // input best split info
+  CUDASplitInfo* const* best_split_info,
+  const int right_leaf_index,
+  const uint32_t* categorical_bitset,
+  const int categorical_bitset_len,
+  // for leaf information update
+  CUDALeafSplitsStruct* smaller_leaf_splits,
+  CUDALeafSplitsStruct* larger_leaf_splits) {
   global_timer.Start("CUDADataPartition::SplitInnerKernel");
-  SplitInnerKernel<<<grid_dim_, block_dim_, 0, cuda_streams_[1]>>>(
-    left_leaf_index, right_leaf_index, cuda_leaf_data_start_, cuda_leaf_num_data_, cuda_data_indices_,
+  SplitInnerKernelLaunch<<<1, 1, 0, cuda_streams_[1]>>>(
+    best_split_info, right_leaf_index, cuda_leaf_data_start_, cuda_leaf_num_data_, cuda_data_indices_,
     cuda_block_data_to_left_offset_, cuda_block_data_to_right_offset_, cuda_block_to_left_offset_,
     cuda_out_data_indices_in_leaf_);
   global_timer.Stop("CUDADataPartition::SplitInnerKernel");
+
+  // TODO: can remove this synchronization ?
   SynchronizeCUDADevice(__FILE__, __LINE__);
 
   global_timer.Start("CUDADataPartition::SplitTreeStructureKernel");
-  SplitTreeStructureKernel<<<4, 5, 0, cuda_streams_[0]>>>(left_leaf_index, right_leaf_index,
+  SplitTreeStructureKernelLaunch<<<1, 1, 0, cuda_streams_[0]>>>(best_split_info, right_leaf_index,
     cuda_block_data_to_left_offset_,
     cuda_block_data_to_right_offset_, cuda_leaf_data_start_, cuda_leaf_data_end_,
     cuda_leaf_num_data_, cuda_out_data_indices_in_leaf_,
-    best_split_info,
     smaller_leaf_splits,
     larger_leaf_splits,
     num_total_bin_,
     cuda_hist_,
     cuda_hist_pool_,
-    cuda_leaf_output_, cuda_split_info_buffer_);
+    cuda_leaf_output_);
   global_timer.Stop("CUDADataPartition::SplitTreeStructureKernel");
-  std::vector<int> cpu_split_info_buffer(16);
-  const double* cpu_sum_hessians_info = reinterpret_cast<const double*>(cpu_split_info_buffer.data() + 8);
-  global_timer.Start("CUDADataPartition::CopyFromCUDADeviceToHostAsync");
-  CopyFromCUDADeviceToHostAsync<int>(cpu_split_info_buffer.data(), cuda_split_info_buffer_, 16, cuda_streams_[0], __FILE__, __LINE__);
   SynchronizeCUDADevice(__FILE__, __LINE__);
-  global_timer.Stop("CUDADataPartition::CopyFromCUDADeviceToHostAsync");
-  const data_size_t left_leaf_num_data = cpu_split_info_buffer[1];
-  const data_size_t left_leaf_data_start = cpu_split_info_buffer[2];
-  const data_size_t right_leaf_num_data = cpu_split_info_buffer[4];
   global_timer.Start("CUDADataPartition::CopyDataIndicesKernel");
-  CopyDataIndicesKernel<<<grid_dim_, block_dim_, 0, cuda_streams_[2]>>>(
-    left_leaf_num_data + right_leaf_num_data, cuda_out_data_indices_in_leaf_, cuda_data_indices_ + left_leaf_data_start);
+  CopyDataIndicesKernelLaunch<<<1, 1, 0, cuda_streams_[2]>>>(
+    best_split_info,
+    cuda_leaf_data_start_,
+    cuda_out_data_indices_in_leaf_,
+    cuda_data_indices_);
   global_timer.Stop("CUDADataPartition::CopyDataIndicesKernel");
-  const data_size_t right_leaf_data_start = cpu_split_info_buffer[5];
-  *left_leaf_num_data_ref = left_leaf_num_data;
-  *left_leaf_start_ref = left_leaf_data_start;
-  *right_leaf_num_data_ref = right_leaf_num_data;
-  *right_leaf_start_ref = right_leaf_data_start;
-  *left_leaf_sum_of_hessians_ref = cpu_sum_hessians_info[0];
-  *right_leaf_sum_of_hessians_ref = cpu_sum_hessians_info[1];
-  *left_leaf_sum_of_gradients_ref = cpu_sum_hessians_info[2];
-  *right_leaf_sum_of_gradients_ref = cpu_sum_hessians_info[3];
 }
 
 template <bool USE_BAGGING>

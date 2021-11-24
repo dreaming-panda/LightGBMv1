@@ -141,70 +141,45 @@ void CUDADataPartition::BeforeTrain() {
 
 void CUDADataPartition::Split(
   // input best split info
-  const CUDASplitInfo* best_split_info,
-  const int left_leaf_index,
+  CUDASplitInfo* const* best_split_info,
   const int right_leaf_index,
-  const int leaf_best_split_feature,
-  const uint32_t leaf_best_split_threshold,
   const uint32_t* categorical_bitset,
   const int categorical_bitset_len,
-  const uint8_t leaf_best_split_default_left,
-  const data_size_t num_data_in_leaf,
-  const data_size_t leaf_data_start,
   // for leaf information update
   CUDALeafSplitsStruct* smaller_leaf_splits,
-  CUDALeafSplitsStruct* larger_leaf_splits,
-  // gather information for CPU, used for launching kernels
-  data_size_t* left_leaf_num_data,
-  data_size_t* right_leaf_num_data,
-  data_size_t* left_leaf_start,
-  data_size_t* right_leaf_start,
-  double* left_leaf_sum_of_hessians,
-  double* right_leaf_sum_of_hessians,
-  double* left_leaf_sum_of_gradients,
-  double* right_leaf_sum_of_gradients) {
-  CalcBlockDim(num_data_in_leaf);
+  CUDALeafSplitsStruct* larger_leaf_splits) {
+  //CalcBlockDim(num_data_in_leaf);
   global_timer.Start("GenDataToLeftBitVector");
-  GenDataToLeftBitVector(num_data_in_leaf,
-                         leaf_best_split_feature,
-                         leaf_best_split_threshold,
-                         categorical_bitset,
-                         categorical_bitset_len,
-                         leaf_best_split_default_left,
-                         leaf_data_start,
-                         left_leaf_index,
-                         right_leaf_index);
+  GenDataToLeftBitVector(
+    best_split_info,
+    right_leaf_index,
+    categorical_bitset,
+    categorical_bitset_len,
+    smaller_leaf_splits,
+    larger_leaf_splits);
   global_timer.Stop("GenDataToLeftBitVector");
   global_timer.Start("SplitInner");
 
-  SplitInner(num_data_in_leaf,
-             best_split_info,
-             left_leaf_index,
-             right_leaf_index,
-             smaller_leaf_splits,
-             larger_leaf_splits,
-             left_leaf_num_data,
-             right_leaf_num_data,
-             left_leaf_start,
-             right_leaf_start,
-             left_leaf_sum_of_hessians,
-             right_leaf_sum_of_hessians,
-             left_leaf_sum_of_gradients,
-             right_leaf_sum_of_gradients);
+  SplitInner(
+    best_split_info,
+    right_leaf_index,
+    categorical_bitset,
+    categorical_bitset_len,
+    smaller_leaf_splits,
+    larger_leaf_splits);
   global_timer.Stop("SplitInner");
 }
 
 void CUDADataPartition::GenDataToLeftBitVector(
-    const data_size_t num_data_in_leaf,
-    const int split_feature_index,
-    const uint32_t split_threshold,
-    const uint32_t* categorical_bitset,
-    const int categorical_bitset_len,
-    const uint8_t split_default_left,
-    const data_size_t leaf_data_start,
-    const int left_leaf_index,
-    const int right_leaf_index) {
-  if (is_categorical_feature_[split_feature_index]) {
+  // input best split info
+  CUDASplitInfo* const* best_split_info,
+  const int right_leaf_index,
+  const uint32_t* categorical_bitset,
+  const int categorical_bitset_len,
+  // for leaf information update
+  CUDALeafSplitsStruct* smaller_leaf_splits,
+  CUDALeafSplitsStruct* larger_leaf_splits) {
+  /*if (is_categorical_feature_[split_feature_index]) {
     LaunchGenDataToLeftBitVectorCategoricalKernel(
       num_data_in_leaf,
       split_feature_index,
@@ -214,49 +189,33 @@ void CUDADataPartition::GenDataToLeftBitVector(
       leaf_data_start,
       left_leaf_index,
       right_leaf_index);
-  } else {
+  } else {*/
     LaunchGenDataToLeftBitVectorKernel(
-      num_data_in_leaf,
-      split_feature_index,
-      split_threshold,
-      split_default_left,
-      leaf_data_start,
-      left_leaf_index,
-      right_leaf_index);
-  }
+      best_split_info,
+      right_leaf_index,
+      categorical_bitset,
+      categorical_bitset_len,
+      smaller_leaf_splits,
+      larger_leaf_splits);
+  //}
 }
 
 void CUDADataPartition::SplitInner(
-  const data_size_t num_data_in_leaf,
-  const CUDASplitInfo* best_split_info,
-  const int left_leaf_index,
+  // input best split info
+  CUDASplitInfo* const* best_split_info,
   const int right_leaf_index,
-  // for leaf splits information update
+  const uint32_t* categorical_bitset,
+  const int categorical_bitset_len,
+  // for leaf information update
   CUDALeafSplitsStruct* smaller_leaf_splits,
-  CUDALeafSplitsStruct* larger_leaf_splits,
-  data_size_t* left_leaf_num_data,
-  data_size_t* right_leaf_num_data,
-  data_size_t* left_leaf_start,
-  data_size_t* right_leaf_start,
-  double* left_leaf_sum_of_hessians,
-  double* right_leaf_sum_of_hessians,
-  double* left_leaf_sum_of_gradients,
-  double* right_leaf_sum_of_gradients) {
+  CUDALeafSplitsStruct* larger_leaf_splits) {
   LaunchSplitInnerKernel(
-    num_data_in_leaf,
     best_split_info,
-    left_leaf_index,
     right_leaf_index,
+    categorical_bitset,
+    categorical_bitset_len,
     smaller_leaf_splits,
-    larger_leaf_splits,
-    left_leaf_num_data,
-    right_leaf_num_data,
-    left_leaf_start,
-    right_leaf_start,
-    left_leaf_sum_of_hessians,
-    right_leaf_sum_of_hessians,
-    left_leaf_sum_of_gradients,
-    right_leaf_sum_of_gradients);
+    larger_leaf_splits);
   ++cur_num_leaves_;
 }
 

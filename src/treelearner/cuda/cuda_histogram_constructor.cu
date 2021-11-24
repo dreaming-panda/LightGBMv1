@@ -14,6 +14,35 @@
 
 namespace LightGBM {
 
+void CUDAHistogramConstructor::CalcConstructHistogramKernelDim(
+  int* grid_dim_x,
+  int* grid_dim_y,
+  int* block_dim_x,
+  int* block_dim_y,
+  const data_size_t num_data_in_leaf) {
+  *block_dim_x = cuda_row_data_->max_num_column_per_partition();
+  *block_dim_y = NUM_THRADS_PER_BLOCK / cuda_row_data_->max_num_column_per_partition();
+  *grid_dim_x = cuda_row_data_->num_feature_partitions();
+  *grid_dim_y = std::max(min_grid_dim_y_,
+    ((num_data_in_leaf + NUM_DATA_PER_THREAD - 1) / NUM_DATA_PER_THREAD + (*block_dim_y) - 1) / (*block_dim_y));
+}
+
+__device__ void CUDAHistogramConstructor::CalcConstructHistogramKernelDim(
+  int* grid_dim_x,
+  int* grid_dim_y,
+  int* block_dim_x,
+  int* block_dim_y,
+  const data_size_t num_data_in_smaller_leaf,
+  const int max_num_column_per_partition,
+  const int num_feature_partitions,
+  const int min_grid_dim_y) {
+  *block_dim_x = max_num_column_per_partition;
+  *block_dim_y = NUM_THRADS_PER_BLOCK / max_num_column_per_partition;
+  *grid_dim_x = num_feature_partitions;
+  *grid_dim_y = max(min_grid_dim_y,
+    ((num_data_in_smaller_leaf + NUM_DATA_PER_THREAD - 1) / NUM_DATA_PER_THREAD + (*block_dim_y) - 1) / (*block_dim_y));
+}
+
 template <typename BIN_TYPE, typename HIST_TYPE, int SHARED_HIST_SIZE>
 __global__ void CUDAConstructHistogramDenseKernel(
   const CUDALeafSplitsStruct* smaller_leaf_splits,
@@ -73,6 +102,49 @@ __global__ void CUDAConstructHistogramDenseKernel(
   }
 }
 
+template <typename BIN_TYPE, typename HIST_TYPE, int SHARED_HIST_SIZE>
+__global__ void CUDAConstructHistogramDenseKernelLaunch(
+  const CUDALeafSplitsStruct* smaller_leaf_splits,
+  const CUDALeafSplitsStruct* larger_leaf_splits,
+  const score_t* cuda_gradients,
+  const score_t* cuda_hessians,
+  const BIN_TYPE* data,
+  const uint32_t* column_hist_offsets,
+  const uint32_t* column_hist_offsets_full,
+  const int* feature_partition_column_index_offsets,
+  const data_size_t num_data,
+  const data_size_t min_data_in_leaf,
+  const double min_sum_hessians_in_leaf,
+  const int max_num_column_per_partition,
+  const int num_feature_partitions,
+  const int min_grid_dim_y) {
+  if ((smaller_leaf_splits->num_data_in_leaf <= min_data_in_leaf || smaller_leaf_splits->sum_of_hessians <= min_sum_hessians_in_leaf) &&
+      (larger_leaf_splits->num_data_in_leaf <= min_data_in_leaf || larger_leaf_splits->sum_of_hessians <= min_sum_hessians_in_leaf)) {
+    return;
+  }
+  int grid_dim_x = 0;
+  int grid_dim_y = 0;
+  int block_dim_x = 0;
+  int block_dim_y = 0;
+  CUDAHistogramConstructor::CalcConstructHistogramKernelDim(
+    &grid_dim_x, &grid_dim_y, &block_dim_x, &block_dim_y,
+    smaller_leaf_splits->num_data_in_leaf,
+    max_num_column_per_partition, num_feature_partitions, min_grid_dim_y);
+  cudaStream_t cuda_stream;
+  cudaStreamCreateWithFlags(&cuda_stream, cudaStreamNonBlocking);
+  CUDAConstructHistogramDenseKernel<BIN_TYPE, HIST_TYPE, SHARED_HIST_SIZE>
+    <<<dim3(grid_dim_x, grid_dim_y), dim3(block_dim_x, block_dim_y), 0, cuda_stream>>>(
+      smaller_leaf_splits,
+      cuda_gradients,
+      cuda_hessians,
+      data,
+      column_hist_offsets,
+      column_hist_offsets_full,
+      feature_partition_column_index_offsets,
+      num_data);
+  cudaStreamDestroy(cuda_stream);
+}
+
 template <typename BIN_TYPE, int SHARED_HIST_SIZE>
 __global__ void CUDAConstructDiscretizedHistogramDenseKernel(
   const CUDALeafSplitsStruct* smaller_leaf_splits,
@@ -127,6 +199,47 @@ __global__ void CUDAConstructDiscretizedHistogramDenseKernel(
   for (unsigned int i = thread_idx; i < num_items_in_partition; i += num_threads_per_block) {
     atomicAdd_system(feature_histogram_ptr + (i * 2), static_cast<int32_t>(shared_hist[i]));
   }
+}
+
+template <typename BIN_TYPE, int SHARED_HIST_SIZE>
+__global__ void CUDAConstructDiscretizedHistogramDenseKernelLaunch(
+  const CUDALeafSplitsStruct* smaller_leaf_splits,
+  const CUDALeafSplitsStruct* larger_leaf_splits,
+  const int32_t* cuda_gradients_and_hessians,
+  const BIN_TYPE* data,
+  const uint32_t* column_hist_offsets,
+  const uint32_t* column_hist_offsets_full,
+  const int* feature_partition_column_index_offsets,
+  const data_size_t num_data,
+  const data_size_t min_data_in_leaf,
+  const double min_sum_hessians_in_leaf,
+  const int max_num_column_per_partition,
+  const int num_feature_partitions,
+  const int min_grid_dim_y) {
+  if ((smaller_leaf_splits->num_data_in_leaf <= min_data_in_leaf || smaller_leaf_splits->sum_of_hessians <= min_sum_hessians_in_leaf) &&
+      (larger_leaf_splits->num_data_in_leaf <= min_data_in_leaf || larger_leaf_splits->sum_of_hessians <= min_sum_hessians_in_leaf)) {
+    return;
+  }
+  int grid_dim_x = 0;
+  int grid_dim_y = 0;
+  int block_dim_x = 0;
+  int block_dim_y = 0;
+  CUDAHistogramConstructor::CalcConstructHistogramKernelDim(
+    &grid_dim_x, &grid_dim_y, &block_dim_x, &block_dim_y,
+    smaller_leaf_splits->num_data_in_leaf,
+    max_num_column_per_partition, num_feature_partitions, min_grid_dim_y);
+  cudaStream_t cuda_stream;
+  cudaStreamCreateWithFlags(&cuda_stream, cudaStreamNonBlocking);
+  CUDAConstructDiscretizedHistogramDenseKernel<BIN_TYPE, SHARED_HIST_SIZE>
+    <<<dim3(grid_dim_x, grid_dim_y), dim3(block_dim_x, block_dim_y), 0, cuda_stream>>>(
+      smaller_leaf_splits,
+      cuda_gradients_and_hessians,
+      data,
+      column_hist_offsets,
+      column_hist_offsets_full,
+      feature_partition_column_index_offsets,
+      num_data);
+  cudaStreamDestroy(cuda_stream);
 }
 
 template <typename BIN_TYPE, typename DATA_PTR_TYPE, typename HIST_TYPE, int SHARED_HIST_SIZE>
@@ -187,8 +300,51 @@ __global__ void CUDAConstructHistogramSparseKernel(
   }
 }
 
+template <typename BIN_TYPE, typename DATA_PTR_TYPE, typename HIST_TYPE, int SHARED_HIST_SIZE>
+__global__ void CUDAConstructHistogramSparseKernelLaunch(
+  const CUDALeafSplitsStruct* smaller_leaf_splits,
+  const CUDALeafSplitsStruct* larger_leaf_splits,
+  const score_t* cuda_gradients,
+  const score_t* cuda_hessians,
+  const BIN_TYPE* data,
+  const DATA_PTR_TYPE* row_ptr,
+  const DATA_PTR_TYPE* partition_ptr,
+  const uint32_t* column_hist_offsets_full,
+  const data_size_t num_data,
+  const data_size_t min_data_in_leaf,
+  const double min_sum_hessians_in_leaf,
+  const int max_num_column_per_partition,
+  const int num_feature_partitions,
+  const int min_grid_dim_y) {
+  if ((smaller_leaf_splits->num_data_in_leaf <= min_data_in_leaf || smaller_leaf_splits->sum_of_hessians <= min_sum_hessians_in_leaf) &&
+      (larger_leaf_splits->num_data_in_leaf <= min_data_in_leaf || larger_leaf_splits->sum_of_hessians <= min_sum_hessians_in_leaf)) {
+    return;
+  }
+  int grid_dim_x = 0;
+  int grid_dim_y = 0;
+  int block_dim_x = 0;
+  int block_dim_y = 0;
+  CUDAHistogramConstructor::CalcConstructHistogramKernelDim(
+    &grid_dim_x, &grid_dim_y, &block_dim_x, &block_dim_y,
+    smaller_leaf_splits->num_data_in_leaf,
+    max_num_column_per_partition, num_feature_partitions, min_grid_dim_y);
+  cudaStream_t cuda_stream;
+  cudaStreamCreateWithFlags(&cuda_stream, cudaStreamNonBlocking);
+  CUDAConstructHistogramSparseKernel<BIN_TYPE, DATA_PTR_TYPE, HIST_TYPE, SHARED_HIST_SIZE>
+    <<<dim3(grid_dim_x, grid_dim_y), dim3(block_dim_x, block_dim_y), 0, cuda_stream>>>(
+      smaller_leaf_splits,
+      cuda_gradients,
+      cuda_hessians,
+      data,
+      row_ptr,
+      partition_ptr,
+      column_hist_offsets_full,
+      num_data);
+  cudaStreamDestroy(cuda_stream);
+}
+
 // TODO(shiyu1994): global memory buffer should also has double precision option
-template <typename BIN_TYPE>
+/*template <typename BIN_TYPE>
 __global__ void CUDAConstructHistogramDenseKernel_GlobalMemory(
   const CUDALeafSplitsStruct* smaller_leaf_splits,
   const score_t* cuda_gradients,
@@ -308,44 +464,43 @@ __global__ void CUDAConstructHistogramSparseKernel_GlobalMemory(
   for (unsigned int i = thread_idx; i < num_items_in_partition; i += num_threads_per_block) {
     atomicAdd_system(feature_histogram_ptr + i, shared_hist[i]);
   }
-}
+}*/
 
 void CUDAHistogramConstructor::LaunchConstructHistogramKernel(
   const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
-  const data_size_t num_data_in_smaller_leaf) {
+  const CUDALeafSplitsStruct* cuda_larger_leaf_splits) {
   if (gpu_use_discretized_grad_) {
     CHECK_EQ(cuda_row_data_->shared_hist_size(), 6144 * 4);
-    LaunchConstructDiscretizedHistogramKernel(cuda_smaller_leaf_splits, num_data_in_smaller_leaf);
+    LaunchConstructDiscretizedHistogramKernel(cuda_smaller_leaf_splits, cuda_larger_leaf_splits);
   } else if (cuda_row_data_->use_dp()) {
     CHECK_EQ(cuda_row_data_->shared_hist_size(), 6144);
-    LaunchConstructHistogramKernelInner<double, 6144>(cuda_smaller_leaf_splits, num_data_in_smaller_leaf);
+    LaunchConstructHistogramKernelInner<double, 6144>(cuda_smaller_leaf_splits, cuda_larger_leaf_splits);
   } else {
     CHECK_EQ(cuda_row_data_->shared_hist_size(), 6144 * 2);
-    LaunchConstructHistogramKernelInner<float, 6144 * 2>(cuda_smaller_leaf_splits, num_data_in_smaller_leaf);
+    LaunchConstructHistogramKernelInner<float, 6144 * 2>(cuda_smaller_leaf_splits, cuda_larger_leaf_splits);
   }
 }
 
 void CUDAHistogramConstructor::LaunchConstructDiscretizedHistogramKernel(
   const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
-  const data_size_t num_data_in_smaller_leaf) {
-  int grid_dim_x = 0;
-  int grid_dim_y = 0;
-  int block_dim_x = 0;
-  int block_dim_y = 0;
-  CalcConstructHistogramKernelDim(&grid_dim_x, &grid_dim_y, &block_dim_x, &block_dim_y, num_data_in_smaller_leaf);
-  dim3 grid_dim(grid_dim_x, grid_dim_y);
-  dim3 block_dim(block_dim_x, block_dim_y);
+  const CUDALeafSplitsStruct* cuda_larger_leaf_splits) {
   if (!cuda_row_data_->is_sparse()) {
     if (cuda_row_data_->bit_type() == 8) {
       CHECK_EQ(cuda_row_data_->shared_hist_size(), 6144 * 4);
-      CUDAConstructDiscretizedHistogramDenseKernel<uint8_t, 6144 * 4><<<grid_dim, block_dim, 0, cuda_stream_>>>(
+      CUDAConstructDiscretizedHistogramDenseKernelLaunch<uint8_t, 6144 * 4><<<1, 1, 0, cuda_stream_>>>(
         cuda_smaller_leaf_splits,
+        cuda_larger_leaf_splits,
         reinterpret_cast<const int32_t*>(cuda_gradients_),
         cuda_row_data_->cuda_data_uint8(),
         cuda_row_data_->cuda_column_hist_offsets(),
         cuda_row_data_->cuda_partition_hist_offsets(),
         cuda_row_data_->cuda_feature_partition_column_index_offsets(),
-        num_data_);
+        num_data_,
+        min_data_in_leaf_,
+        min_sum_hessian_in_leaf_,
+        cuda_row_data_->max_num_column_per_partition(),
+        cuda_row_data_->num_feature_partitions(),
+        min_grid_dim_y_);
     }
   }
 }
@@ -353,135 +508,200 @@ void CUDAHistogramConstructor::LaunchConstructDiscretizedHistogramKernel(
 template <typename HIST_TYPE, int SHARED_HIST_SIZE>
 void CUDAHistogramConstructor::LaunchConstructHistogramKernelInner(
   const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
-  const data_size_t num_data_in_smaller_leaf) {
-  int grid_dim_x = 0;
-  int grid_dim_y = 0;
-  int block_dim_x = 0;
-  int block_dim_y = 0;
-  CalcConstructHistogramKernelDim(&grid_dim_x, &grid_dim_y, &block_dim_x, &block_dim_y, num_data_in_smaller_leaf);
-  dim3 grid_dim(grid_dim_x, grid_dim_y);
-  dim3 block_dim(block_dim_x, block_dim_y);
+  const CUDALeafSplitsStruct* cuda_larger_leaf_splits) {
   if (cuda_row_data_->NumLargeBinPartition() == 0) {
     if (cuda_row_data_->is_sparse()) {
       if (cuda_row_data_->bit_type() == 8) {
         if (cuda_row_data_->row_ptr_bit_type() == 16) {
-          CUDAConstructHistogramSparseKernel<uint8_t, uint16_t, HIST_TYPE, SHARED_HIST_SIZE><<<grid_dim, block_dim, 0, cuda_stream_>>>(
+          CUDAConstructHistogramSparseKernelLaunch<uint8_t, uint16_t, HIST_TYPE, SHARED_HIST_SIZE><<<1, 1, 0, cuda_stream_>>>(
             cuda_smaller_leaf_splits,
+            cuda_larger_leaf_splits,
             cuda_gradients_, cuda_hessians_,
             cuda_row_data_->cuda_data_uint8(),
             cuda_row_data_->cuda_row_ptr_uint16(),
             cuda_row_data_->cuda_partition_ptr_uint16(),
             cuda_row_data_->cuda_partition_hist_offsets(),
-            num_data_);
+            num_data_,
+            min_data_in_leaf_,
+            min_sum_hessian_in_leaf_,
+            cuda_row_data_->max_num_column_per_partition(),
+            cuda_row_data_->num_feature_partitions(),
+            min_grid_dim_y_);
         } else if (cuda_row_data_->row_ptr_bit_type() == 32) {
-          CUDAConstructHistogramSparseKernel<uint8_t, uint32_t, HIST_TYPE, SHARED_HIST_SIZE><<<grid_dim, block_dim, 0, cuda_stream_>>>(
+          CUDAConstructHistogramSparseKernelLaunch<uint8_t, uint32_t, HIST_TYPE, SHARED_HIST_SIZE><<<1, 1, 0, cuda_stream_>>>(
             cuda_smaller_leaf_splits,
+            cuda_larger_leaf_splits,
             cuda_gradients_, cuda_hessians_,
             cuda_row_data_->cuda_data_uint8(),
             cuda_row_data_->cuda_row_ptr_uint32(),
             cuda_row_data_->cuda_partition_ptr_uint32(),
             cuda_row_data_->cuda_partition_hist_offsets(),
-            num_data_);
+            num_data_,
+            min_data_in_leaf_,
+            min_sum_hessian_in_leaf_,
+            cuda_row_data_->max_num_column_per_partition(),
+            cuda_row_data_->num_feature_partitions(),
+            min_grid_dim_y_);
         } else if (cuda_row_data_->row_ptr_bit_type() == 64) {
-          CUDAConstructHistogramSparseKernel<uint8_t, uint64_t, HIST_TYPE, SHARED_HIST_SIZE><<<grid_dim, block_dim, 0, cuda_stream_>>>(
+          CUDAConstructHistogramSparseKernelLaunch<uint8_t, uint64_t, HIST_TYPE, SHARED_HIST_SIZE><<<1, 1, 0, cuda_stream_>>>(
             cuda_smaller_leaf_splits,
+            cuda_larger_leaf_splits,
             cuda_gradients_, cuda_hessians_,
             cuda_row_data_->cuda_data_uint8(),
             cuda_row_data_->cuda_row_ptr_uint64(),
             cuda_row_data_->cuda_partition_ptr_uint64(),
             cuda_row_data_->cuda_partition_hist_offsets(),
-            num_data_);
+            num_data_,
+            min_data_in_leaf_,
+            min_sum_hessian_in_leaf_,
+            cuda_row_data_->max_num_column_per_partition(),
+            cuda_row_data_->num_feature_partitions(),
+            min_grid_dim_y_);
         }
       } else if (cuda_row_data_->bit_type() == 16) {
         if (cuda_row_data_->row_ptr_bit_type() == 16) {
-          CUDAConstructHistogramSparseKernel<uint16_t, uint16_t, HIST_TYPE, SHARED_HIST_SIZE><<<grid_dim, block_dim, 0, cuda_stream_>>>(
+          CUDAConstructHistogramSparseKernelLaunch<uint16_t, uint16_t, HIST_TYPE, SHARED_HIST_SIZE><<<1, 1, 0, cuda_stream_>>>(
             cuda_smaller_leaf_splits,
+            cuda_larger_leaf_splits,
             cuda_gradients_, cuda_hessians_,
             cuda_row_data_->cuda_data_uint16(),
             cuda_row_data_->cuda_row_ptr_uint16(),
             cuda_row_data_->cuda_partition_ptr_uint16(),
             cuda_row_data_->cuda_partition_hist_offsets(),
-            num_data_);
+            num_data_,
+            min_data_in_leaf_,
+            min_sum_hessian_in_leaf_,
+            cuda_row_data_->max_num_column_per_partition(),
+            cuda_row_data_->num_feature_partitions(),
+            min_grid_dim_y_);
         } else if (cuda_row_data_->row_ptr_bit_type() == 32) {
-          CUDAConstructHistogramSparseKernel<uint16_t, uint32_t, HIST_TYPE, SHARED_HIST_SIZE><<<grid_dim, block_dim, 0, cuda_stream_>>>(
+          CUDAConstructHistogramSparseKernelLaunch<uint16_t, uint32_t, HIST_TYPE, SHARED_HIST_SIZE><<<1, 1, 0, cuda_stream_>>>(
             cuda_smaller_leaf_splits,
+            cuda_larger_leaf_splits,
             cuda_gradients_, cuda_hessians_,
             cuda_row_data_->cuda_data_uint16(),
             cuda_row_data_->cuda_row_ptr_uint32(),
             cuda_row_data_->cuda_partition_ptr_uint32(),
             cuda_row_data_->cuda_partition_hist_offsets(),
-            num_data_);
+            num_data_,
+            min_data_in_leaf_,
+            min_sum_hessian_in_leaf_,
+            cuda_row_data_->max_num_column_per_partition(),
+            cuda_row_data_->num_feature_partitions(),
+            min_grid_dim_y_);
         } else if (cuda_row_data_->row_ptr_bit_type() == 64) {
-          CUDAConstructHistogramSparseKernel<uint16_t, uint64_t, HIST_TYPE, SHARED_HIST_SIZE><<<grid_dim, block_dim, 0, cuda_stream_>>>(
+          CUDAConstructHistogramSparseKernelLaunch<uint16_t, uint64_t, HIST_TYPE, SHARED_HIST_SIZE><<<1, 1, 0, cuda_stream_>>>(
             cuda_smaller_leaf_splits,
+            cuda_larger_leaf_splits,
             cuda_gradients_, cuda_hessians_,
             cuda_row_data_->cuda_data_uint16(),
             cuda_row_data_->cuda_row_ptr_uint64(),
             cuda_row_data_->cuda_partition_ptr_uint64(),
             cuda_row_data_->cuda_partition_hist_offsets(),
-            num_data_);
+            num_data_,
+            min_data_in_leaf_,
+            min_sum_hessian_in_leaf_,
+            cuda_row_data_->max_num_column_per_partition(),
+            cuda_row_data_->num_feature_partitions(),
+            min_grid_dim_y_);
         }
       } else if (cuda_row_data_->bit_type() == 32) {
         if (cuda_row_data_->row_ptr_bit_type() == 16) {
-          CUDAConstructHistogramSparseKernel<uint32_t, uint16_t, HIST_TYPE, SHARED_HIST_SIZE><<<grid_dim, block_dim, 0, cuda_stream_>>>(
+          CUDAConstructHistogramSparseKernelLaunch<uint32_t, uint16_t, HIST_TYPE, SHARED_HIST_SIZE><<<1, 1, 0, cuda_stream_>>>(
             cuda_smaller_leaf_splits,
+            cuda_larger_leaf_splits,
             cuda_gradients_, cuda_hessians_,
             cuda_row_data_->cuda_data_uint32(),
             cuda_row_data_->cuda_row_ptr_uint16(),
             cuda_row_data_->cuda_partition_ptr_uint16(),
             cuda_row_data_->cuda_partition_hist_offsets(),
-            num_data_);
+            num_data_,
+            min_data_in_leaf_,
+            min_sum_hessian_in_leaf_,
+            cuda_row_data_->max_num_column_per_partition(),
+            cuda_row_data_->num_feature_partitions(),
+            min_grid_dim_y_);
         } else if (cuda_row_data_->row_ptr_bit_type() == 32) {
-          CUDAConstructHistogramSparseKernel<uint32_t, uint32_t, HIST_TYPE, SHARED_HIST_SIZE><<<grid_dim, block_dim, 0, cuda_stream_>>>(
+          CUDAConstructHistogramSparseKernelLaunch<uint32_t, uint32_t, HIST_TYPE, SHARED_HIST_SIZE><<<1, 1, 0, cuda_stream_>>>(
             cuda_smaller_leaf_splits,
+            cuda_larger_leaf_splits,
             cuda_gradients_, cuda_hessians_,
             cuda_row_data_->cuda_data_uint32(),
             cuda_row_data_->cuda_row_ptr_uint32(),
             cuda_row_data_->cuda_partition_ptr_uint32(),
             cuda_row_data_->cuda_partition_hist_offsets(),
-            num_data_);
+            num_data_,
+            min_data_in_leaf_,
+            min_sum_hessian_in_leaf_,
+            cuda_row_data_->max_num_column_per_partition(),
+            cuda_row_data_->num_feature_partitions(),
+            min_grid_dim_y_);
         } else if (cuda_row_data_->row_ptr_bit_type() == 64) {
-          CUDAConstructHistogramSparseKernel<uint32_t, uint64_t, HIST_TYPE, SHARED_HIST_SIZE><<<grid_dim, block_dim, 0, cuda_stream_>>>(
+          CUDAConstructHistogramSparseKernelLaunch<uint32_t, uint64_t, HIST_TYPE, SHARED_HIST_SIZE><<<1, 1, 0, cuda_stream_>>>(
             cuda_smaller_leaf_splits,
+            cuda_larger_leaf_splits,
             cuda_gradients_, cuda_hessians_,
             cuda_row_data_->cuda_data_uint32(),
             cuda_row_data_->cuda_row_ptr_uint64(),
             cuda_row_data_->cuda_partition_ptr_uint64(),
             cuda_row_data_->cuda_partition_hist_offsets(),
-            num_data_);
+            num_data_,
+            min_data_in_leaf_,
+            min_sum_hessian_in_leaf_,
+            cuda_row_data_->max_num_column_per_partition(),
+            cuda_row_data_->num_feature_partitions(),
+            min_grid_dim_y_);
         }
       }
     } else {
       if (cuda_row_data_->bit_type() == 8) {
-        CUDAConstructHistogramDenseKernel<uint8_t, HIST_TYPE, SHARED_HIST_SIZE><<<grid_dim, block_dim, 0, cuda_stream_>>>(
+        CUDAConstructHistogramDenseKernelLaunch<uint8_t, HIST_TYPE, SHARED_HIST_SIZE><<<1, 1, 0, cuda_stream_>>>(
           cuda_smaller_leaf_splits,
+          cuda_larger_leaf_splits,
           cuda_gradients_, cuda_hessians_,
           cuda_row_data_->cuda_data_uint8(),
           cuda_row_data_->cuda_column_hist_offsets(),
           cuda_row_data_->cuda_partition_hist_offsets(),
           cuda_row_data_->cuda_feature_partition_column_index_offsets(),
-          num_data_);
+          num_data_,
+          min_data_in_leaf_,
+          min_sum_hessian_in_leaf_,
+          cuda_row_data_->max_num_column_per_partition(),
+          cuda_row_data_->num_feature_partitions(),
+          min_grid_dim_y_);
       } else if (cuda_row_data_->bit_type() == 16) {
-        CUDAConstructHistogramDenseKernel<uint16_t, HIST_TYPE, SHARED_HIST_SIZE><<<grid_dim, block_dim, 0, cuda_stream_>>>(
+        CUDAConstructHistogramDenseKernelLaunch<uint16_t, HIST_TYPE, SHARED_HIST_SIZE><<<1, 1, 0, cuda_stream_>>>(
           cuda_smaller_leaf_splits,
+          cuda_larger_leaf_splits,
           cuda_gradients_, cuda_hessians_,
           cuda_row_data_->cuda_data_uint16(),
           cuda_row_data_->cuda_column_hist_offsets(),
           cuda_row_data_->cuda_partition_hist_offsets(),
           cuda_row_data_->cuda_feature_partition_column_index_offsets(),
-          num_data_);
+          num_data_,
+          min_data_in_leaf_,
+          min_sum_hessian_in_leaf_,
+          cuda_row_data_->max_num_column_per_partition(),
+          cuda_row_data_->num_feature_partitions(),
+          min_grid_dim_y_);
       } else if (cuda_row_data_->bit_type() == 32) {
-        CUDAConstructHistogramDenseKernel<uint32_t, HIST_TYPE, SHARED_HIST_SIZE><<<grid_dim, block_dim, 0, cuda_stream_>>>(
+        CUDAConstructHistogramDenseKernelLaunch<uint32_t, HIST_TYPE, SHARED_HIST_SIZE><<<1, 1, 0, cuda_stream_>>>(
           cuda_smaller_leaf_splits,
+          cuda_larger_leaf_splits,
           cuda_gradients_, cuda_hessians_,
           cuda_row_data_->cuda_data_uint32(),
           cuda_row_data_->cuda_column_hist_offsets(),
           cuda_row_data_->cuda_partition_hist_offsets(),
           cuda_row_data_->cuda_feature_partition_column_index_offsets(),
-          num_data_);
+          num_data_,
+          min_data_in_leaf_,
+          min_sum_hessian_in_leaf_,
+          cuda_row_data_->max_num_column_per_partition(),
+          cuda_row_data_->num_feature_partitions(),
+          min_grid_dim_y_);
       }
     }
-  } else {
+  }/* else {
     if (cuda_row_data_->is_sparse()) {
       if (cuda_row_data_->bit_type() == 8) {
         if (cuda_row_data_->row_ptr_bit_type() == 16) {
@@ -613,7 +833,7 @@ void CUDAHistogramConstructor::LaunchConstructHistogramKernelInner(
           cuda_hist_buffer_);
       }
     }
-  }
+  }*/
 }
 
 __global__ void SubtractHistogramKernel(

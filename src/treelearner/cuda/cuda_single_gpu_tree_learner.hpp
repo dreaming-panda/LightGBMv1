@@ -87,20 +87,16 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
   std::unique_ptr<CUDABestSplitFinder> cuda_best_split_finder_;
   std::unique_ptr<CUDAGradientDiscretizer> cuda_gradient_discretizer_;
 
-  std::vector<int> leaf_best_split_feature_;
-  std::vector<uint32_t> leaf_best_split_threshold_;
-  std::vector<uint8_t> leaf_best_split_default_left_;
-  std::vector<data_size_t> leaf_num_data_;
-  std::vector<data_size_t> leaf_data_start_;
-  std::vector<double> leaf_sum_hessians_;
-  int smaller_leaf_index_;
-  int larger_leaf_index_;
-  int best_leaf_index_;
   int num_cat_threshold_;
   bool has_categorical_feature_;
 
   std::vector<int> categorical_bin_to_value_;
   std::vector<int> categorical_bin_offsets_;
+  std::vector<int> numerical_bin_offsets_;
+  std::vector<int> real_feature_index_;
+  std::vector<MissingType> feature_missing_type_;
+  std::vector<BinType> feature_bin_type_;
+  std::vector<double> feature_real_threshold_;
 
   mutable double* cuda_leaf_gradient_stat_buffer_;
   mutable double* cuda_leaf_hessian_stat_buffer_;
@@ -113,6 +109,11 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
   size_t* cuda_block_bitset_len_buffer_;
   int* cuda_categorical_bin_to_value_;
   int* cuda_categorical_bin_offsets_;
+  int* cuda_numerical_bin_offsets_;
+  int* cuda_real_feature_index_;
+  MissingType* cuda_feature_missing_type_;
+  BinType* cuda_feature_bin_type_;
+  double* cuda_feature_real_threshold_;
 };
 
 }  // namespace LightGBM

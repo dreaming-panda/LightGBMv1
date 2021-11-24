@@ -246,6 +246,9 @@ void CUDABestSplitFinder::InitCUDAFeatureMetaInfo() {
   AllocateCUDAMemory<int>(&cuda_cat_threshold_real_leaf_, max_num_categories_in_split_ * cuda_best_leaf_split_info_buffer_size, __FILE__, __LINE__);
   AllocateCatVectors(cuda_leaf_best_split_info_, cuda_cat_threshold_leaf_, cuda_cat_threshold_real_leaf_, cuda_best_leaf_split_info_buffer_size);
   AllocateCatVectors(cuda_best_split_info_, cuda_cat_threshold_feature_, cuda_cat_threshold_real_feature_, output_buffer_size);
+
+  AllocateCUDAMemory<CUDASplitInfo*>(&cuda_best_split_found_, 1, __FILE__, __LINE__);
+  AllocateCUDAMemory<int>(&cuda_best_leaf_index_, 1, __FILE__, __LINE__);
 }
 
 void CUDABestSplitFinder::ResetTrainingData(
@@ -310,51 +313,19 @@ void CUDABestSplitFinder::BeforeTrain(const std::vector<int8_t>& is_feature_used
 
 void CUDABestSplitFinder::FindBestSplitsForLeaf(
   const CUDALeafSplitsStruct* smaller_leaf_splits,
-  const CUDALeafSplitsStruct* larger_leaf_splits,
-  const int smaller_leaf_index,
-  const int larger_leaf_index,
-  const data_size_t num_data_in_smaller_leaf,
-  const data_size_t num_data_in_larger_leaf,
-  const double sum_hessians_in_smaller_leaf,
-  const double sum_hessians_in_larger_leaf) {
-  const bool is_smaller_leaf_valid = (num_data_in_smaller_leaf > min_data_in_leaf_ &&
-    sum_hessians_in_smaller_leaf > min_sum_hessian_in_leaf_);
-  const bool is_larger_leaf_valid = (num_data_in_larger_leaf > min_data_in_leaf_ &&
-    sum_hessians_in_larger_leaf > min_sum_hessian_in_leaf_ && larger_leaf_index >= 0);
-  LaunchFindBestSplitsForLeafKernel(smaller_leaf_splits, larger_leaf_splits,
-    smaller_leaf_index, larger_leaf_index, is_smaller_leaf_valid, is_larger_leaf_valid);
-  global_timer.Start("CUDABestSplitFinder::LaunchSyncBestSplitForLeafKernel");
-  LaunchSyncBestSplitForLeafKernel(smaller_leaf_index, larger_leaf_index, is_smaller_leaf_valid, is_larger_leaf_valid);
+  const CUDALeafSplitsStruct* larger_leaf_splits) {
+  LaunchFindBestSplitsForLeafKernel(smaller_leaf_splits, larger_leaf_splits);
   SynchronizeCUDADevice(__FILE__, __LINE__);
-  global_timer.Stop("CUDABestSplitFinder::LaunchSyncBestSplitForLeafKernel");
 }
 
-const CUDASplitInfo* CUDABestSplitFinder::FindBestFromAllSplits(
-    const int cur_num_leaves,
-    const int smaller_leaf_index,
-    const int larger_leaf_index,
-    int* smaller_leaf_best_split_feature,
-    uint32_t* smaller_leaf_best_split_threshold,
-    uint8_t* smaller_leaf_best_split_default_left,
-    int* larger_leaf_best_split_feature,
-    uint32_t* larger_leaf_best_split_threshold,
-    uint8_t* larger_leaf_best_split_default_left,
-    int* best_leaf_index,
-    int* num_cat_threshold) {
+CUDASplitInfo* const* CUDABestSplitFinder::FindBestFromAllSplits(
+  const int cur_num_leaves,
+  int* best_leaf_index) {
   LaunchFindBestFromAllSplitsKernel(
     cur_num_leaves,
-    smaller_leaf_index,
-    larger_leaf_index,
-    smaller_leaf_best_split_feature,
-    smaller_leaf_best_split_threshold,
-    smaller_leaf_best_split_default_left,
-    larger_leaf_best_split_feature,
-    larger_leaf_best_split_threshold,
-    larger_leaf_best_split_default_left,
-    best_leaf_index,
-    num_cat_threshold);
+    best_leaf_index);
   SynchronizeCUDADevice(__FILE__, __LINE__);
-  return cuda_leaf_best_split_info_ + (*best_leaf_index);
+  return cuda_best_split_found_;
 }
 
 void CUDABestSplitFinder::AllocateCatVectors(CUDASplitInfo* cuda_split_infos, uint32_t* cat_threshold_vec, int* cat_threshold_real_vec, size_t len) {

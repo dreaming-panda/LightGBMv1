@@ -44,11 +44,7 @@ class CUDAHistogramConstructor {
 
   void ConstructHistogramForLeaf(
     const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
-    const CUDALeafSplitsStruct* cuda_larger_leaf_splits,
-    const data_size_t num_data_in_smaller_leaf,
-    const data_size_t num_data_in_larger_leaf,
-    const double sum_hessians_in_smaller_leaf,
-    const double sum_hessians_in_larger_leaf);
+    const CUDALeafSplitsStruct* cuda_larger_leaf_splits);
 
   void SubtractHistogramForLeaf(
     const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
@@ -59,6 +55,16 @@ class CUDAHistogramConstructor {
   void ResetConfig(const Config* config);
 
   void BeforeTrain(const score_t* gradients, const score_t* hessians);
+
+  __device__ static void CalcConstructHistogramKernelDim(
+    int* grid_dim_x,
+    int* grid_dim_y,
+    int* block_dim_x,
+    int* block_dim_y,
+    const data_size_t num_data_in_smaller_leaf,
+    const int max_num_column_per_partition,
+    const int num_feature_partitions,
+    const int min_grid_dim_y);
 
   const hist_t* cuda_hist() const { return cuda_hist_; }
 
@@ -74,20 +80,20 @@ class CUDAHistogramConstructor {
     int* grid_dim_y,
     int* block_dim_x,
     int* block_dim_y,
-    const data_size_t num_data_in_smaller_leaf);
+    const data_size_t num_data_in_leaf);
 
   void LaunchConstructHistogramKernel(
     const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
-    const data_size_t num_data_in_smaller_leaf);
+    const CUDALeafSplitsStruct* cuda_larger_leaf_splits);
 
   template <typename HIST_TYPE, int SHARED_HIST_SIZE>
   void LaunchConstructHistogramKernelInner(
     const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
-    const data_size_t num_data_in_smaller_leaf);
+    const CUDALeafSplitsStruct* cuda_larger_leaf_splits);
 
   void LaunchConstructDiscretizedHistogramKernel(
     const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
-    const data_size_t num_data_in_smaller_leaf);
+    const CUDALeafSplitsStruct* cuda_larger_leaf_splits);
 
   void LaunchSparseConstructHistogramKernel(
     const dim3 grid_dim,

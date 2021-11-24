@@ -43,28 +43,13 @@ class CUDADataPartition {
 
   void Split(
     // input best split info
-    const CUDASplitInfo* best_split_info,
-    const int left_leaf_index,
+    CUDASplitInfo* const* best_split_info,
     const int right_leaf_index,
-    const int leaf_best_split_feature,
-    const uint32_t leaf_best_split_threshold,
     const uint32_t* categorical_bitset,
     const int categorical_bitset_len,
-    const uint8_t leaf_best_split_default_left,
-    const data_size_t num_data_in_leaf,
-    const data_size_t leaf_data_start,
     // for leaf information update
     CUDALeafSplitsStruct* smaller_leaf_splits,
-    CUDALeafSplitsStruct* larger_leaf_splits,
-    // gather information for CPU, used for launching kernels
-    data_size_t* left_leaf_num_data,
-    data_size_t* right_leaf_num_data,
-    data_size_t* left_leaf_start,
-    data_size_t* right_leaf_start,
-    double* left_leaf_sum_of_hessians,
-    double* right_leaf_sum_of_hessians,
-    double* left_leaf_sum_of_gradients,
-    double* right_leaf_sum_of_gradients);
+    CUDALeafSplitsStruct* larger_leaf_splits);
 
   void UpdateTrainScore(const Tree* tree, double* cuda_scores);
 
@@ -77,6 +62,8 @@ class CUDADataPartition {
   void ResetConfig(const Config* config);
 
   void ResetByLeafPred(const std::vector<int>& leaf_pred, int num_leaves);
+
+  __device__ static void CalcBlockDim(const data_size_t num_data_in_leaf, int* grid_dim, int* block_dim);
 
   data_size_t root_num_data() const {
     if (use_bagging_) {
@@ -100,65 +87,47 @@ class CUDADataPartition {
   void CalcBlockDim(const data_size_t num_data_in_leaf);
 
   void GenDataToLeftBitVector(
-    const data_size_t num_data_in_leaf,
-    const int split_feature_index,
-    const uint32_t split_threshold,
+    // input best split info
+    CUDASplitInfo* const* best_split_info,
+    const int right_leaf_index,
     const uint32_t* categorical_bitset,
     const int categorical_bitset_len,
-    const uint8_t split_default_left,
-    const data_size_t leaf_data_start,
-    const int left_leaf_index,
-    const int right_leaf_index);
+    // for leaf information update
+    CUDALeafSplitsStruct* smaller_leaf_splits,
+    CUDALeafSplitsStruct* larger_leaf_splits);
 
   void SplitInner(
     // input best split info
-    const data_size_t num_data_in_leaf,
-    const CUDASplitInfo* best_split_info,
-    const int left_leaf_index,
+    CUDASplitInfo* const* best_split_info,
     const int right_leaf_index,
-    // for leaf splits information update
+    const uint32_t* categorical_bitset,
+    const int categorical_bitset_len,
+    // for leaf information update
     CUDALeafSplitsStruct* smaller_leaf_splits,
-    CUDALeafSplitsStruct* larger_leaf_splits,
-    // gather information for CPU, used for launching kernels
-    data_size_t* left_leaf_num_data,
-    data_size_t* right_leaf_num_data,
-    data_size_t* left_leaf_start,
-    data_size_t* right_leaf_start,
-    double* left_leaf_sum_of_hessians,
-    double* right_leaf_sum_of_hessians,
-    double* left_leaf_sum_of_gradients,
-    double* right_leaf_sum_of_gradients);
+    CUDALeafSplitsStruct* larger_leaf_splits);
 
   // kernel launch functions
   void LaunchFillDataIndicesBeforeTrain();
 
   void LaunchSplitInnerKernel(
     // input best split info
-    const data_size_t num_data_in_leaf,
-    const CUDASplitInfo* best_split_info,
-    const int left_leaf_index,
+    CUDASplitInfo* const* best_split_info,
     const int right_leaf_index,
-    // for leaf splits information update
+    const uint32_t* categorical_bitset,
+    const int categorical_bitset_len,
+    // for leaf information update
     CUDALeafSplitsStruct* smaller_leaf_splits,
-    CUDALeafSplitsStruct* larger_leaf_splits,
-    // gather information for CPU, used for launching kernels
-    data_size_t* left_leaf_num_data,
-    data_size_t* right_leaf_num_data,
-    data_size_t* left_leaf_start,
-    data_size_t* right_leaf_start,
-    double* left_leaf_sum_of_hessians,
-    double* right_leaf_sum_of_hessians,
-    double* left_leaf_sum_of_gradients,
-    double* right_leaf_sum_of_gradients);
+    CUDALeafSplitsStruct* larger_leaf_splitss);
 
   void LaunchGenDataToLeftBitVectorKernel(
-    const data_size_t num_data_in_leaf,
-    const int split_feature_index,
-    const uint32_t split_threshold,
-    const uint8_t split_default_left,
-    const data_size_t leaf_data_start,
-    const int left_leaf_index,
-    const int right_leaf_index);
+    // input best split info
+    CUDASplitInfo* const* best_split_info,
+    const int right_leaf_index,
+    const uint32_t* categorical_bitset,
+    const int categorical_bitset_len,
+    // for leaf information update
+    CUDALeafSplitsStruct* smaller_leaf_splits,
+    CUDALeafSplitsStruct* larger_leaf_splits);
 
   void LaunchGenDataToLeftBitVectorCategoricalKernel(
     const data_size_t num_data_in_leaf,

@@ -40,6 +40,13 @@ class CUDATree : public Tree {
 
   ~CUDATree() noexcept;
 
+  int Split(CUDASplitInfo* const* best_split_info,
+            const MissingType* cuda_feature_missing_type,
+            const BinType* cuda_feature_bin_type,
+            const int* cuda_real_feature_index,
+            const int* cuda_numerical_bin_offsets,
+            const double* cuda_feature_real_threshold);
+
   int Split(const int leaf_index,
             const int real_feature_index,
             const double real_threshold,
@@ -111,6 +118,14 @@ class CUDATree : public Tree {
   void InitCUDAMemory();
 
   void InitCUDA();
+
+  void LaunchSplitKernel(
+    CUDASplitInfo* const* best_split_info,
+    const MissingType* cuda_feature_missing_type,
+    const BinType* cuda_feature_bin_type,
+    const int* cuda_real_feature_index,
+    const int* cuda_numerical_bin_offsets,
+    const double* cuda_feature_real_threshold);
 
   void LaunchSplitKernel(const int leaf_index,
                          const int real_feature_index,

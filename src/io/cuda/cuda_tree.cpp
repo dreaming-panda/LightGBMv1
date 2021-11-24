@@ -210,6 +210,23 @@ void CUDATree::InitCUDA() {
   SynchronizeCUDADevice(__FILE__, __LINE__);
 }
 
+int CUDATree::Split(CUDASplitInfo* const* best_split_info,
+                    const MissingType* cuda_feature_missing_type,
+                    const BinType* cuda_feature_bin_type,
+                    const int* cuda_real_feature_index,
+                    const int* cuda_numerical_bin_offsets,
+                    const double* cuda_feature_real_threshold) {
+  LaunchSplitKernel(
+    best_split_info,
+    cuda_feature_missing_type,
+    cuda_feature_bin_type,
+    cuda_real_feature_index,
+    cuda_numerical_bin_offsets,
+    cuda_feature_real_threshold);
+  ++num_leaves_;
+  return num_leaves_ - 1;
+}
+
 int CUDATree::Split(const int leaf_index,
            const int real_feature_index,
            const double real_threshold,
