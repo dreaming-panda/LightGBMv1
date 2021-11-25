@@ -93,6 +93,7 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
   std::vector<data_size_t> leaf_num_data_;
   std::vector<data_size_t> leaf_data_start_;
   std::vector<double> leaf_sum_hessians_;
+  std::vector<double> leaf_best_split_gain_;
   int smaller_leaf_index_;
   int larger_leaf_index_;
   int best_leaf_index_;

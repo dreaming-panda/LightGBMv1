@@ -59,6 +59,7 @@ CUDADataPartition::CUDADataPartition(
   cuda_block_data_to_right_offset_ = nullptr;
   cuda_out_data_indices_in_leaf_ = nullptr;
   cuda_split_info_buffer_ = nullptr;
+  host_split_info_buffer_ = nullptr;
   cuda_num_data_ = nullptr;
   cuda_add_train_score_ = nullptr;
 }
@@ -76,6 +77,7 @@ CUDADataPartition::~CUDADataPartition() {
   DeallocateCUDAMemory<data_size_t>(&cuda_block_data_to_right_offset_, __FILE__, __LINE__);
   DeallocateCUDAMemory<data_size_t>(&cuda_out_data_indices_in_leaf_, __FILE__, __LINE__);
   DeallocateCUDAMemory<int>(&cuda_split_info_buffer_, __FILE__, __LINE__);
+  CUDASUCCESS_OR_FATAL(cudaFreeHost(host_split_info_buffer_));
   DeallocateCUDAMemory<data_size_t>(&cuda_num_data_, __FILE__, __LINE__);
   DeallocateCUDAMemory<double>(&cuda_add_train_score_, __FILE__, __LINE__);
   CUDASUCCESS_OR_FATAL(cudaStreamDestroy(cuda_streams_[0]));
@@ -104,6 +106,7 @@ void CUDADataPartition::Init() {
   CopyFromHostToCUDADevice<hist_t*>(cuda_hist_pool_, &cuda_hist_, 1, __FILE__, __LINE__);
 
   AllocateCUDAMemory<int>(&cuda_split_info_buffer_, 16, __FILE__, __LINE__);
+  CUDASUCCESS_OR_FATAL(cudaMallocHost(&host_split_info_buffer_, 16 * sizeof(int)));
 
   AllocateCUDAMemory<double>(&cuda_leaf_output_, static_cast<size_t>(num_leaves_), __FILE__, __LINE__);
 

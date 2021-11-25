@@ -139,6 +139,14 @@ void ShufflePrefixSumGlobalInner(T* values, size_t len, T* block_prefix_sum_buff
   ShufflePrefixSumGlobalAddBase<<<num_blocks, GLOBAL_PREFIX_SUM_BLOCK_SIZE>>>(len, block_prefix_sum_buffer, values);
 }
 
+template <typename T>
+void ShufflePrefixSumGlobalInnerAsync(T* values, size_t len, T* block_prefix_sum_buffer, cudaStream_t cuda_stream) {
+  const int num_blocks = (static_cast<int>(len) + GLOBAL_PREFIX_SUM_BLOCK_SIZE - 1) / GLOBAL_PREFIX_SUM_BLOCK_SIZE;
+  ShufflePrefixSumGlobalKernel<<<num_blocks, GLOBAL_PREFIX_SUM_BLOCK_SIZE, 0, cuda_stream>>>(values, len, block_prefix_sum_buffer);
+  ShufflePrefixSumGlobalReduceBlockKernel<<<1, GLOBAL_PREFIX_SUM_BLOCK_SIZE, 0, cuda_stream>>>(block_prefix_sum_buffer, num_blocks);
+  ShufflePrefixSumGlobalAddBase<<<num_blocks, GLOBAL_PREFIX_SUM_BLOCK_SIZE, 0, cuda_stream>>>(len, block_prefix_sum_buffer, values);
+}
+
 template <>
 void ShufflePrefixSumGlobal(uint16_t* values, size_t len, uint16_t* block_prefix_sum_buffer) {
   ShufflePrefixSumGlobalInner<uint16_t>(values, len, block_prefix_sum_buffer);
@@ -153,6 +161,11 @@ template <>
 void ShufflePrefixSumGlobal(uint64_t* values, size_t len, uint64_t* block_prefix_sum_buffer) {
   ShufflePrefixSumGlobalInner<uint64_t>(values, len, block_prefix_sum_buffer);
 }
+
+/*template <>
+void ShufflePrefixSumGlobalAysnc(uint64_t* values, size_t len, uint64_t* block_prefix_sum_buffer) {
+  ShufflePrefixSumGlobalInnerAsync<uint64_t>(values, len, block_prefix_sum_buffer);
+}*/
 
 template <typename INDEX_T, typename VAL_T, typename REDUCE_T>
 __global__ void GlobalInclusiveArgPrefixSumKernel(

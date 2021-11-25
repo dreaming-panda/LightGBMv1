@@ -951,7 +951,7 @@ void CUDADataPartition::LaunchSplitInnerKernel(
   SplitTreeStructureKernel<<<4, 5, 0, cuda_streams_[0]>>>(left_leaf_index, right_leaf_index,
     cuda_block_data_to_left_offset_,
     cuda_block_data_to_right_offset_, cuda_leaf_data_start_, cuda_leaf_data_end_,
-    cuda_leaf_num_data_, cuda_out_data_indices_in_leaf_,
+    cuda_leaf_num_data_, cuda_out_data_indices_in_leaf_,    
     best_split_info,
     smaller_leaf_splits,
     larger_leaf_splits,
@@ -960,20 +960,20 @@ void CUDADataPartition::LaunchSplitInnerKernel(
     cuda_hist_pool_,
     cuda_leaf_output_, cuda_split_info_buffer_);
   global_timer.Stop("CUDADataPartition::SplitTreeStructureKernel");
-  std::vector<int> cpu_split_info_buffer(16);
-  const double* cpu_sum_hessians_info = reinterpret_cast<const double*>(cpu_split_info_buffer.data() + 8);
+  //std::vector<int> cpu_split_info_buffer(16);
+  const double* cpu_sum_hessians_info = reinterpret_cast<const double*>(host_split_info_buffer_ + 8);
   global_timer.Start("CUDADataPartition::CopyFromCUDADeviceToHostAsync");
-  CopyFromCUDADeviceToHostAsync<int>(cpu_split_info_buffer.data(), cuda_split_info_buffer_, 16, cuda_streams_[0], __FILE__, __LINE__);
+  CopyFromCUDADeviceToHostAsync<int>(host_split_info_buffer_, cuda_split_info_buffer_, 16, cuda_streams_[0], __FILE__, __LINE__);
   SynchronizeCUDADevice(__FILE__, __LINE__);
   global_timer.Stop("CUDADataPartition::CopyFromCUDADeviceToHostAsync");
-  const data_size_t left_leaf_num_data = cpu_split_info_buffer[1];
-  const data_size_t left_leaf_data_start = cpu_split_info_buffer[2];
-  const data_size_t right_leaf_num_data = cpu_split_info_buffer[4];
+  const data_size_t left_leaf_num_data = host_split_info_buffer_[1];
+  const data_size_t left_leaf_data_start = host_split_info_buffer_[2];
+  const data_size_t right_leaf_num_data = host_split_info_buffer_[4];
   global_timer.Start("CUDADataPartition::CopyDataIndicesKernel");
   CopyDataIndicesKernel<<<grid_dim_, block_dim_, 0, cuda_streams_[2]>>>(
     left_leaf_num_data + right_leaf_num_data, cuda_out_data_indices_in_leaf_, cuda_data_indices_ + left_leaf_data_start);
   global_timer.Stop("CUDADataPartition::CopyDataIndicesKernel");
-  const data_size_t right_leaf_data_start = cpu_split_info_buffer[5];
+  const data_size_t right_leaf_data_start = host_split_info_buffer_[5];
   *left_leaf_num_data_ref = left_leaf_num_data;
   *left_leaf_start_ref = left_leaf_data_start;
   *right_leaf_num_data_ref = right_leaf_num_data;

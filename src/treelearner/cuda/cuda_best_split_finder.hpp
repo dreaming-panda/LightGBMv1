@@ -76,9 +76,11 @@ class CUDABestSplitFinder {
     int* smaller_leaf_best_split_feature,
     uint32_t* smaller_leaf_best_split_threshold,
     uint8_t* smaller_leaf_best_split_default_left,
+    double* smaller_leaf_best_split_gain,
     int* larger_leaf_best_split_feature,
     uint32_t* larger_leaf_best_split_threshold,
     uint8_t* larger_leaf_best_split_default_left,
+    double* larger_leaf_best_split_gain,
     int* best_leaf_index,
     int* num_cat_threshold);
 
@@ -125,9 +127,11 @@ class CUDABestSplitFinder {
     int* smaller_leaf_best_split_feature,
     uint32_t* smaller_leaf_best_split_threshold,
     uint8_t* smaller_leaf_best_split_default_left,
+    double* smaller_leaf_best_split_gain,
     int* larger_leaf_best_split_feature,
     uint32_t* larger_leaf_best_split_threshold,
     uint8_t* larger_leaf_best_split_default_left,
+    double* larger_leaf_best_split_gain,
     int* best_leaf_index,
     data_size_t* num_cat_threshold);
 
@@ -182,6 +186,7 @@ class CUDABestSplitFinder {
   CUDASplitInfo* cuda_best_split_info_;
   // best split information buffer, to be copied to host
   int* cuda_best_split_info_buffer_;
+  int* host_leaf_split_info_buffer_;
   // find best split task information
   CUDAVector<SplitFindTask> cuda_split_find_tasks_;
   int8_t* cuda_is_feature_used_bytree_;

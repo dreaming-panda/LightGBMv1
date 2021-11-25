@@ -351,6 +351,7 @@ class CUDADataPartition {
   // split tree structure algorithm related
   /*! \brief buffer to store split information, prepared to be copied to cpu */
   int* cuda_split_info_buffer_;
+  int* host_split_info_buffer_;
 
   // dataset information
   /*! \brief number of data in training set, for intialization of cuda_leaf_num_data_ and cuda_leaf_data_end_ */
