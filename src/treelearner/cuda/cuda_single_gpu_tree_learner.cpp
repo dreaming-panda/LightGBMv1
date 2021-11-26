@@ -137,7 +137,8 @@ Tree* CUDASingleGPUTreeLearner::Train(const score_t* gradients,
       const auto& feature_hist_offsets = share_state_->feature_hist_offsets();
       const int num_total_bin = feature_hist_offsets.empty() ? 0 : static_cast<int>(feature_hist_offsets.back());
       //Log::Warning("smaller_leaf_index = %d, larger_leaf_index = %d", smaller_leaf_index_, larger_leaf_index_);
-      cuda_gradient_discretizer_->ScaleHistogram(num_total_bin, cuda_smaller_leaf_splits_->GetCUDAStructRef());
+      cuda_gradient_discretizer_->ScaleHistogram(num_total_bin, cuda_smaller_leaf_splits_->GetCUDAStructRef(),
+        cuda_histogram_constructor_->cuda_stream());
     }
     global_timer.Stop("CUDASingleGPUTreeLearner::ConstructHistogramForLeaf");
 

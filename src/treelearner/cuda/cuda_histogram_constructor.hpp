@@ -66,6 +66,8 @@ class CUDAHistogramConstructor {
 
   hist_t* cuda_hist_pointer() { return cuda_hist_; }
 
+  cudaStream_t cuda_stream() const { return cuda_stream_; }
+
  private:
   void InitFeatureMetaInfo(const Dataset* train_data, const std::vector<uint32_t>& feature_hist_offsets);
 

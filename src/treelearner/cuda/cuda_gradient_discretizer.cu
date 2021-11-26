@@ -179,11 +179,11 @@ __global__ void ScaleHistogramKernel(
 }
 
 void CUDAGradientDiscretizer::ScaleHistogram(
-  const int num_total_bin, CUDALeafSplitsStruct* cuda_leaf_splits) const {
+  const int num_total_bin, CUDALeafSplitsStruct* cuda_leaf_splits, cudaStream_t cuda_stream) const {
   const int num_blocks = (num_total_bin + CUDA_GRADIENT_DISCRETIZER_BLOCK_SIZE - 1) / CUDA_GRADIENT_DISCRETIZER_BLOCK_SIZE;
   int32_t* histogram_ptr = nullptr;
   //AllocateCUDAMemory<int32_t>(&histogram_ptr, num_total_bin * 4, __FILE__, __LINE__);
-  ScaleHistogramKernel<<<num_blocks, CUDA_GRADIENT_DISCRETIZER_BLOCK_SIZE>>>(
+  ScaleHistogramKernel<<<num_blocks, CUDA_GRADIENT_DISCRETIZER_BLOCK_SIZE, 0, cuda_stream>>>(
     num_total_bin,
     grad_max_block_buffer_.RawData(),
     hess_max_block_buffer_.RawData(),

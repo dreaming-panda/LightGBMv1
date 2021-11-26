@@ -39,7 +39,7 @@ class CUDAGradientDiscretizer {
 
   void ScaleHistogram(
     const int num_total_bin,
-    CUDALeafSplitsStruct* cuda_leaf_splits) const;
+    CUDALeafSplitsStruct* cuda_leaf_splits, cudaStream_t cuda_stream) const;
 
   const int32_t* discretized_gradients_and_hessians() const { return discretized_gradients_and_hessians_.RawData(); }
 
