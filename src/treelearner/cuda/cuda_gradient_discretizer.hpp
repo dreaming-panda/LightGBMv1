@@ -45,6 +45,10 @@ class CUDAGradientDiscretizer {
 
   bool gpu_use_discretized_grad() const { return gpu_use_discretized_grad_; }
 
+  const score_t* grad_scale() const { return grad_max_block_buffer_.RawData(); }
+
+  const score_t* hess_scale() const { return hess_max_block_buffer_.RawData(); }
+
   void Init(const data_size_t num_data) {
     discretized_gradients_and_hessians_.Resize(num_data);
     num_reduce_blocks_ = (num_data + CUDA_GRADIENT_DISCRETIZER_BLOCK_SIZE - 1) / CUDA_GRADIENT_DISCRETIZER_BLOCK_SIZE;

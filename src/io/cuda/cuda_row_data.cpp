@@ -26,6 +26,9 @@ gpu_device_id_(gpu_device_id), use_dp_(gpu_use_dp), gpu_use_discretized_grad_(gp
   } else {
     num_total_bin_ = static_cast<int>(feature_hist_offsets.back());
   }
+  while (shared_hist_size_ / 4 >= num_total_bin_) {
+    shared_hist_size_ /= 2;
+  }
   num_feature_group_ = train_data->num_feature_groups();
   num_feature_ = train_data->num_features();
   if (gpu_device_id >= 0) {

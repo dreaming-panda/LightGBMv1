@@ -81,6 +81,12 @@ void CUDAHistogramConstructor::InitFeatureMetaInfo(const Dataset* train_data, co
   } else {
     num_total_bin_ = static_cast<int>(feature_hist_offsets.back());
   }
+  const double num_data_num_bin_ratio = static_cast<double>(train_data->num_data()) / static_cast<double>(num_total_bin_);
+  if (num_data_num_bin_ratio >= 10.0) {
+    min_grid_dim_y_ = 160;
+  } else {
+    min_grid_dim_y_ = 10;
+  }
 }
 
 void CUDAHistogramConstructor::BeforeTrain(const score_t* gradients, const score_t* hessians) {
