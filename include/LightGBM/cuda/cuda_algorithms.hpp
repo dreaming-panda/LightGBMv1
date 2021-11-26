@@ -130,6 +130,9 @@ template <typename T>
 void ShufflePrefixSumGlobal(T* values, size_t len, T* block_prefix_sum_buffer);
 
 template <typename T>
+void ShufflePrefixSumGlobalAysnc(T* values, size_t len, T* block_prefix_sum_buffer, cudaStream_t cuda_strem);
+
+template <typename T>
 __device__ __forceinline__ T ShuffleReduceSumWarp(T value, const data_size_t len) {
   if (len > 0) {
     // TODO(shiyu1994): check how mask works

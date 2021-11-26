@@ -55,8 +55,7 @@ CUDADataPartition::CUDADataPartition(
   cuda_leaf_output_ = nullptr;
   cuda_block_to_left_offset_ = nullptr;
   cuda_data_index_to_leaf_index_ = nullptr;
-  cuda_block_data_to_left_offset_ = nullptr;
-  cuda_block_data_to_right_offset_ = nullptr;
+  cuda_block_data_to_left_right_offset_ = nullptr;
   cuda_out_data_indices_in_leaf_ = nullptr;
   cuda_split_info_buffer_ = nullptr;
   host_split_info_buffer_ = nullptr;
@@ -73,8 +72,7 @@ CUDADataPartition::~CUDADataPartition() {
   DeallocateCUDAMemory<double>(&cuda_leaf_output_, __FILE__, __LINE__);
   DeallocateCUDAMemory<uint16_t>(&cuda_block_to_left_offset_, __FILE__, __LINE__);
   DeallocateCUDAMemory<data_size_t>(&cuda_data_index_to_leaf_index_, __FILE__, __LINE__);
-  DeallocateCUDAMemory<data_size_t>(&cuda_block_data_to_left_offset_, __FILE__, __LINE__);
-  DeallocateCUDAMemory<data_size_t>(&cuda_block_data_to_right_offset_, __FILE__, __LINE__);
+  DeallocateCUDAMemory<uint64_t>(&cuda_block_data_to_left_right_offset_, __FILE__, __LINE__);
   DeallocateCUDAMemory<data_size_t>(&cuda_out_data_indices_in_leaf_, __FILE__, __LINE__);
   DeallocateCUDAMemory<int>(&cuda_split_info_buffer_, __FILE__, __LINE__);
   CUDASUCCESS_OR_FATAL(cudaFreeHost(host_split_info_buffer_));
@@ -97,10 +95,11 @@ void CUDADataPartition::Init() {
   // leave some space for alignment
   AllocateCUDAMemory<uint16_t>(&cuda_block_to_left_offset_, static_cast<size_t>(num_data_), __FILE__, __LINE__);
   AllocateCUDAMemory<int>(&cuda_data_index_to_leaf_index_, static_cast<size_t>(num_data_), __FILE__, __LINE__);
-  AllocateCUDAMemory<data_size_t>(&cuda_block_data_to_left_offset_, static_cast<size_t>(max_num_split_indices_blocks_) + 1, __FILE__, __LINE__);
-  AllocateCUDAMemory<data_size_t>(&cuda_block_data_to_right_offset_, static_cast<size_t>(max_num_split_indices_blocks_) + 1, __FILE__, __LINE__);
-  SetCUDAMemory<data_size_t>(cuda_block_data_to_left_offset_, 0, static_cast<size_t>(max_num_split_indices_blocks_) + 1, __FILE__, __LINE__);
-  SetCUDAMemory<data_size_t>(cuda_block_data_to_right_offset_, 0, static_cast<size_t>(max_num_split_indices_blocks_) + 1, __FILE__, __LINE__);
+  const size_t offset_vector_len = static_cast<size_t>(max_num_split_indices_blocks_) + 1;
+  AllocateCUDAMemory<uint64_t>(&cuda_block_data_to_left_right_offset_, offset_vector_len, __FILE__, __LINE__);
+  SetCUDAMemory<uint64_t>(cuda_block_data_to_left_right_offset_, 0, offset_vector_len, __FILE__, __LINE__);
+  const size_t num_blocks = (offset_vector_len + AGGREGATE_BLOCK_SIZE_DATA_PARTITION - 1) / AGGREGATE_BLOCK_SIZE_DATA_PARTITION;
+  cuda_prefix_sum_buffer_.Resize(num_blocks + 1);
   AllocateCUDAMemory<data_size_t>(&cuda_out_data_indices_in_leaf_, static_cast<size_t>(num_data_), __FILE__, __LINE__);
   AllocateCUDAMemory<hist_t*>(&cuda_hist_pool_, static_cast<size_t>(num_leaves_), __FILE__, __LINE__);
   CopyFromHostToCUDADevice<hist_t*>(cuda_hist_pool_, &cuda_hist_, 1, __FILE__, __LINE__);
@@ -276,7 +275,7 @@ void CUDADataPartition::UpdateTrainScore(const Tree* tree, double* scores) {
     // we need restore the order of indices in cuda_data_indices_
     CopyFromHostToCUDADevice<data_size_t>(cuda_data_indices_, used_indices_, static_cast<size_t>(num_used_indices_), __FILE__, __LINE__);
   }
-  LaunchAddPredictionToScoreKernel(cuda_tree->cuda_leaf_value(), scores);
+  LaunchAddPredictionToScoreKernel(cuda_tree->cuda_leaf_value(), scores, tree->num_leaves());
 }
 
 void CUDADataPartition::CalcBlockDim(const data_size_t num_data_in_leaf) {
@@ -316,12 +315,12 @@ void CUDADataPartition::ResetTrainingData(const Dataset* train_data, const int n
     const int old_max_num_split_indices_blocks = max_num_split_indices_blocks_;
     max_num_split_indices_blocks_ = grid_dim_;
     if (max_num_split_indices_blocks_ > old_max_num_split_indices_blocks) {
-      DeallocateCUDAMemory<data_size_t>(&cuda_block_data_to_left_offset_, __FILE__, __LINE__);
-      DeallocateCUDAMemory<data_size_t>(&cuda_block_data_to_right_offset_, __FILE__, __LINE__);
-      AllocateCUDAMemory<data_size_t>(&cuda_block_data_to_left_offset_, static_cast<size_t>(max_num_split_indices_blocks_) + 1, __FILE__, __LINE__);
-      AllocateCUDAMemory<data_size_t>(&cuda_block_data_to_right_offset_, static_cast<size_t>(max_num_split_indices_blocks_) + 1, __FILE__, __LINE__);
-      SetCUDAMemory<data_size_t>(cuda_block_data_to_left_offset_, 0, static_cast<size_t>(max_num_split_indices_blocks_) + 1, __FILE__, __LINE__);
-      SetCUDAMemory<data_size_t>(cuda_block_data_to_right_offset_, 0, static_cast<size_t>(max_num_split_indices_blocks_) + 1, __FILE__, __LINE__);
+      DeallocateCUDAMemory<uint64_t>(&cuda_block_data_to_left_right_offset_, __FILE__, __LINE__);
+      const size_t offset_vector_len = static_cast<size_t>(max_num_split_indices_blocks_) + 1;
+      AllocateCUDAMemory<uint64_t>(&cuda_block_data_to_left_right_offset_, offset_vector_len, __FILE__, __LINE__);
+      SetCUDAMemory<uint64_t>(cuda_block_data_to_left_right_offset_, 0, offset_vector_len, __FILE__, __LINE__);
+      const size_t num_blocks = (offset_vector_len + AGGREGATE_BLOCK_SIZE_DATA_PARTITION - 1) / AGGREGATE_BLOCK_SIZE_DATA_PARTITION;
+      cuda_prefix_sum_buffer_.Resize(num_blocks + 1);
     }
     DeallocateCUDAMemory<data_size_t>(&cuda_data_indices_, __FILE__, __LINE__);
     DeallocateCUDAMemory<uint16_t>(&cuda_block_to_left_offset_, __FILE__, __LINE__);

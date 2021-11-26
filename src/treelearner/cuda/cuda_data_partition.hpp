@@ -268,7 +268,7 @@ class CUDADataPartition {
 
 #undef UpdateDataIndexToLeafIndexKernel_PARAMS
 
-  void LaunchAddPredictionToScoreKernel(const double* leaf_value, double* cuda_scores);
+  void LaunchAddPredictionToScoreKernel(const double* leaf_value, double* cuda_scores, const int num_leaves);
 
   void LaunchFillDataIndexToLeafIndex();
 
@@ -342,9 +342,11 @@ class CUDADataPartition {
   /*! \brief maps data index to leaf index, for adding scores to training data set */
   int* cuda_data_index_to_leaf_index_;
   /*! \brief prefix sum of number of data going to left in all blocks */
-  data_size_t* cuda_block_data_to_left_offset_;
+  //data_size_t* cuda_block_data_to_left_offset_;
   /*! \brief prefix sum of number of data going to right in all blocks */
-  data_size_t* cuda_block_data_to_right_offset_;
+  //data_size_t* cuda_block_data_to_right_offset_;
+  uint64_t* cuda_block_data_to_left_right_offset_;
+  CUDAVector<uint64_t> cuda_prefix_sum_buffer_;
   /*! \brief buffer for splitting data indices, will be copied back to cuda_data_indices_ after split */
   data_size_t* cuda_out_data_indices_in_leaf_;
 
