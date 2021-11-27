@@ -142,9 +142,10 @@ void CUDAHistogramConstructor::ConstructHistogramForLeaf(
 
 void CUDAHistogramConstructor::SubtractHistogramForLeaf(
   const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
-  const CUDALeafSplitsStruct* cuda_larger_leaf_splits) {
+  const CUDALeafSplitsStruct* cuda_larger_leaf_splits,
+  const bool gpu_use_discretized_grad) {
   global_timer.Start("CUDAHistogramConstructor::ConstructHistogramForLeaf::LaunchSubtractHistogramKernel");
-  LaunchSubtractHistogramKernel(cuda_smaller_leaf_splits, cuda_larger_leaf_splits);
+  LaunchSubtractHistogramKernel(cuda_smaller_leaf_splits, cuda_larger_leaf_splits, gpu_use_discretized_grad);
   global_timer.Stop("CUDAHistogramConstructor::ConstructHistogramForLeaf::LaunchSubtractHistogramKernel");
 }
 

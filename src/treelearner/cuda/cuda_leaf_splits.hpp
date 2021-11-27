@@ -23,6 +23,7 @@ struct CUDALeafSplitsStruct {
   int leaf_index;
   double sum_of_gradients;
   double sum_of_hessians;
+  int64_t sum_of_gradients_hessians;
   data_size_t num_data_in_leaf;
   double gain;
   double leaf_value;
@@ -36,7 +37,7 @@ class CUDALeafSplits {
 
   ~CUDALeafSplits();
 
-  void Init();
+  void Init(const bool gpu_use_discretized_grad);
 
   void InitValues(
     const double lambda_l1, const double lambda_l2,
@@ -165,6 +166,7 @@ class CUDALeafSplits {
   CUDALeafSplitsStruct* cuda_struct_;
   double* cuda_sum_of_gradients_buffer_;
   double* cuda_sum_of_hessians_buffer_;
+  int64_t* cuda_sum_of_gradients_hessians_buffer_;
 
   // CUDA memory, held by other object
   const score_t* cuda_gradients_;

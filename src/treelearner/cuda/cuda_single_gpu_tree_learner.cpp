@@ -30,9 +30,9 @@ void CUDASingleGPUTreeLearner::Init(const Dataset* train_data, bool is_constant_
   CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_device_id_));
 
   cuda_smaller_leaf_splits_.reset(new CUDALeafSplits(num_data_));
-  cuda_smaller_leaf_splits_->Init();
+  cuda_smaller_leaf_splits_->Init(config_->gpu_use_discretized_grad);
   cuda_larger_leaf_splits_.reset(new CUDALeafSplits(num_data_));
-  cuda_larger_leaf_splits_->Init();
+  cuda_larger_leaf_splits_->Init(config_->gpu_use_discretized_grad);
 
   cuda_histogram_constructor_.reset(new CUDAHistogramConstructor(train_data_, config_->num_leaves, num_threads_,
     share_state_->feature_hist_offsets(),
@@ -144,26 +144,39 @@ Tree* CUDASingleGPUTreeLearner::Train(const score_t* gradients,
       sum_hessians_in_smaller_leaf,
       sum_hessians_in_larger_leaf);
 
-    if (config_->gpu_use_discretized_grad) {
+    /*if (config_->gpu_use_discretized_grad) {
       const auto& feature_hist_offsets = share_state_->feature_hist_offsets();
       const int num_total_bin = feature_hist_offsets.empty() ? 0 : static_cast<int>(feature_hist_offsets.back());
       //Log::Warning("smaller_leaf_index = %d, larger_leaf_index = %d", smaller_leaf_index_, larger_leaf_index_);
       cuda_gradient_discretizer_->ScaleHistogram(num_total_bin, cuda_smaller_leaf_splits_->GetCUDAStructRef(),
         cuda_histogram_constructor_->cuda_stream());
-    }
+    }*/
     global_timer.Stop("CUDASingleGPUTreeLearner::ConstructHistogramForLeaf");
 
     cuda_histogram_constructor_->SubtractHistogramForLeaf(
       cuda_smaller_leaf_splits_->GetCUDAStruct(),
-      cuda_larger_leaf_splits_->GetCUDAStruct());
+      cuda_larger_leaf_splits_->GetCUDAStruct(),
+      config_->gpu_use_discretized_grad);
 
     global_timer.Start("CUDASingleGPUTreeLearner::FindBestSplitsForLeaf");
-    cuda_best_split_finder_->FindBestSplitsForLeaf(
-      cuda_smaller_leaf_splits_->GetCUDAStruct(),
-      cuda_larger_leaf_splits_->GetCUDAStruct(),
-      smaller_leaf_index_, larger_leaf_index_,
-      num_data_in_smaller_leaf, num_data_in_larger_leaf,
-      sum_hessians_in_smaller_leaf, sum_hessians_in_larger_leaf);
+    if (config_->gpu_use_discretized_grad) {
+      cuda_best_split_finder_->FindBestSplitsForLeaf(
+        cuda_smaller_leaf_splits_->GetCUDAStruct(),
+        cuda_larger_leaf_splits_->GetCUDAStruct(),
+        smaller_leaf_index_, larger_leaf_index_,
+        num_data_in_smaller_leaf, num_data_in_larger_leaf,
+        sum_hessians_in_smaller_leaf, sum_hessians_in_larger_leaf,
+        cuda_gradient_discretizer_->grad_scale(),
+        cuda_gradient_discretizer_->hess_scale());
+    } else {
+      cuda_best_split_finder_->FindBestSplitsForLeaf(
+        cuda_smaller_leaf_splits_->GetCUDAStruct(),
+        cuda_larger_leaf_splits_->GetCUDAStruct(),
+        smaller_leaf_index_, larger_leaf_index_,
+        num_data_in_smaller_leaf, num_data_in_larger_leaf,
+        sum_hessians_in_smaller_leaf, sum_hessians_in_larger_leaf,
+        nullptr, nullptr);
+    }
     global_timer.Stop("CUDASingleGPUTreeLearner::FindBestSplitsForLeaf");
     global_timer.Start("CUDASingleGPUTreeLearner::FindBestFromAllSplits");
     const CUDASplitInfo* best_split_info = nullptr;
