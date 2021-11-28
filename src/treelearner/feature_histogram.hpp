@@ -56,9 +56,10 @@ class FeatureHistogram {
    * \param feature the feature data for this histogram
    * \param min_num_data_one_leaf minimal number of data in one leaf
    */
-  void Init(hist_t* data, const FeatureMetainfo* meta) {
+  void Init(hist_t* data, int_hist_t* int_data, const FeatureMetainfo* meta) {
     meta_ = meta;
     data_ = data;
+    int_data_ = int_data;
     ResetFunc();
   }
 
@@ -71,6 +72,8 @@ class FeatureHistogram {
   }
 
   hist_t* RawData() { return data_; }
+
+  int_hist_t* IntRawData() { return int_data_; }
 
   /*!
    * \brief Subtract current histograms with other
@@ -716,12 +719,25 @@ class FeatureHistogram {
     return (meta_->num_bin - meta_->offset) * kHistEntrySize;
   }
 
+  int SizeOfIntHistgram() const {
+    return (meta_->num_bin - meta_->offset) * kIntHistEntrySize;
+  }
+
   /*!
    * \brief Restore histogram from memory
    */
   void FromMemory(char* memory_data) {
     std::memcpy(data_, memory_data,
                 (meta_->num_bin - meta_->offset) * kHistEntrySize);
+  }
+
+  void FromMemoryWithScale(char* memory_data, const double grad_scale, const double hess_scale) {
+    std::memcpy(int_data_, memory_data,
+                (meta_->num_bin - meta_->offset) * kIntHistEntrySize);
+    for (int bin = 0; bin < meta_->num_bin - meta_->offset; ++bin) {
+      data_[bin << 1] = int_data_[bin << 1] * grad_scale;
+      data_[(bin << 1) + 1] = int_data_[(bin << 1) + 1] * hess_scale;
+    }
   }
 
   /*!
@@ -1085,6 +1101,7 @@ class FeatureHistogram {
   const FeatureMetainfo* meta_;
   /*! \brief sum of gradient of each bin */
   hist_t* data_;
+  int_hist_t* int_data_;
   bool is_splittable_ = true;
 
   std::function<void(double, double, data_size_t, const FeatureConstraint*,
@@ -1199,6 +1216,7 @@ class HistogramPool {
     if (cache_size > old_cache_size) {
       pool_.resize(cache_size);
       data_.resize(cache_size);
+      int_data_.resize(cache_size);
     }
     OMP_INIT_EX();
 #pragma omp parallel for schedule(static)
@@ -1206,8 +1224,9 @@ class HistogramPool {
       OMP_LOOP_EX_BEGIN();
       pool_[i].reset(new FeatureHistogram[train_data->num_features()]);
       data_[i].resize(num_total_bin * 2);
+      int_data_[i].resize(num_total_bin * 2);
       for (int j = 0; j < train_data->num_features(); ++j) {
-        pool_[i][j].Init(data_[i].data() + offsets[j] * 2, &feature_metas_[j]);
+        pool_[i][j].Init(data_[i].data() + offsets[j] * 2, int_data_[i].data() + offsets[j] * 2, &feature_metas_[j]);
       }
       OMP_LOOP_EX_END();
     }
@@ -1294,6 +1313,9 @@ class HistogramPool {
   std::vector<
       std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>>
       data_;
+  std::vector<
+      std::vector<int_hist_t, Common::AlignmentAllocator<int_hist_t, kAlignedSize>>>
+      int_data_;
   std::vector<FeatureMetainfo> feature_metas_;
   int cache_size_;
   int total_size_;

@@ -22,7 +22,9 @@ using AlignedVector = std::vector<HIST_BUF_T, Common::AlignmentAllocator<HIST_BU
 class MultiValBinWrapperBase {
  public:
   MultiValBinWrapperBase(const std::vector<int> feature_groups_contained):
-    feature_groups_contained_(feature_groups_contained) {}
+    feature_groups_contained_(feature_groups_contained) {
+      is_distributed_ = false;
+    }
 
   bool IsSparse() {
     if (multi_val_bin_ != nullptr) {
@@ -52,6 +54,10 @@ class MultiValBinWrapperBase {
 
   int GetNumBin() const {
     return num_bin_;
+  }
+
+  void SetIsDistributed(const bool is_distributed) {
+    is_distributed_ = is_distributed;
   }
 
   virtual void ConstructHistograms(const data_size_t* data_indices,
@@ -94,6 +100,7 @@ class MultiValBinWrapperBase {
 
   double grad_scale_;
   double hess_scale_;
+  bool is_distributed_;
 };
 
 template <typename SCORE_T, typename HIST_BUF_T>
@@ -311,6 +318,8 @@ struct TrainingShareStates {
 
   void RecoverHistogramsFromInteger(hist_t* hist);
 
+  void RecoverHistogramsFromIntegerDistributed(hist_t* hist);
+
   int_hist_t* GetIntegerHistogram(int group_id);
 
   void SetGradScale(double grad_scale, double hess_scale) {
@@ -325,6 +334,11 @@ struct TrainingShareStates {
 
   double hess_scale() const { return hess_scale_; }
 
+  void SetIsDistributed() {
+    multi_val_bin_wrapper_->SetIsDistributed(true);
+    is_distributed_ = true;
+  }
+
  private:
   std::vector<uint32_t> feature_hist_offsets_;
   uint64_t num_hist_total_bin_ = 0;
@@ -337,6 +351,7 @@ struct TrainingShareStates {
   std::vector<int> group_bin_boundaries_;
   double grad_scale_;
   double hess_scale_;
+  bool is_distributed_ = false;
 
   data_size_t total_num_data_;
 };

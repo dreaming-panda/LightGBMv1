@@ -188,22 +188,45 @@ void MultiValBinWrapper<score_t, hist_t>::HistMove(const std::vector<hist_t,
 template <>
 void MultiValBinWrapper<int_score_t, int_hist_t>::HistMove(const std::vector<int_hist_t,
   Common::AlignmentAllocator<int_hist_t, kAlignedSize>>& hist_buf, hist_t* out_hist_data) {
-  if (!is_use_subcol_) {
-    const int_hist_t* src = hist_buf.data();
-    #pragma omp parallel for schedule(static)
-    for (int i = 0; i < num_bin_; ++i) {
-      out_hist_data[2 * i] = src[2 * i + 1] * grad_scale_;
-      out_hist_data[2 * i + 1] = src[2 * i] * hess_scale_;
+  if (!is_distributed_) {
+    if (!is_use_subcol_) {
+      const int_hist_t* src = hist_buf.data();
+      #pragma omp parallel for schedule(static)
+      for (int i = 0; i < num_bin_; ++i) {
+        out_hist_data[2 * i] = src[2 * i + 1] * grad_scale_;
+        out_hist_data[2 * i + 1] = src[2 * i] * hess_scale_;
+      }
+    } else {
+      const int_hist_t* src = hist_buf.data();
+      #pragma omp parallel for schedule(static)
+      for (int i = 0; i < static_cast<int>(hist_move_src_.size()); ++i) {
+        const int_hist_t* src_ptr = src + hist_move_src_[i];
+        hist_t* dst_ptr = out_hist_data + hist_move_dest_[i];
+        for (int j = 0; j < static_cast<int>(hist_move_size_[i]) / 2; ++j) {
+          dst_ptr[2 * j] = grad_scale_ * src_ptr[2 * j + 1];
+          dst_ptr[2 * j + 1] = hess_scale_ * src_ptr[2 * j];
+        }
+      }
     }
   } else {
-    const int_hist_t* src = hist_buf.data();
-    #pragma omp parallel for schedule(static)
-    for (int i = 0; i < static_cast<int>(hist_move_src_.size()); ++i) {
-      const int_hist_t* src_ptr = src + hist_move_src_[i];
-      hist_t* dst_ptr = out_hist_data + hist_move_dest_[i];
-      for (int j = 0; j < static_cast<int>(hist_move_size_[i]) / 2; ++j) {
-        dst_ptr[2 * j] = grad_scale_ * src_ptr[2 * j + 1];
-        dst_ptr[2 * j + 1] = hess_scale_ * src_ptr[2 * j];
+    int_hist_t* out_hist_data_ptr = reinterpret_cast<int_hist_t*>(out_hist_data);
+    if (!is_use_subcol_) {
+      const int_hist_t* src = hist_buf.data();
+      #pragma omp parallel for schedule(static)
+      for (int i = 0; i < num_bin_; ++i) {
+        out_hist_data_ptr[2 * i] = src[2 * i + 1];
+        out_hist_data_ptr[2 * i + 1] = src[2 * i];
+      }
+    } else {
+      const int_hist_t* src = hist_buf.data();
+      #pragma omp parallel for schedule(static)
+      for (int i = 0; i < static_cast<int>(hist_move_src_.size()); ++i) {
+        const int_hist_t* src_ptr = src + hist_move_src_[i];
+        int_hist_t* dst_ptr = out_hist_data_ptr + hist_move_dest_[i];
+        for (int j = 0; j < static_cast<int>(hist_move_size_[i]) / 2; ++j) {
+          dst_ptr[2 * j] = src_ptr[2 * j + 1];
+          dst_ptr[2 * j + 1] = src_ptr[2 * j];
+        }
       }
     }
   }
@@ -576,10 +599,21 @@ void TrainingShareStates::SetMultiValBin(MultiValBin* bin, data_size_t num_data,
 }
 
 void TrainingShareStates::RecoverHistogramsFromInteger(hist_t* hist) {
-  #pragma omp parallel for schedule(static)
-  for (int i = 0; i < group_bin_boundaries_.back(); ++i) {
-    hist[2 * i] = int_hist_buf_for_col_wise_[2 * i + 1] * grad_scale_;
-    hist[2 * i + 1] = int_hist_buf_for_col_wise_[2 * i] * hess_scale_;
+  if (is_distributed_) {
+    Log::Warning("before recover hist");
+    int_hist_t* int_hist = reinterpret_cast<int_hist_t*>(hist);
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < group_bin_boundaries_.back(); ++i) {
+      int_hist[2 * i] = int_hist_buf_for_col_wise_[2 * i + 1];
+      int_hist[2 * i + 1] = int_hist_buf_for_col_wise_[2 * i];
+    }
+    Log::Warning("after recover hist");
+  } else {
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < group_bin_boundaries_.back(); ++i) {
+      hist[2 * i] = int_hist_buf_for_col_wise_[2 * i + 1] * grad_scale_;
+      hist[2 * i + 1] = int_hist_buf_for_col_wise_[2 * i] * hess_scale_;
+    }
   }
 }
 

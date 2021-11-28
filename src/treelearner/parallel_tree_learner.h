@@ -184,6 +184,8 @@ class VotingParallelTreeLearner: public TREELEARNER_T {
 
   std::vector<hist_t> smaller_leaf_histogram_data_;
   std::vector<hist_t> larger_leaf_histogram_data_;
+  std::vector<int_hist_t> smaller_leaf_int_histogram_data_;
+  std::vector<int_hist_t> larger_leaf_int_histogram_data_;
   std::vector<FeatureMetainfo> feature_metas_;
 };
 

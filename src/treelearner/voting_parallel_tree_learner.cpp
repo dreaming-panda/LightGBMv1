@@ -71,10 +71,12 @@ void VotingParallelTreeLearner<TREELEARNER_T>::Init(const Dataset* train_data, b
   int num_total_bin = this->share_state_->num_hist_total_bin();
   smaller_leaf_histogram_data_.resize(num_total_bin * 2);
   larger_leaf_histogram_data_.resize(num_total_bin * 2);
+  smaller_leaf_int_histogram_data_.resize(num_total_bin * 2);
+  larger_leaf_int_histogram_data_.resize(num_total_bin * 2);
   HistogramPool::SetFeatureInfo<true, true>(train_data, this->config_, &feature_metas_);
   for (int j = 0; j < train_data->num_features(); ++j) {
-    smaller_leaf_histogram_array_global_[j].Init(smaller_leaf_histogram_data_.data() + offsets[j] * 2, &feature_metas_[j]);
-    larger_leaf_histogram_array_global_[j].Init(larger_leaf_histogram_data_.data() + offsets[j] * 2, &feature_metas_[j]);
+    smaller_leaf_histogram_array_global_[j].Init(smaller_leaf_histogram_data_.data() + offsets[j] * 2, smaller_leaf_int_histogram_data_.data() + offsets[j] * 2, &feature_metas_[j]);
+    larger_leaf_histogram_array_global_[j].Init(larger_leaf_histogram_data_.data() + offsets[j] * 2, larger_leaf_int_histogram_data_.data() + offsets[j] * 2, &feature_metas_[j]);
   }
 }
 

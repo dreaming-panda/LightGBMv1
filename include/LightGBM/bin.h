@@ -57,6 +57,21 @@ inline static void HistogramSumReducer(const char* src, char* dst, int type_size
   }
 }
 
+inline static void IntHistogramSumReducer(const char* src, char* dst, int type_size, comm_size_t len) {
+  comm_size_t used_size = 0;
+  const int_hist_t* p1;
+  int_hist_t* p2;
+  while (used_size < len) {
+    // convert
+    p1 = reinterpret_cast<const int_hist_t*>(src);
+    p2 = reinterpret_cast<int_hist_t*>(dst);
+    *p2 += *p1;
+    src += type_size;
+    dst += type_size;
+    used_size += type_size;
+  }
+}
+
 /*! \brief This class used to convert feature values into bin,
 *          and store some meta information for bin*/
 class BinMapper {

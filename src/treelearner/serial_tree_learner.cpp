@@ -93,6 +93,9 @@ void SerialTreeLearner::GetShareStates(const Dataset* dataset,
         is_constant_hessian, share_state_->is_col_wise,
         !share_state_->is_col_wise, config_->use_gradient_discretization));
   }
+  if (config_->tree_learner == std::string("data")) {
+    share_state_->SetIsDistributed();
+  }
   CHECK_NOTNULL(share_state_);
 }
 
@@ -378,7 +381,8 @@ void SerialTreeLearner::ConstructHistograms(
   Common::FunctionTimer fun_timer("SerialTreeLearner::ConstructHistograms",
                                   global_timer);
   // construct smaller leaf
-  hist_t* ptr_smaller_leaf_hist_data =
+  hist_t* ptr_smaller_leaf_hist_data = (config_->use_gradient_discretization && config_->tree_learner == std::string("data")) ?
+      reinterpret_cast<hist_t*>(smaller_leaf_histogram_array_[0].IntRawData() - kHistOffset) :
       smaller_leaf_histogram_array_[0].RawData() - kHistOffset;
   train_data_->ConstructHistograms(
       is_feature_used, smaller_leaf_splits_->data_indices(),
@@ -390,8 +394,9 @@ void SerialTreeLearner::ConstructHistograms(
       ptr_smaller_leaf_hist_data);
   if (larger_leaf_histogram_array_ != nullptr && !use_subtract) {
     // construct larger leaf
-    hist_t* ptr_larger_leaf_hist_data =
-        larger_leaf_histogram_array_[0].RawData() - kHistOffset;
+    hist_t* ptr_larger_leaf_hist_data = (config_->use_gradient_discretization && config_->tree_learner == std::string("data")) ?
+      reinterpret_cast<hist_t*>(larger_leaf_histogram_array_[0].IntRawData() - kHistOffset) :
+      larger_leaf_histogram_array_[0].RawData() - kHistOffset;
     train_data_->ConstructHistograms(
         is_feature_used, larger_leaf_splits_->data_indices(),
         larger_leaf_splits_->num_data_in_leaf(), 
