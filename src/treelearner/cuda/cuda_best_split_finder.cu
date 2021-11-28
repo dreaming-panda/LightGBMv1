@@ -168,10 +168,18 @@ __device__ void FindBestSplitsForLeafKernelInner(
     (task->skip_default_bin && (threadIdx_x + task->mfb_offset) == static_cast<int>(task->default_bin));
   const uint32_t feature_num_bin_minus_offset = task->num_bin - task->mfb_offset;
   if (!REVERSE) {
-    if (threadIdx_x < feature_num_bin_minus_offset && !skip_sum) {
-      const unsigned int bin_offset = threadIdx_x << 1;
-      local_grad_hist = feature_hist_ptr[bin_offset];
-      local_hess_hist = feature_hist_ptr[bin_offset + 1];
+    if (task->na_as_missing && task->mfb_offset == 1) {
+      if (threadIdx_x < static_cast<uint32_t>(task->num_bin) && threadIdx_x > 0) {
+        const unsigned int bin_offset = (threadIdx_x - 1) << 1;
+        local_grad_hist = feature_hist_ptr[bin_offset];
+        local_hess_hist = feature_hist_ptr[bin_offset + 1];
+      }
+    } else {
+      if (threadIdx_x < feature_num_bin_minus_offset && !skip_sum) {
+        const unsigned int bin_offset = threadIdx_x << 1;
+        local_grad_hist = feature_hist_ptr[bin_offset];
+        local_hess_hist = feature_hist_ptr[bin_offset + 1];
+      }
     }
   } else {
     if (threadIdx_x >= static_cast<unsigned int>(task->na_as_missing) &&
@@ -183,6 +191,15 @@ __device__ void FindBestSplitsForLeafKernelInner(
     }
   }
   __syncthreads();
+  if (!REVERSE && task->na_as_missing && task->mfb_offset == 1) {
+    const hist_t sum_gradients_non_default = ShuffleReduceSum<hist_t>(local_grad_hist, shared_double_buffer, blockDim.x);
+    __syncthreads();
+    const hist_t sum_hessians_non_default = ShuffleReduceSum<hist_t>(local_hess_hist, shared_double_buffer, blockDim.x);
+    if (threadIdx_x == 0) {
+      local_grad_hist += (sum_gradients - sum_gradients_non_default);
+      local_hess_hist += (sum_hessians - sum_hessians_non_default);
+    }
+  }
   if (threadIdx_x == 0) {
     local_hess_hist += kEpsilon;
   }
@@ -214,7 +231,8 @@ __device__ void FindBestSplitsForLeafKernelInner(
       }
     }
   } else {
-    if (threadIdx_x <= feature_num_bin_minus_offset - 2 && !skip_sum) {
+    const uint32_t end = (task->na_as_missing && task->mfb_offset == 1) ? static_cast<uint32_t>(task->num_bin - 2) : feature_num_bin_minus_offset - 2;
+    if (threadIdx_x <= end && !skip_sum) {
       const double sum_left_gradient = local_grad_hist;
       const double sum_left_hessian = local_hess_hist;
       const data_size_t left_count = static_cast<data_size_t>(__double2int_rn(sum_left_hessian * cnt_factor));
@@ -231,8 +249,9 @@ __device__ void FindBestSplitsForLeafKernelInner(
         // gain with split is worse than without split
         if (current_gain > min_gain_shift) {
           local_gain = current_gain - min_gain_shift;
-          threshold_value = static_cast<uint32_t>(threadIdx_x + task->mfb_offset);
-          threshold_found = true;
+          threshold_value = (task->na_as_missing && task->mfb_offset == 1) ?
+            static_cast<uint32_t>(threadIdx_x) :
+            static_cast<uint32_t>(threadIdx_x + task->mfb_offset);
         }
       }
     }
@@ -360,9 +379,6 @@ __device__ void FindBestSplitsDiscretizedForLeafKernelInner(
     }
   }
   __syncthreads();
-  /*if (threadIdx_x == 0) {
-    local_hess_hist += kEpsilon;
-  }*/
   local_gain = kMinScore;
   local_grad_hess_hist = ShufflePrefixSum(local_grad_hess_hist, reinterpret_cast<int64_t*>(shared_int_buffer));
   double sum_left_gradient = 0.0f;

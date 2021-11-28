@@ -397,16 +397,12 @@ void CUDADataPartition::LaunchGenDataToLeftBitVectorKernelInner3(
       <MIN_IS_MAX, MISSING_IS_ZERO, MISSING_IS_NA, MFB_IS_ZERO, MFB_IS_NA, false, BIN_TYPE>
       <<<grid_dim_, block_dim_, 0, cuda_streams_[0]>>>(GenBitVector_ARGS,
         cuda_block_to_left_offset_,
-        //cuda_block_data_to_left_offset_,
-        //cuda_block_data_to_right_offset_,
         reinterpret_cast<uint32_t*>(cuda_block_data_to_left_right_offset_));
   } else {
     GenDataToLeftBitVectorKernel
       <MIN_IS_MAX, MISSING_IS_ZERO, MISSING_IS_NA, MFB_IS_ZERO, MFB_IS_NA, true, BIN_TYPE>
       <<<grid_dim_, block_dim_, 0, cuda_streams_[0]>>>(GenBitVector_ARGS,
         cuda_block_to_left_offset_,
-        //cuda_block_data_to_left_offset_,
-        //cuda_block_data_to_right_offset_,
         reinterpret_cast<uint32_t*>(cuda_block_data_to_left_right_offset_));
   }
 }
@@ -577,10 +573,6 @@ __global__ void GenDataToLeftBitVectorKernel_Categorical(
   cuda_block_to_left_offset_, \
   reinterpret_cast<uint32_t*>(cuda_block_data_to_left_right_offset_)
 
-
-  //cuda_block_data_to_left_offset_,
-  //cuda_block_data_to_right_offset_
-
 #define UpdateDataIndexToLeafIndex_Categorical_ARGS \
   num_data_in_leaf, data_indices_in_leaf, \
   bitset, bitset_len, \
@@ -694,7 +686,6 @@ __global__ void AggregateBlockOffsetKernel0(
     block_to_left_right_offset_buffer[block_index] += block_to_left_right_offset;
   }
   __syncthreads();
-  //const data_size_t to_left_total_count = static_cast<data_size_t>(block_to_left_right_offset_buffer[num_blocks] & 0x00000000ffffffff);
   if (blockIdx.x == 0 && threadIdx.x == 0) {
     const data_size_t old_leaf_data_end = cuda_leaf_data_end[left_leaf_index];
     cuda_leaf_data_end[left_leaf_index] = cuda_leaf_data_start[left_leaf_index] + static_cast<data_size_t>(to_left_total_count);

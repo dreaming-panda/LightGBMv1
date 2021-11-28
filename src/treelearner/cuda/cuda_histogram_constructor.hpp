@@ -88,6 +88,7 @@ class CUDAHistogramConstructor {
     const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
     const data_size_t num_data_in_smaller_leaf);
 
+  template <int SHARED_HIST_SIZE>
   void LaunchConstructDiscretizedHistogramKernel(
     const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
     const data_size_t num_data_in_smaller_leaf);
