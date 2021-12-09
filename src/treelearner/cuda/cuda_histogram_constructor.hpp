@@ -133,7 +133,10 @@ class CUDAHistogramConstructor {
   std::vector<uint32_t> need_fix_histogram_features_num_bin_aligend_;
   /*! \brief minimum number of blocks allowed in the y dimension */
   int min_grid_dim_y_;
-
+  /*! \brief CUDA texture objects */
+  std::vector<cudaTextureObject_t> texture_objects_;
+  std::vector<cudaResourceDesc> texture_res_desc_;
+  std::vector<cudaTextureDesc> texture_desc_;
 
   // CUDA memory, held by this object
 

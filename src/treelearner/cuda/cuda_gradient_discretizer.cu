@@ -106,15 +106,9 @@ __global__ void DiscretizeGradientsKernel(
     const score_t hessian = input_hessians[index];
     const score_t gradient_random_value = gradient_random_values[index_offset];
     const score_t hessian_random_value = hessian_random_values[index_offset];
-    /*if (index < 500) {
-      printf("gradient = %f, grad_scale = %f, gradient_random_value = %f\n", gradient, grad_scale, gradient_random_value);
-    }*/
     output_gradients_and_hessians_ptr[2 * index + 1] = gradient > 0.0f ?
       static_cast<int16_t>(gradient * grad_scale + gradient_random_value) :
       static_cast<int16_t>(gradient * grad_scale - gradient_random_value);
-    /*if (index < 500) {
-      printf("hessian = %f, hess_scale = %f, hessian_random_value = %f\n", hessian, hess_scale, hessian_random_value);
-    }*/
     output_gradients_and_hessians_ptr[2 * index] = static_cast<int16_t>(hessian * hess_scale + hessian_random_value);
   }
 }
@@ -148,12 +142,6 @@ void CUDAGradientDiscretizer::DiscretizeGradients(
     hessian_random_values_.RawData(),
     grad_discretize_bins_,
     discretized_gradients_and_hessians_.RawData());
-  /*std::vector<int32_t> host_discretized_gradients_and_hessians(num_data);
-  CopyFromCUDADeviceToHost<int32_t>(host_discretized_gradients_and_hessians.data(), discretized_gradients_and_hessians_.RawData(), num_data, __FILE__, __LINE__);
-  const int16_t* host_discretized_gradients_and_hessians_ptr = reinterpret_cast<const int16_t*>(host_discretized_gradients_and_hessians.data());
-  for (size_t i = 0; i < 1000; ++i) {
-    Log::Warning("host_discretized_gradients_and_hessians_ptr[%d] = %d", i, host_discretized_gradients_and_hessians_ptr[i]);
-  }*/
   ++iter_;
 }
 

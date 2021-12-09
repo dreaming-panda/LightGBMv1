@@ -83,6 +83,7 @@ void CUDARowData::Init(const Dataset* train_data, TrainingShareStates* train_sha
       std::vector<uint8_t> partitioned_data;
       GetDenseDataPartitioned<uint8_t>(reinterpret_cast<const uint8_t*>(host_data), &partitioned_data);
       InitCUDAMemoryFromHostMemory<uint8_t>(&cuda_data_uint8_t_, partitioned_data.data(), total_size, __FILE__, __LINE__);
+      Log::Warning("total_size = %d", total_size);
     } else {
       if (row_ptr_bit_type_ == 16) {
         InitSparseData<uint8_t, uint16_t>(

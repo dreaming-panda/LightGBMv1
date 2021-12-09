@@ -117,12 +117,48 @@ void CUDAHistogramConstructor::Init(const Dataset* train_data, TrainingShareStat
   InitCUDAMemoryFromHostMemory<uint32_t>(&cuda_need_fix_histogram_features_num_bin_aligned_, need_fix_histogram_features_num_bin_aligend_.data(),
     need_fix_histogram_features_num_bin_aligend_.size(), __FILE__, __LINE__);
 
+  int grid_dim_x = 0, grid_dim_y = 0, block_dim_x = 0, block_dim_y = 0;
+  CalcConstructHistogramKernelDim(&grid_dim_x, &grid_dim_y, &block_dim_x, &block_dim_y, num_data_);
   if (cuda_row_data_->NumLargeBinPartition() > 0) {
-    int grid_dim_x = 0, grid_dim_y = 0, block_dim_x = 0, block_dim_y = 0;
-    CalcConstructHistogramKernelDim(&grid_dim_x, &grid_dim_y, &block_dim_x, &block_dim_y, num_data_);
     const size_t buffer_size = static_cast<size_t>(grid_dim_y) * static_cast<size_t>(num_total_bin_) * 2;
     AllocateCUDAMemory<float>(&cuda_hist_buffer_, buffer_size, __FILE__, __LINE__);
   }
+
+  const size_t size_per_texture = 10500000 * 14;
+  texture_objects_.resize(2);
+  texture_res_desc_.resize(2);
+  texture_desc_.resize(2);
+  cudaChannelFormatDesc channelDesc1 = cudaCreateChannelDesc(8, 0, 0, 0, cudaChannelFormatKindUnsigned);
+  cudaChannelFormatDesc channelDesc2 = cudaCreateChannelDesc(8, 0, 0, 0, cudaChannelFormatKindUnsigned);
+  memset(&texture_res_desc_[0], 0, sizeof(texture_res_desc_[0]));
+  memset(&texture_res_desc_[1], 0, sizeof(texture_res_desc_[1]));
+  texture_res_desc_[0].resType = cudaResourceTypeLinear;
+  texture_res_desc_[0].res.linear.devPtr = cuda_row_data_->cuda_data_uint8();
+  texture_res_desc_[0].res.linear.desc = channelDesc1;
+  texture_res_desc_[0].res.linear.sizeInBytes = size_per_texture * sizeof(uint8_t);
+  
+  texture_res_desc_[1].resType = cudaResourceTypeLinear;
+  texture_res_desc_[1].res.linear.devPtr = cuda_row_data_->cuda_data_uint8() + size_per_texture;
+  texture_res_desc_[1].res.linear.desc = channelDesc2;
+  texture_res_desc_[1].res.linear.sizeInBytes = size_per_texture * sizeof(uint8_t);
+
+  memset(&texture_desc_[0], 0, sizeof(texture_desc_[0]));
+  texture_desc_[0].addressMode[0] = cudaAddressModeWrap;
+  texture_desc_[0].filterMode = cudaFilterModePoint;
+  texture_desc_[0].readMode = cudaReadModeElementType;
+
+  memset(&texture_desc_[1], 0, sizeof(texture_desc_[1]));
+  texture_desc_[1].addressMode[0] = cudaAddressModeWrap;
+  texture_desc_[1].filterMode = cudaFilterModePoint;
+  texture_desc_[1].readMode = cudaReadModeElementType;
+  PrintLastCUDAError();
+  Log::Warning("before creating first texture object");
+  cudaCreateTextureObject(&texture_objects_[0], &texture_res_desc_[0], &texture_desc_[0], NULL);
+  Log::Warning("after creating first texture object");
+  PrintLastCUDAError();
+  cudaCreateTextureObject(&texture_objects_[1], &texture_res_desc_[1], &texture_desc_[1], NULL);
+  Log::Warning("after creating second texture object");
+  PrintLastCUDAError();
 }
 
 void CUDAHistogramConstructor::ConstructHistogramForLeaf(

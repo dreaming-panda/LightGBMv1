@@ -56,7 +56,7 @@ class CUDARowData {
 
   uint8_t row_ptr_bit_type() const { return row_ptr_bit_type_; }
 
-  const uint8_t* cuda_data_uint8() const { return cuda_data_uint8_t_; }
+  uint8_t* cuda_data_uint8() const { return cuda_data_uint8_t_; }
 
   const uint16_t* cuda_data_uint16() const { return cuda_data_uint16_t_; }
 

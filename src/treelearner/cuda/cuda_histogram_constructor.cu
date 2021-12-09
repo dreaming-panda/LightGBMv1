@@ -81,7 +81,9 @@ __global__ void CUDAConstructDiscretizedHistogramDenseKernel(
   const uint32_t* column_hist_offsets,
   const uint32_t* column_hist_offsets_full,
   const int* feature_partition_column_index_offsets,
-  const data_size_t num_data) {
+  const data_size_t num_data,
+  cudaTextureObject_t textObj1,
+  cudaTextureObject_t textObj2) {
   const int dim_y = static_cast<int>(gridDim.y * blockDim.y);
   const data_size_t num_data_in_smaller_leaf = smaller_leaf_splits->num_data_in_leaf;
   const data_size_t num_data_per_thread = (num_data_in_smaller_leaf + dim_y - 1) / dim_y;
@@ -116,7 +118,11 @@ __global__ void CUDAConstructDiscretizedHistogramDenseKernel(
     for (data_size_t i = 0; i < num_iteration_this; ++i) {
       const data_size_t data_index = data_indices_ref_this_block[inner_data_index];
       const int32_t grad_and_hess = cuda_gradients_and_hessians[data_index];
-      const uint32_t bin = static_cast<uint32_t>(data_ptr[data_index * num_columns_in_partition + threadIdx.x]);
+      const size_t index = data_index * num_columns_in_partition + threadIdx.x;
+      const uint32_t bin = static_cast<uint32_t>(
+        index < 10500000 * 14 ? tex1D<uint8_t>(textObj1, index) :
+        data_ptr[index]
+      );
       int32_t* pos_ptr = shared_hist_ptr + bin;
       atomicAdd_block(pos_ptr, grad_and_hess);
       inner_data_index += blockDim.y;
@@ -388,6 +394,7 @@ void CUDAHistogramConstructor::LaunchConstructHistogramKernel(
       LaunchConstructHistogramKernelInner<float, 3072>(cuda_smaller_leaf_splits, num_data_in_smaller_leaf);
     }
   }
+  //PrintLastCUDAError();
 }
 
 template <int SHARED_HIST_SIZE>
@@ -410,7 +417,9 @@ void CUDAHistogramConstructor::LaunchConstructDiscretizedHistogramKernel(
         cuda_row_data_->cuda_column_hist_offsets(),
         cuda_row_data_->cuda_partition_hist_offsets(),
         cuda_row_data_->cuda_feature_partition_column_index_offsets(),
-        num_data_);
+        num_data_,
+        texture_objects_[0],
+        texture_objects_[1]);
     } else if (cuda_row_data_->bit_type() == 16) {
       CUDAConstructDiscretizedHistogramDenseKernel<uint16_t, SHARED_HIST_SIZE><<<grid_dim, block_dim, 0, cuda_stream_>>>(
         cuda_smaller_leaf_splits,
@@ -419,7 +428,9 @@ void CUDAHistogramConstructor::LaunchConstructDiscretizedHistogramKernel(
         cuda_row_data_->cuda_column_hist_offsets(),
         cuda_row_data_->cuda_partition_hist_offsets(),
         cuda_row_data_->cuda_feature_partition_column_index_offsets(),
-        num_data_);
+        num_data_,
+        texture_objects_[0],
+        texture_objects_[1]);
     } else if (cuda_row_data_->bit_type() == 32) {
       CUDAConstructDiscretizedHistogramDenseKernel<uint32_t, SHARED_HIST_SIZE><<<grid_dim, block_dim, 0, cuda_stream_>>>(
         cuda_smaller_leaf_splits,
@@ -428,7 +439,9 @@ void CUDAHistogramConstructor::LaunchConstructDiscretizedHistogramKernel(
         cuda_row_data_->cuda_column_hist_offsets(),
         cuda_row_data_->cuda_partition_hist_offsets(),
         cuda_row_data_->cuda_feature_partition_column_index_offsets(),
-        num_data_);
+        num_data_,
+        texture_objects_[0],
+        texture_objects_[1]);
     }
   } else {
     if (cuda_row_data_->bit_type() == 8) {
