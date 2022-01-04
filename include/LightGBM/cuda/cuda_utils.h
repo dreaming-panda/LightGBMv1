@@ -165,6 +165,10 @@ class CUDAVector {
     return data_;
   }
 
+  void SetValue(int value) {
+    SetCUDAMemory<T>(data_, value, size_, __FILE__, __LINE__);
+  }
+
  private:
   T* data_;
   size_t size_;

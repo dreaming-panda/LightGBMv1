@@ -69,6 +69,10 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
     const int inner_split_feature,
     const int left_leaf, const int right_leaf, const double sum_left_gradients, const double sum_right_gradients);
 
+  void RenewDiscretizedTreeLeaves(CUDATree* cuda_tree);
+
+  void LaunchCalcLeafValuesGivenGradStat(CUDATree* cuda_tree, const data_size_t* num_data_in_leaf);
+
   // GPU device ID
   int gpu_device_id_;
   // number of threads on CPU
@@ -103,9 +107,8 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
   std::vector<int> categorical_bin_to_value_;
   std::vector<int> categorical_bin_offsets_;
 
-  mutable double* cuda_leaf_gradient_stat_buffer_;
-  mutable double* cuda_leaf_hessian_stat_buffer_;
-  mutable data_size_t leaf_stat_buffer_size_;
+  mutable CUDAVector<double> cuda_leaf_gradient_stat_buffer_;
+  mutable CUDAVector<double> cuda_leaf_hessian_stat_buffer_;
   mutable data_size_t refit_num_data_;
   uint32_t* cuda_bitset_;
   size_t cuda_bitset_len_;
