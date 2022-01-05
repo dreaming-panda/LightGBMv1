@@ -120,6 +120,7 @@ void CUDADataPartition::Init() {
   AllocateCUDAMemory<double>(&cuda_add_train_score_, static_cast<size_t>(num_data_), __FILE__, __LINE__);
   use_bagging_ = false;
   used_indices_ = nullptr;
+  leaf_indices_sorted_by_leaf_start_.Resize(num_leaves_);
 }
 
 void CUDADataPartition::BeforeTrain() {

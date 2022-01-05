@@ -1021,6 +1021,9 @@ struct Config {
   // desc = number of bins to discretize gradients and hessians
   int gpu_grad_discretize_bins = 4;
 
+  // desc = whether to renew the leaf values with original gradients
+  bool gpu_use_discretized_grad_renew = false;
+
   // check = >0
   // desc = number of GPUs
   // desc = **Note**: can be used only in CUDA implementation

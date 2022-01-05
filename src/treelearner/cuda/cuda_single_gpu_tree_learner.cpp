@@ -282,8 +282,10 @@ Tree* CUDASingleGPUTreeLearner::Train(const score_t* gradients,
     global_timer.Stop("CUDASingleGPUTreeLearner::Split");
   }
   SynchronizeCUDADevice(__FILE__, __LINE__);
-  if (config_->gpu_use_discretized_grad) {
+  if (config_->gpu_use_discretized_grad && config_->gpu_use_discretized_grad_renew) {
+    global_timer.Start("CUDASingleGPUTreeLearner::RenewDiscretizedTreeLeaves");
     RenewDiscretizedTreeLeaves(tree.get());
+    global_timer.Stop("CUDASingleGPUTreeLearner::RenewDiscretizedTreeLeaves");
   }
   tree->ToHost();
   return tree.release();

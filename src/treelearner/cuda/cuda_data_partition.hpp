@@ -370,6 +370,7 @@ class CUDADataPartition {
   // for train score update
   /*! \brief added train score buffer in CUDA */
   double* cuda_add_train_score_;
+  CUDAVector<int> leaf_indices_sorted_by_leaf_start_;
 
 
   // CUDA memory, held by other object
