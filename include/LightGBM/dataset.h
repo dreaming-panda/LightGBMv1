@@ -734,6 +734,8 @@ class Dataset {
     return cuda_column_data_.get();
   }
 
+  void MoveToCUDADevice(const int gpu_device_id);
+
   #endif  // USE_CUDA
 
  private:

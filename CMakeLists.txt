@@ -167,6 +167,7 @@ endif(__INTEGRATE_OPENCL)
 
 if(USE_CUDA)
     find_package(CUDA 9.0 REQUIRED)
+    find_package(Nccl REQUIRED)
     include_directories(${CUDA_INCLUDE_DIRS})
     LIST(APPEND CMAKE_CUDA_FLAGS -Xcompiler=${OpenMP_CXX_FLAGS} -Xcompiler=-fPIC -Xcompiler=-Wall)
 
@@ -437,6 +438,11 @@ if(USE_GPU)
   TARGET_LINK_LIBRARIES(lightgbm ${OpenCL_LIBRARY} ${Boost_LIBRARIES})
   TARGET_LINK_LIBRARIES(_lightgbm ${OpenCL_LIBRARY} ${Boost_LIBRARIES})
 endif(USE_GPU)
+
+if(USE_CUDA)
+  TARGET_LINK_LIBRARIES(lightgbm ${NCCL_LIBRARY})
+  TARGET_LINK_LIBRARIES(_lightgbm ${NCCL_LIBRARY})
+endif(USE_CUDA)
 
 if(__INTEGRATE_OPENCL)
   # targets OpenCL and Boost are added in IntegratedOpenCL.cmake

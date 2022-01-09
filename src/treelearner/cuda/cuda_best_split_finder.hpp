@@ -93,6 +93,14 @@ class CUDABestSplitFinder {
 
   void ResetConfig(const Config* config);
 
+  const int* cuda_best_split_info_buffer() const {
+    return cuda_best_split_info_buffer_;
+  }
+
+  CUDASplitInfo* cuda_leaf_best_split_info() {
+    return cuda_leaf_best_split_info_;
+  }
+
  private:
 
   #define LaunchFindBestSplitsForLeafKernel_PARAMS \

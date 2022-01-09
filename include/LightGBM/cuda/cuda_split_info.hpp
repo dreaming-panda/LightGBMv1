@@ -15,12 +15,12 @@ namespace LightGBM {
 
 class CUDASplitInfo {
  public:
-  bool is_valid;
+  int8_t is_valid;
   int leaf_index;
   double gain;
   int inner_feature_index;
   uint32_t threshold;
-  bool default_left;
+  int8_t default_left;
 
   double left_sum_gradients;
   double left_sum_hessians;

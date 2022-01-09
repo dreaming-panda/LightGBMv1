@@ -1,0 +1,76 @@
+/*!
+ * Copyright (c) 2021 Microsoft Corporation. All rights reserved.
+ * Licensed under the MIT License. See LICENSE file in the project root for
+ * license information.
+ */
+
+#ifndef LIGHTGBM_CUDA_CUDA_EXP_TREE_LEARNER_HPP_
+#define LIGHTGBM_CUDA_CUDA_EXP_TREE_LEARNER_HPP_
+
+#ifdef USE_CUDA
+
+#include "cuda_single_gpu_tree_learner.hpp"
+#include <nccl.h>
+
+namespace LightGBM {
+
+class CUDAExpTreeLearner: public CUDASingleGPUTreeLearner {
+ public:
+  explicit CUDAExpTreeLearner(const Config* config);
+
+  ~CUDAExpTreeLearner();
+
+  void Init(const Dataset* train_data, bool is_constant_hessian) override;
+
+  void ResetTrainingData(const Dataset* train_data,
+                         bool is_constant_hessian) override;
+
+  Tree* Train(const score_t* gradients, const score_t *hessians, bool is_first_tree) override;
+
+  /*void SetBaggingData(const Dataset* subset, const data_size_t* used_indices, data_size_t num_data) override;
+
+  void AddPredictionToScore(const Tree* tree, double* out_score) const override;
+
+  void RenewTreeOutput(Tree* tree, const ObjectiveFunction* obj, std::function<double(const label_t*, int)> residual_getter,
+                       const double* score, data_size_t total_num_data, const data_size_t* bag_indices, data_size_t bag_cnt) const override;
+
+  void ResetConfig(const Config* config) override;
+
+  Tree* FitByExistingTree(const Tree* old_tree, const score_t* gradients, const score_t* hessians) const override;
+
+  Tree* FitByExistingTree(const Tree* old_tree, const std::vector<int>& leaf_pred,
+                          const score_t* gradients, const score_t* hessians) const override;*/
+
+  void BeforeTrainWithGrad(const score_t* gradients, const score_t* hessians, const std::vector<int8_t>& is_feature_used_by_tree) override;
+
+ private:
+  void NCCLReduceHistograms();
+
+  void NCCLReduceRootNodeInformation();
+
+  void LaunchReduceRootNodeInformationKernel(CUDALeafSplitsStruct* out);
+
+  void NCCLReduceBestSplitsForLeaf(CUDATree* tree);
+
+  void LaunchReduceBestSplitsForLeafKernel();
+
+  void BroadCastBestSplit();
+
+  std::vector<std::unique_ptr<CUDASingleGPUTreeLearner>> tree_learners_;
+  std::vector<std::unique_ptr<Dataset>> datasets_;
+  std::vector<std::unique_ptr<Config>> configs_;
+  data_size_t num_data_per_gpu_;
+  std::vector<ncclComm_t> nccl_communicators_;
+  std::vector<cudaStream_t> cuda_streams_;
+  std::vector<std::vector<int8_t>> is_feature_used_by_tree_per_gpu_;
+  int num_total_bin_;
+
+  CUDAVector<CUDALeafSplitsStruct> leaf_splits_buffer_;
+  CUDAVector<int> best_split_info_buffer_;
+  int* host_split_info_buffer_;
+};
+
+}  // namespace LightGBM
+
+#endif  // USE_CUDA
+#endif  // LIGHTGBM_CUDA_CUDA_EXP_TREE_LEARNER_HPP_

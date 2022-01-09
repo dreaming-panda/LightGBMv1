@@ -73,7 +73,9 @@ void CUDASingleGPUTreeLearner::Init(const Dataset* train_data, bool is_constant_
   }
 }
 
-void CUDASingleGPUTreeLearner::BeforeTrain() {
+void CUDASingleGPUTreeLearner::BeforeTrainWithGrad(const score_t* gradients, const score_t* hessians, const std::vector<int8_t>& is_feature_used_by_tree) {
+  gradients_ = gradients;
+  hessians_ = hessians;
   const data_size_t root_num_data = cuda_data_partition_->root_num_data();
   const data_size_t* leaf_splits_init_indices =
     cuda_data_partition_->use_bagging() ? cuda_data_partition_->cuda_data_indices() : nullptr;
@@ -109,7 +111,7 @@ void CUDASingleGPUTreeLearner::BeforeTrain() {
   leaf_num_data_[0] = root_num_data;
   cuda_larger_leaf_splits_->InitValues();
   col_sampler_.ResetByTree();
-  cuda_best_split_finder_->BeforeTrain(col_sampler_.is_feature_used_bytree());
+  cuda_best_split_finder_->BeforeTrain(is_feature_used_by_tree);
   leaf_data_start_[0] = 0;
   smaller_leaf_index_ = 0;
   larger_leaf_index_ = -1;
@@ -119,64 +121,126 @@ void CUDASingleGPUTreeLearner::AddPredictionToScore(const Tree* tree, double* ou
   cuda_data_partition_->UpdateTrainScore(tree, out_score);
 }
 
+void CUDASingleGPUTreeLearner::CUDAConstructHistograms(
+  data_size_t global_num_data_in_smaller_leaf,
+  data_size_t global_num_data_in_larger_leaf,
+  double global_sum_hessians_in_smaller_leaf,
+  double global_sum_hessians_in_larger_leaf) {
+  global_timer.Start("CUDASingleGPUTreeLearner::ConstructHistogramForLeaf");
+  const data_size_t local_num_data_in_smaller_leaf = leaf_num_data_[smaller_leaf_index_];
+  const data_size_t local_num_data_in_larger_leaf = larger_leaf_index_ < 0 ? 0 : leaf_num_data_[larger_leaf_index_];
+  const double local_sum_hessians_in_smaller_leaf = leaf_sum_hessians_[smaller_leaf_index_];
+  const double local_sum_hessians_in_larger_leaf = larger_leaf_index_ < 0 ? 0 : leaf_sum_hessians_[larger_leaf_index_];
+  cuda_histogram_constructor_->ConstructHistogramForLeaf(
+    cuda_smaller_leaf_splits_->GetCUDAStruct(),
+    cuda_larger_leaf_splits_->GetCUDAStruct(),
+    global_num_data_in_smaller_leaf,
+    global_num_data_in_larger_leaf,
+    global_sum_hessians_in_smaller_leaf,
+    global_sum_hessians_in_larger_leaf,
+    local_num_data_in_smaller_leaf,
+    local_num_data_in_larger_leaf,
+    local_sum_hessians_in_smaller_leaf,
+    local_sum_hessians_in_larger_leaf);
+  global_timer.Stop("CUDASingleGPUTreeLearner::ConstructHistogramForLeaf");
+}
+
+void CUDASingleGPUTreeLearner::CUDASubtractHistograms(
+  const CUDALeafSplitsStruct* global_smaller_leaf_splits,
+  const CUDALeafSplitsStruct* global_larger_leaf_splits) {
+  cuda_histogram_constructor_->SubtractHistogramForLeaf(
+    global_smaller_leaf_splits,
+    global_larger_leaf_splits,
+    config_->gpu_use_discretized_grad);
+}
+
+void CUDASingleGPUTreeLearner::CUDAFindBestSplitsForLeaf(
+  data_size_t global_num_data_in_smaller_leaf,
+  data_size_t global_num_data_in_larger_leaf,
+  double global_sum_hessians_in_smaller_leaf,
+  double global_sum_hessians_in_larger_leaf,
+  const CUDALeafSplitsStruct* global_smaller_leaf_splits,
+  const CUDALeafSplitsStruct* global_larger_leaf_splits) {
+  global_timer.Start("CUDASingleGPUTreeLearner::FindBestSplitsForLeaf");
+  const data_size_t local_num_data_in_smaller_leaf = leaf_num_data_[smaller_leaf_index_];
+  const data_size_t local_num_data_in_larger_leaf = larger_leaf_index_ < 0 ? 0 : leaf_num_data_[larger_leaf_index_];
+  const double local_sum_hessians_in_smaller_leaf = leaf_sum_hessians_[smaller_leaf_index_];
+  const double local_sum_hessians_in_larger_leaf = larger_leaf_index_ < 0 ? 0 : leaf_sum_hessians_[larger_leaf_index_];
+  if (config_->gpu_use_discretized_grad) {
+    cuda_best_split_finder_->FindBestSplitsForLeaf(
+      global_smaller_leaf_splits,
+      global_larger_leaf_splits,
+      smaller_leaf_index_, larger_leaf_index_,
+      global_num_data_in_smaller_leaf, global_num_data_in_larger_leaf,
+      global_sum_hessians_in_smaller_leaf, global_sum_hessians_in_larger_leaf,
+      cuda_gradient_discretizer_->grad_scale(),
+      cuda_gradient_discretizer_->hess_scale());
+  } else {
+    cuda_best_split_finder_->FindBestSplitsForLeaf(
+      global_smaller_leaf_splits,
+      global_larger_leaf_splits,
+      smaller_leaf_index_, larger_leaf_index_,
+      global_num_data_in_smaller_leaf, global_num_data_in_larger_leaf,
+      global_sum_hessians_in_smaller_leaf, global_sum_hessians_in_larger_leaf,
+      nullptr, nullptr);
+  }
+  global_timer.Stop("CUDASingleGPUTreeLearner::FindBestSplitsForLeaf");
+}
+
+void CUDASingleGPUTreeLearner::SetBestSplit(
+  const int best_leaf_index,
+  const int smaller_leaf_best_split_feature,
+  const uint32_t smaller_leaf_best_split_threshold,
+  const uint8_t smaller_leaf_best_split_default_left,
+  const double smaller_leaf_best_split_gain,
+  const int larger_leaf_best_split_feature,
+  const uint32_t larger_leaf_best_split_threshold,
+  const uint8_t larger_leaf_best_split_default_left,
+  const double larger_leaf_best_split_gain) {
+  leaf_best_split_feature_[smaller_leaf_index_] = smaller_leaf_best_split_feature;
+  leaf_best_split_threshold_[smaller_leaf_index_] = smaller_leaf_best_split_threshold;
+  leaf_best_split_default_left_[smaller_leaf_index_] = smaller_leaf_best_split_default_left;
+  leaf_best_split_gain_[smaller_leaf_index_] = smaller_leaf_best_split_gain;
+  if (larger_leaf_index_ >= 0) {
+    leaf_best_split_feature_[larger_leaf_index_] = larger_leaf_best_split_feature;
+    leaf_best_split_threshold_[larger_leaf_index_] = larger_leaf_best_split_threshold;
+    leaf_best_split_default_left_[larger_leaf_index_] = larger_leaf_best_split_default_left;
+    leaf_best_split_gain_[larger_leaf_index_] = larger_leaf_best_split_gain;
+  }
+  best_leaf_index_ = best_leaf_index;
+}
+
 Tree* CUDASingleGPUTreeLearner::Train(const score_t* gradients,
   const score_t* hessians, bool /*is_first_tree*/) {
-  gradients_ = gradients;
-  hessians_ = hessians;
   global_timer.Start("CUDASingleGPUTreeLearner::BeforeTrain");
-  BeforeTrain();
+  BeforeTrainWithGrad(gradients, hessians, col_sampler_.is_feature_used_bytree());
   global_timer.Stop("CUDASingleGPUTreeLearner::BeforeTrain");
   const bool track_branch_features = !(config_->interaction_constraints_vector.empty());
   std::unique_ptr<CUDATree> tree(new CUDATree(config_->num_leaves, track_branch_features,
     config_->linear_tree, config_->gpu_device_id, has_categorical_feature_));
   for (int i = 0; i < config_->num_leaves - 1; ++i) {
-    global_timer.Start("CUDASingleGPUTreeLearner::ConstructHistogramForLeaf");
-    const data_size_t num_data_in_smaller_leaf = leaf_num_data_[smaller_leaf_index_];
-    const data_size_t num_data_in_larger_leaf = larger_leaf_index_ < 0 ? 0 : leaf_num_data_[larger_leaf_index_];
-    const double sum_hessians_in_smaller_leaf = leaf_sum_hessians_[smaller_leaf_index_];
-    const double sum_hessians_in_larger_leaf = larger_leaf_index_ < 0 ? 0 : leaf_sum_hessians_[larger_leaf_index_];
-    cuda_histogram_constructor_->ConstructHistogramForLeaf(
+    const data_size_t global_num_data_in_smaller_leaf = leaf_num_data_[smaller_leaf_index_];
+    const data_size_t global_num_data_in_larger_leaf = larger_leaf_index_ < 0 ? 0 : leaf_num_data_[larger_leaf_index_];
+    const double global_sum_hessians_in_smaller_leaf = leaf_sum_hessians_[smaller_leaf_index_];
+    const double global_sum_hessians_in_larger_leaf = larger_leaf_index_ < 0 ? 0 : leaf_sum_hessians_[larger_leaf_index_];
+    CUDAConstructHistograms(
+      global_num_data_in_smaller_leaf,
+      global_num_data_in_larger_leaf,
+      global_sum_hessians_in_smaller_leaf,
+      global_sum_hessians_in_larger_leaf);
+
+    CUDASubtractHistograms(
       cuda_smaller_leaf_splits_->GetCUDAStruct(),
-      cuda_larger_leaf_splits_->GetCUDAStruct(),
-      num_data_in_smaller_leaf,
-      num_data_in_larger_leaf,
-      sum_hessians_in_smaller_leaf,
-      sum_hessians_in_larger_leaf);
+      cuda_larger_leaf_splits_->GetCUDAStruct());
 
-    /*if (config_->gpu_use_discretized_grad) {
-      const auto& feature_hist_offsets = share_state_->feature_hist_offsets();
-      const int num_total_bin = feature_hist_offsets.empty() ? 0 : static_cast<int>(feature_hist_offsets.back());
-      //Log::Warning("smaller_leaf_index = %d, larger_leaf_index = %d", smaller_leaf_index_, larger_leaf_index_);
-      cuda_gradient_discretizer_->ScaleHistogram(num_total_bin, cuda_smaller_leaf_splits_->GetCUDAStructRef(),
-        cuda_histogram_constructor_->cuda_stream());
-    }*/
-    global_timer.Stop("CUDASingleGPUTreeLearner::ConstructHistogramForLeaf");
-
-    cuda_histogram_constructor_->SubtractHistogramForLeaf(
+    CUDAFindBestSplitsForLeaf(
+      global_num_data_in_smaller_leaf,
+      global_num_data_in_larger_leaf,
+      global_sum_hessians_in_smaller_leaf,
+      global_sum_hessians_in_larger_leaf,
       cuda_smaller_leaf_splits_->GetCUDAStruct(),
-      cuda_larger_leaf_splits_->GetCUDAStruct(),
-      config_->gpu_use_discretized_grad);
+      cuda_larger_leaf_splits_->GetCUDAStruct());
 
-    global_timer.Start("CUDASingleGPUTreeLearner::FindBestSplitsForLeaf");
-    if (config_->gpu_use_discretized_grad) {
-      cuda_best_split_finder_->FindBestSplitsForLeaf(
-        cuda_smaller_leaf_splits_->GetCUDAStruct(),
-        cuda_larger_leaf_splits_->GetCUDAStruct(),
-        smaller_leaf_index_, larger_leaf_index_,
-        num_data_in_smaller_leaf, num_data_in_larger_leaf,
-        sum_hessians_in_smaller_leaf, sum_hessians_in_larger_leaf,
-        cuda_gradient_discretizer_->grad_scale(),
-        cuda_gradient_discretizer_->hess_scale());
-    } else {
-      cuda_best_split_finder_->FindBestSplitsForLeaf(
-        cuda_smaller_leaf_splits_->GetCUDAStruct(),
-        cuda_larger_leaf_splits_->GetCUDAStruct(),
-        smaller_leaf_index_, larger_leaf_index_,
-        num_data_in_smaller_leaf, num_data_in_larger_leaf,
-        sum_hessians_in_smaller_leaf, sum_hessians_in_larger_leaf,
-        nullptr, nullptr);
-    }
-    global_timer.Stop("CUDASingleGPUTreeLearner::FindBestSplitsForLeaf");
     global_timer.Start("CUDASingleGPUTreeLearner::FindBestFromAllSplits");
     const CUDASplitInfo* best_split_info = nullptr;
     if (larger_leaf_index_ >= 0) {

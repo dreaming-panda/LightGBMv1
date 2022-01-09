@@ -50,9 +50,54 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
   Tree* FitByExistingTree(const Tree* old_tree, const std::vector<int>& leaf_pred,
                           const score_t* gradients, const score_t* hessians) const override;
 
- protected:
-  void BeforeTrain() override;
+  virtual void BeforeTrainWithGrad(const score_t* gradients, const score_t* hessians, const std::vector<int8_t>& is_feature_used_by_tree);
 
+  void CUDAConstructHistograms(
+    data_size_t global_num_data_in_smaller_leaf,
+    data_size_t global_num_data_in_larger_leaf,
+    double global_sum_hessians_in_smaller_leaf,
+    double global_sum_hessians_in_larger_leaf);
+
+  void CUDASubtractHistograms(
+    const CUDALeafSplitsStruct* global_smaller_leaf_splits,
+    const CUDALeafSplitsStruct* global_larger_leaf_splits);
+
+  void CUDAFindBestSplitsForLeaf(
+    data_size_t global_num_data_in_smaller_leaf,
+    data_size_t global_num_data_in_larger_leaf,
+    double global_sum_hessians_in_smaller_leaf,
+    double global_sum_hessians_in_larger_leaf,
+    const CUDALeafSplitsStruct* global_smaller_leaf_splits,
+    const CUDALeafSplitsStruct* global_larger_leaf_splits);
+
+  hist_t* smaller_leaf_hist() {
+    return cuda_smaller_leaf_splits_->GetCUDAStruct()->hist_in_leaf;
+  }
+
+  const CUDALeafSplitsStruct* GetSmallerLeafSplitsStruct() const {
+    return cuda_smaller_leaf_splits_->GetCUDAStruct();
+  }
+
+  const int* cuda_best_split_info_buffer() const {
+    return cuda_best_split_finder_->cuda_best_split_info_buffer();
+  }
+
+  CUDASplitInfo* cuda_leaf_best_split_info() {
+    return cuda_best_split_finder_->cuda_leaf_best_split_info();
+  }
+
+  void SetBestSplit(
+    const int best_leaf_index,
+    const int smaller_leaf_best_split_feature,
+    const uint32_t smaller_leaf_best_split_threshold,
+    const uint8_t smaller_leaf_best_split_default_left,
+    const double smaller_leaf_best_split_gain,
+    const int larger_leaf_best_split_feature,
+    const uint32_t larger_leaf_best_split_threshold,
+    const uint8_t larger_leaf_best_split_default_left,
+    const double larger_leaf_best_split_gain);
+
+ protected:
   void ReduceLeafStat(CUDATree* old_tree, const score_t* gradients, const score_t* hessians, const data_size_t* num_data_in_leaf) const;
 
   void LaunchReduceLeafStatKernel(const score_t* gradients, const score_t* hessians, const data_size_t* num_data_in_leaf,

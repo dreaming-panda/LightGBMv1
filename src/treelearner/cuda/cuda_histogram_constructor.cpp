@@ -127,16 +127,20 @@ void CUDAHistogramConstructor::Init(const Dataset* train_data, TrainingShareStat
 
 void CUDAHistogramConstructor::ConstructHistogramForLeaf(
   const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
-  const CUDALeafSplitsStruct* cuda_larger_leaf_splits,
-  const data_size_t num_data_in_smaller_leaf,
-  const data_size_t num_data_in_larger_leaf,
-  const double sum_hessians_in_smaller_leaf,
-  const double sum_hessians_in_larger_leaf) {
-  if ((num_data_in_smaller_leaf <= min_data_in_leaf_ || sum_hessians_in_smaller_leaf <= min_sum_hessian_in_leaf_) &&
-    (num_data_in_larger_leaf <= min_data_in_leaf_ || sum_hessians_in_larger_leaf <= min_sum_hessian_in_leaf_)) {
+  const CUDALeafSplitsStruct* /*cuda_larger_leaf_splits*/,
+  const data_size_t global_num_data_in_smaller_leaf,
+  const data_size_t global_num_data_in_larger_leaf,
+  const data_size_t local_num_data_in_smaller_leaf,
+  const data_size_t /*local_num_data_in_larger_leaf*/,
+  const double global_sum_hessians_in_smaller_leaf,
+  const double global_sum_hessians_in_larger_leaf,
+  const double /*local_sum_hessians_in_smaller_leaf*/,
+  const double /*local_sum_hessians_in_larger_leaf*/) {
+  if ((global_num_data_in_smaller_leaf <= min_data_in_leaf_ || global_sum_hessians_in_smaller_leaf <= min_sum_hessian_in_leaf_) &&
+    (global_num_data_in_larger_leaf <= min_data_in_leaf_ || global_sum_hessians_in_larger_leaf <= min_sum_hessian_in_leaf_)) {
     return;
   }
-  LaunchConstructHistogramKernel(cuda_smaller_leaf_splits, num_data_in_smaller_leaf);
+  LaunchConstructHistogramKernel(cuda_smaller_leaf_splits, local_num_data_in_smaller_leaf);
   SynchronizeCUDADevice(__FILE__, __LINE__);
 }
 
