@@ -168,6 +168,7 @@ void DataParallelTreeLearner<TREELEARNER_T>::FindBestSplits(const Tree* tree) {
   // Reduce scatter for histogram
   Network::ReduceScatter(input_buffer_.data(), reduce_scatter_size_, sizeof(hist_t), block_start_.data(),
                          block_len_.data(), output_buffer_.data(), static_cast<comm_size_t>(output_buffer_.size()), &HistogramSumReducer);
+  Log::Warning("rank_ = %d, after Network::ReduceScatter in DataParallelTreeLearner::FindBestSplits", rank_);
   this->FindBestSplitsFromHistograms(
       this->col_sampler_.is_feature_used_bytree(), true, tree);
 }

@@ -399,6 +399,7 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
       }
       bool is_first_tree = models_.size() < static_cast<size_t>(num_tree_per_iteration_);
       new_tree.reset(tree_learner_->Train(grad, hess, is_first_tree));
+      Log::Warning("after training tree iter_ = %d", iter_);
     }
 
     if (new_tree->num_leaves() > 1) {
@@ -411,6 +412,7 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
       new_tree->Shrinkage(shrinkage_rate_);
       // update score
       UpdateScore(new_tree.get(), cur_tree_id);
+      Log::Warning("after UpdateScore iter_ = %d", iter_);
       if (std::fabs(init_scores[cur_tree_id]) > kEpsilon) {
         new_tree->AddBias(init_scores[cur_tree_id]);
       }
@@ -432,6 +434,7 @@ bool GBDT::TrainOneIter(const score_t* gradients, const score_t* hessians) {
           score_updater->AddScore(output, cur_tree_id);
         }
       }
+      Log::Warning("after AddScore iter_ = %d", iter_);
     }
     // add model
     models_.push_back(std::move(new_tree));

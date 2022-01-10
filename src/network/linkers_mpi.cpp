@@ -32,19 +32,24 @@ Linkers::~Linkers() {
 }
 
 bool Linkers::IsMpiInitialized() {
+  Log::Warning("before IsMpiInitialized");
   int is_mpi_init;
   MPI_SAFE_CALL(MPI_Initialized(&is_mpi_init));
+  Log::Warning("after IsMpiInitialized");
   return is_mpi_init;
 }
 
 void Linkers::MpiFinalizeIfIsParallel() {
+  Log::Warning("before MpiFinalizeIfIsParallel");
   if (IsMpiInitialized()) {
     Log::Debug("Finalizing MPI session.");
     MPI_SAFE_CALL(MPI_Finalize());
   }
+  Log::Warning("after MpiFinalizeIfIsParallel");
 }
 
 void Linkers::MpiAbortIfIsParallel() {
+  Log::Warning("before MpiAbortIfIsParallel");
   try {
     if (IsMpiInitialized()) {
       std::cerr << "Aborting MPI communication." << std::endl << std::flush;
@@ -55,6 +60,7 @@ void Linkers::MpiAbortIfIsParallel() {
     std::cerr << "Exception was raised before aborting MPI. Aborting process..." << std::endl << std::flush;
     abort();
   }
+  Log::Warning("after MpiAbortIfIsParallel");
 }
 
 }  // namespace LightGBM
