@@ -336,7 +336,7 @@ void Config::CheckParamConflict() {
   }
   // force col-wise for gpu, and non-single GPU CUDA version
   if (device_type == std::string("gpu") ||
-    (device_type == std::string("cuda") && (num_gpu > 1 || tree_learner != std::string("serial")))) {
+    (device_type == std::string("cuda") && tree_learner != std::string("serial"))) {
     force_col_wise = true;
     force_row_wise = false;
     if (deterministic) {

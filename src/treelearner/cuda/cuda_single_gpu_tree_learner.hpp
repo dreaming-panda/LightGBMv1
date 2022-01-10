@@ -31,6 +31,8 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
 
   void Init(const Dataset* train_data, bool is_constant_hessian) override;
 
+  void Init(const Dataset* train_data, bool is_constant_hessian, int gpu_index);
+
   void ResetTrainingData(const Dataset* train_data,
                          bool is_constant_hessian) override;
 
@@ -69,6 +71,8 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
     double global_sum_hessians_in_larger_leaf,
     const CUDALeafSplitsStruct* global_smaller_leaf_splits,
     const CUDALeafSplitsStruct* global_larger_leaf_splits);
+
+  void CUDASplit(int right_leaf_index);
 
   hist_t* smaller_leaf_hist() {
     return cuda_smaller_leaf_splits_->GetCUDAStruct()->hist_in_leaf;

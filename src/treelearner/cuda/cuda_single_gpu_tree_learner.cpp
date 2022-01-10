@@ -23,10 +23,15 @@ CUDASingleGPUTreeLearner::CUDASingleGPUTreeLearner(const Config* config): Serial
 CUDASingleGPUTreeLearner::~CUDASingleGPUTreeLearner() {}
 
 void CUDASingleGPUTreeLearner::Init(const Dataset* train_data, bool is_constant_hessian) {
+  const int gpu_index = config_->gpu_device_id >= 0 ? config_->gpu_device_id : 0;
+  Init(train_data, is_constant_hessian, gpu_index);
+}
+
+void CUDASingleGPUTreeLearner::Init(const Dataset* train_data, bool is_constant_hessian, int gpu_index) {
   SerialTreeLearner::Init(train_data, is_constant_hessian);
   num_threads_ = OMP_NUM_THREADS();
   // use the first gpu by default
-  gpu_device_id_ = config_->gpu_device_id >= 0 ? config_->gpu_device_id : 0;
+  gpu_device_id_ = gpu_index;
   CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_device_id_));
 
   cuda_smaller_leaf_splits_.reset(new CUDALeafSplits(num_data_));
@@ -136,10 +141,10 @@ void CUDASingleGPUTreeLearner::CUDAConstructHistograms(
     cuda_larger_leaf_splits_->GetCUDAStruct(),
     global_num_data_in_smaller_leaf,
     global_num_data_in_larger_leaf,
-    global_sum_hessians_in_smaller_leaf,
-    global_sum_hessians_in_larger_leaf,
     local_num_data_in_smaller_leaf,
     local_num_data_in_larger_leaf,
+    global_sum_hessians_in_smaller_leaf,
+    global_sum_hessians_in_larger_leaf,
     local_sum_hessians_in_smaller_leaf,
     local_sum_hessians_in_larger_leaf);
   global_timer.Stop("CUDASingleGPUTreeLearner::ConstructHistogramForLeaf");
@@ -162,10 +167,6 @@ void CUDASingleGPUTreeLearner::CUDAFindBestSplitsForLeaf(
   const CUDALeafSplitsStruct* global_smaller_leaf_splits,
   const CUDALeafSplitsStruct* global_larger_leaf_splits) {
   global_timer.Start("CUDASingleGPUTreeLearner::FindBestSplitsForLeaf");
-  const data_size_t local_num_data_in_smaller_leaf = leaf_num_data_[smaller_leaf_index_];
-  const data_size_t local_num_data_in_larger_leaf = larger_leaf_index_ < 0 ? 0 : leaf_num_data_[larger_leaf_index_];
-  const double local_sum_hessians_in_smaller_leaf = leaf_sum_hessians_[smaller_leaf_index_];
-  const double local_sum_hessians_in_larger_leaf = larger_leaf_index_ < 0 ? 0 : leaf_sum_hessians_[larger_leaf_index_];
   if (config_->gpu_use_discretized_grad) {
     cuda_best_split_finder_->FindBestSplitsForLeaf(
       global_smaller_leaf_splits,
@@ -208,6 +209,34 @@ void CUDASingleGPUTreeLearner::SetBestSplit(
     leaf_best_split_gain_[larger_leaf_index_] = larger_leaf_best_split_gain;
   }
   best_leaf_index_ = best_leaf_index;
+}
+
+void CUDASingleGPUTreeLearner::CUDASplit(int right_leaf_index) {
+  leaf_best_split_gain_[best_leaf_index_] = kMinScore;
+  leaf_best_split_gain_[right_leaf_index] = kMinScore;
+
+  double sum_left_gradients = 0.0f;
+  double sum_right_gradients = 0.0f;
+  cuda_data_partition_->Split(cuda_best_split_finder_->cuda_leaf_best_split_info() + best_leaf_index_,
+                              best_leaf_index_,
+                              right_leaf_index,
+                              leaf_best_split_feature_[best_leaf_index_],
+                              leaf_best_split_threshold_[best_leaf_index_],
+                              cuda_bitset_inner_,
+                              static_cast<int>(cuda_bitset_inner_len_),
+                              leaf_best_split_default_left_[best_leaf_index_],
+                              leaf_num_data_[best_leaf_index_],
+                              leaf_data_start_[best_leaf_index_],
+                              cuda_smaller_leaf_splits_->GetCUDAStructRef(),
+                              cuda_larger_leaf_splits_->GetCUDAStructRef(),
+                              &leaf_num_data_[best_leaf_index_],
+                              &leaf_num_data_[right_leaf_index],
+                              &leaf_data_start_[best_leaf_index_],
+                              &leaf_data_start_[right_leaf_index],
+                              &leaf_sum_hessians_[best_leaf_index_],
+                              &leaf_sum_hessians_[right_leaf_index],
+                              &sum_left_gradients,
+                              &sum_right_gradients);
 }
 
 Tree* CUDASingleGPUTreeLearner::Train(const score_t* gradients,
@@ -315,31 +344,7 @@ Tree* CUDASingleGPUTreeLearner::Train(const score_t* gradients,
                                        best_split_info);
     }
 
-    leaf_best_split_gain_[best_leaf_index_] = kMinScore;
-    leaf_best_split_gain_[right_leaf_index] = kMinScore;
-
-    double sum_left_gradients = 0.0f;
-    double sum_right_gradients = 0.0f;
-    cuda_data_partition_->Split(best_split_info,
-                                best_leaf_index_,
-                                right_leaf_index,
-                                leaf_best_split_feature_[best_leaf_index_],
-                                leaf_best_split_threshold_[best_leaf_index_],
-                                cuda_bitset_inner_,
-                                static_cast<int>(cuda_bitset_inner_len_),
-                                leaf_best_split_default_left_[best_leaf_index_],
-                                leaf_num_data_[best_leaf_index_],
-                                leaf_data_start_[best_leaf_index_],
-                                cuda_smaller_leaf_splits_->GetCUDAStructRef(),
-                                cuda_larger_leaf_splits_->GetCUDAStructRef(),
-                                &leaf_num_data_[best_leaf_index_],
-                                &leaf_num_data_[right_leaf_index],
-                                &leaf_data_start_[best_leaf_index_],
-                                &leaf_data_start_[right_leaf_index],
-                                &leaf_sum_hessians_[best_leaf_index_],
-                                &leaf_sum_hessians_[right_leaf_index],
-                                &sum_left_gradients,
-                                &sum_right_gradients);
+    CUDASplit(right_leaf_index);
     //CheckSplitValid(leaf_best_split_feature_[best_leaf_index_], best_leaf_index_, right_leaf_index, sum_left_gradients, sum_right_gradients);
     smaller_leaf_index_ = (leaf_num_data_[best_leaf_index_] < leaf_num_data_[right_leaf_index] ? best_leaf_index_ : right_leaf_index);
     larger_leaf_index_ = (smaller_leaf_index_ == best_leaf_index_ ? right_leaf_index : best_leaf_index_);

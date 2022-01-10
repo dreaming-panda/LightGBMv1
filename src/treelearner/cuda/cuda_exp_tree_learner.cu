@@ -21,9 +21,8 @@ __global__ void ReduceRootNodeInformationKernel(
   double sum_of_hessians = 0.0f;
   int64_t sum_of_gradients_hessians = 0;
   data_size_t num_data_in_leaf = 0;
-  int leaf_index = -1;
   for (int gpu_index = 0; gpu_index < num_gpu; ++gpu_index) {
-    const int gpu_buffer = buffer + gpu_index * count;
+    const int* gpu_buffer = buffer + gpu_index * count;
     const double gpu_sum_of_gradients = (reinterpret_cast<const double*>(gpu_buffer + 1))[0];
     const double gpu_sum_of_hessians = (reinterpret_cast<const double*>(gpu_buffer + 1))[1];
     gpu_buffer += (sizeof(int) + sizeof(double) * 2) / sizeof(int);

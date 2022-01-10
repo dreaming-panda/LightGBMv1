@@ -178,6 +178,7 @@ void CUDARowData::Init(const Dataset* train_data, TrainingShareStates* train_sha
 }
 
 void CUDARowData::DivideCUDAFeatureGroups(const Dataset* train_data, TrainingShareStates* share_state) {
+  Log::Warning("CUDARowData::DivideCUDAFeatureGroups step 0");
   const uint32_t max_num_bin_per_partition = shared_hist_size_ / 2;
   const std::vector<uint32_t>& column_hist_offsets = share_state->column_hist_offsets();
   std::vector<int> feature_group_num_feature_offsets;
@@ -194,6 +195,8 @@ void CUDARowData::DivideCUDAFeatureGroups(const Dataset* train_data, TrainingSha
   CHECK_EQ(offsets, num_feature_);
   feature_group_num_feature_offsets.emplace_back(offsets);
 
+  Log::Warning("CUDARowData::DivideCUDAFeatureGroups step 1");
+
   uint32_t start_hist_offset = 0;
   feature_partition_column_index_offsets_.clear();
   column_hist_offsets_.clear();
@@ -205,20 +208,29 @@ void CUDARowData::DivideCUDAFeatureGroups(const Dataset* train_data, TrainingSha
   num_feature_partitions_ = 0;
   large_bin_partitions_.clear();
   small_bin_partitions_.clear();
+
+  Log::Warning("CUDARowData::DivideCUDAFeatureGroups step 2");
   for (int feature_group_index = 0; feature_group_index < num_feature_groups; ++feature_group_index) {
     if (!train_data->IsMultiGroup(feature_group_index)) {
+  Log::Warning("CUDARowData::DivideCUDAFeatureGroups step 2.1");
       const uint32_t column_feature_hist_start = column_hist_offsets[column_index];
+  Log::Warning("CUDARowData::DivideCUDAFeatureGroups step 2.2");
       const uint32_t column_feature_hist_end = column_hist_offsets[column_index + 1];
       const uint32_t num_bin_in_dense_group = column_feature_hist_end - column_feature_hist_start;
+  Log::Warning("CUDARowData::DivideCUDAFeatureGroups step 2.3");
 
       // if one column has too many bins, use a separate partition for that column
       if (num_bin_in_dense_group > max_num_bin_per_partition) {
         feature_partition_column_index_offsets_.emplace_back(column_index + 1);
+  Log::Warning("CUDARowData::DivideCUDAFeatureGroups step 2.4");
         start_hist_offset = column_feature_hist_end;
         partition_hist_offsets_.emplace_back(start_hist_offset);
+  Log::Warning("CUDARowData::DivideCUDAFeatureGroups step 2.5");
         large_bin_partitions_.emplace_back(num_feature_partitions_);
+  Log::Warning("CUDARowData::DivideCUDAFeatureGroups step 2.6");
         ++num_feature_partitions_;
         column_hist_offsets_.emplace_back(0);
+  Log::Warning("CUDARowData::DivideCUDAFeatureGroups step 2.7");
         ++column_index;
         continue;
       }
@@ -226,19 +238,24 @@ void CUDARowData::DivideCUDAFeatureGroups(const Dataset* train_data, TrainingSha
       // try if adding this column exceed the maximum number per partition
       const uint32_t cur_hist_num_bin = column_feature_hist_end - start_hist_offset;
       if (cur_hist_num_bin > max_num_bin_per_partition) {
+  Log::Warning("CUDARowData::DivideCUDAFeatureGroups step 2.8");
         feature_partition_column_index_offsets_.emplace_back(column_index);
         start_hist_offset = column_feature_hist_start;
+  Log::Warning("CUDARowData::DivideCUDAFeatureGroups step 2.9");
         partition_hist_offsets_.emplace_back(start_hist_offset);
         small_bin_partitions_.emplace_back(num_feature_partitions_);
+  Log::Warning("CUDARowData::DivideCUDAFeatureGroups step 2.10");
         ++num_feature_partitions_;
       }
       column_hist_offsets_.emplace_back(column_hist_offsets[column_index] - start_hist_offset);
+  Log::Warning("CUDARowData::DivideCUDAFeatureGroups step 2.11");
       if (feature_group_index == num_feature_groups - 1) {
         feature_partition_column_index_offsets_.emplace_back(column_index + 1);
         partition_hist_offsets_.emplace_back(column_hist_offsets.back());
         small_bin_partitions_.emplace_back(num_feature_partitions_);
         ++num_feature_partitions_;
       }
+  Log::Warning("CUDARowData::DivideCUDAFeatureGroups step 2.12");
       ++column_index;
     } else {
       const int group_feature_index_start = feature_group_num_feature_offsets[feature_group_index];
@@ -282,6 +299,8 @@ void CUDARowData::DivideCUDAFeatureGroups(const Dataset* train_data, TrainingSha
       }
     }
   }
+
+  Log::Warning("CUDARowData::DivideCUDAFeatureGroups step 3");
   column_hist_offsets_.emplace_back(column_hist_offsets.back() - start_hist_offset);
   max_num_column_per_partition_ = 0;
   for (size_t i = 0; i < feature_partition_column_index_offsets_.size() - 1; ++i) {
@@ -290,6 +309,8 @@ void CUDARowData::DivideCUDAFeatureGroups(const Dataset* train_data, TrainingSha
       max_num_column_per_partition_ = num_column;
     }
   }
+
+  Log::Warning("CUDARowData::DivideCUDAFeatureGroups step 4");
 
   InitCUDAMemoryFromHostMemory<int>(&cuda_feature_partition_column_index_offsets_,
     feature_partition_column_index_offsets_.data(),
@@ -308,6 +329,8 @@ void CUDARowData::DivideCUDAFeatureGroups(const Dataset* train_data, TrainingSha
     partition_hist_offsets_.size(),
     __FILE__,
     __LINE__);
+
+  Log::Warning("CUDARowData::DivideCUDAFeatureGroups step 5");
 }
 
 template <typename BIN_TYPE>
