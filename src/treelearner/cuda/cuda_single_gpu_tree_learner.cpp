@@ -115,7 +115,9 @@ void CUDASingleGPUTreeLearner::BeforeTrainWithGrad(const score_t* gradients, con
       &leaf_sum_hessians_[0]);
   }
   leaf_num_data_[0] = root_num_data;
+  Log::Warning("before init values");
   cuda_larger_leaf_splits_->InitValues();
+  Log::Warning("after init values");
   col_sampler_.ResetByTree();
   cuda_best_split_finder_->BeforeTrain(is_feature_used_by_tree);
   leaf_data_start_[0] = 0;

@@ -46,15 +46,17 @@ class CUDAExpTreeLearner: public CUDASingleGPUTreeLearner {
  private:
   void NCCLReduceHistograms();
 
-  void NCCLReduceRootNodeInformation();
+  void NCCLReduceLeafInformation();
 
-  void LaunchReduceRootNodeInformationKernel(CUDALeafSplitsStruct* out);
+  void LaunchReduceLeafInformationKernel();
 
   void NCCLReduceBestSplitsForLeaf(CUDATree* tree);
 
   void LaunchReduceBestSplitsForLeafKernel();
 
   void BroadCastBestSplit();
+
+  void ReduceLeafInformationAfterSplit();
 
   std::vector<std::unique_ptr<CUDASingleGPUTreeLearner>> tree_learners_;
   std::vector<std::unique_ptr<Dataset>> datasets_;
@@ -69,12 +71,14 @@ class CUDAExpTreeLearner: public CUDASingleGPUTreeLearner {
 
   int num_total_bin_;
 
-  std::vector<CUDAVector<CUDALeafSplitsStruct>> leaf_splits_buffer_;
+  std::vector<CUDAVector<CUDALeafSplitsStruct>> smaller_leaf_splits_buffer_;
+  std::vector<CUDAVector<CUDALeafSplitsStruct>> larger_leaf_splits_buffer_;
   std::vector<std::unique_ptr<CUDAVector<CUDALeafSplitsStruct>>> per_gpu_smaller_leaf_splits_;
   std::vector<std::unique_ptr<CUDAVector<CUDALeafSplitsStruct>>> per_gpu_larger_leaf_splits_;
-  CUDAVector<int> best_split_info_buffer_;
+  std::vector<std::unique_ptr<CUDAVector<int>>> best_split_info_buffer_;
   int* host_split_info_buffer_;
   CUDAVector<double> cuda_root_sum_hessians_;
+  std::vector<int> leaf_to_hist_index_map_;
 };
 
 }  // namespace LightGBM

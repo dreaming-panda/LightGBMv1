@@ -8,65 +8,130 @@
 
 namespace LightGBM {
 
+template <bool IS_ROOT>
 __global__ void ReduceRootNodeInformationKernel(
-  const CUDALeafSplitsStruct* leaf_splits_buffer,
+  const CUDALeafSplitsStruct* smaller_leaf_splits_buffer,
+  const CUDALeafSplitsStruct* larger_leaf_splits_buffer,
   const int num_gpu,
   const double lambda_l1,
   const double lambda_l2,
   const data_size_t num_data,
-  CUDALeafSplitsStruct* out,
+  CUDALeafSplitsStruct* smaller_leaf_splits,
+  CUDALeafSplitsStruct* larger_leaf_splits,
   double* out_sum_hessians) {
-  double sum_of_gradients = 0.0;
-  double sum_of_hessians = 0.0f;
-  int64_t sum_of_gradients_hessians = 0;
-  data_size_t num_data_in_leaf = 0;
+  double smaller_sum_of_gradients = 0.0;
+  double smaller_sum_of_hessians = 0.0f;
+  int64_t smaller_sum_of_gradients_hessians = 0;
+  data_size_t smaller_num_data_in_leaf = 0;
   for (int gpu_index = 0; gpu_index < num_gpu; ++gpu_index) {
-    const CUDALeafSplitsStruct* leaf_splits = leaf_splits_buffer + gpu_index;
-    const double gpu_sum_of_gradients = leaf_splits->sum_of_gradients;
-    const double gpu_sum_of_hessians = leaf_splits->sum_of_hessians;
-    const int64_t gpu_sum_of_gradients_hessians = leaf_splits->sum_of_gradients_hessians;
-    const data_size_t gpu_num_data_in_leaf = leaf_splits->num_data_in_leaf;
-    sum_of_gradients += gpu_sum_of_gradients;
-    sum_of_hessians += gpu_sum_of_hessians;
-    sum_of_gradients_hessians += gpu_sum_of_gradients_hessians;
-    num_data_in_leaf += gpu_num_data_in_leaf;
+    const CUDALeafSplitsStruct* leaf_splits = smaller_leaf_splits_buffer + gpu_index;
+    const double smaller_gpu_sum_of_gradients = leaf_splits->sum_of_gradients;
+    const double smaller_gpu_sum_of_hessians = leaf_splits->sum_of_hessians;
+    const int64_t smaller_gpu_sum_of_gradients_hessians = leaf_splits->sum_of_gradients_hessians;
+    const data_size_t smaller_gpu_num_data_in_leaf = leaf_splits->num_data_in_leaf;
+    smaller_sum_of_gradients += smaller_gpu_sum_of_gradients;
+    smaller_sum_of_hessians += smaller_gpu_sum_of_hessians;
+    smaller_sum_of_gradients_hessians += smaller_gpu_sum_of_gradients_hessians;
+    smaller_num_data_in_leaf += smaller_gpu_num_data_in_leaf;
   }
-  out->sum_of_gradients = sum_of_gradients;
-  out->sum_of_hessians = sum_of_hessians;
-  *out_sum_hessians = sum_of_hessians;
-  out->sum_of_gradients_hessians = sum_of_gradients_hessians;
-  out->num_data_in_leaf = num_data_in_leaf;
-  assert(num_data_in_leaf == num_data);
-  out->leaf_index = 0;
+  smaller_leaf_splits->sum_of_gradients = smaller_sum_of_gradients;
+  smaller_leaf_splits->sum_of_hessians = smaller_sum_of_hessians;
+  if (IS_ROOT) {
+    *out_sum_hessians = smaller_sum_of_hessians;
+  }
+  smaller_leaf_splits->sum_of_gradients_hessians = smaller_sum_of_gradients_hessians;
+  smaller_leaf_splits->num_data_in_leaf = smaller_num_data_in_leaf;
+  if (IS_ROOT) {
+    assert(num_data_in_leaf == num_data);
+    smaller_leaf_splits->leaf_index = 0;
+  }
   const bool use_l1 = lambda_l1 > 0.0f;
   if (!use_l1) {
     // no smoothing on root node
-    out->gain = CUDALeafSplits::GetLeafGain<false, false>(sum_of_gradients, sum_of_hessians, lambda_l1, lambda_l2, 0.0f, 0, 0.0f);
+    smaller_leaf_splits->gain = CUDALeafSplits::GetLeafGain<false, false>(smaller_sum_of_gradients, smaller_sum_of_hessians, lambda_l1, lambda_l2, 0.0f, 0, 0.0f);
   } else {
     // no smoothing on root node
-    out->gain = CUDALeafSplits::GetLeafGain<true, false>(sum_of_gradients, sum_of_hessians, lambda_l1, lambda_l2, 0.0f, 0, 0.0f);
+    smaller_leaf_splits->gain = CUDALeafSplits::GetLeafGain<true, false>(smaller_sum_of_gradients, smaller_sum_of_hessians, lambda_l1, lambda_l2, 0.0f, 0, 0.0f);
   }
   if (!use_l1) {
     // no smoothing on root node
-    out->leaf_value =
-      CUDALeafSplits::CalculateSplittedLeafOutput<false, false>(sum_of_gradients, sum_of_hessians, lambda_l1, lambda_l2, 0.0f, 0, 0.0f);
+    smaller_leaf_splits->leaf_value =
+      CUDALeafSplits::CalculateSplittedLeafOutput<false, false>(smaller_sum_of_gradients, smaller_sum_of_hessians, lambda_l1, lambda_l2, 0.0f, 0, 0.0f);
   } else {
     // no smoothing on root node
-    out->leaf_value =
-      CUDALeafSplits::CalculateSplittedLeafOutput<true, false>(sum_of_gradients, sum_of_hessians, lambda_l1, lambda_l2, 0.0f, 0, 0.0f);
+    smaller_leaf_splits->leaf_value =
+      CUDALeafSplits::CalculateSplittedLeafOutput<true, false>(smaller_sum_of_gradients, smaller_sum_of_hessians, lambda_l1, lambda_l2, 0.0f, 0, 0.0f);
+  }
+
+  if (!IS_ROOT) {
+    double larger_sum_of_gradients = 0.0;
+    double larger_sum_of_hessians = 0.0f;
+    int64_t larger_sum_of_gradients_hessians = 0;
+    data_size_t larger_num_data_in_leaf = 0;
+    for (int gpu_index = 0; gpu_index < num_gpu; ++gpu_index) {
+      const CUDALeafSplitsStruct* leaf_splits = larger_leaf_splits_buffer + gpu_index;
+      const double larger_gpu_sum_of_gradients = leaf_splits->sum_of_gradients;
+      const double larger_gpu_sum_of_hessians = leaf_splits->sum_of_hessians;
+      const int64_t larger_gpu_sum_of_gradients_hessians = leaf_splits->sum_of_gradients_hessians;
+      const data_size_t larger_gpu_num_data_in_leaf = leaf_splits->num_data_in_leaf;
+      larger_sum_of_gradients += larger_gpu_sum_of_gradients;
+      larger_sum_of_hessians += larger_gpu_sum_of_hessians;
+      larger_sum_of_gradients_hessians += larger_gpu_sum_of_gradients_hessians;
+      larger_num_data_in_leaf += larger_gpu_num_data_in_leaf;
+    }
+    larger_leaf_splits->sum_of_gradients = larger_sum_of_gradients;
+    larger_leaf_splits->sum_of_hessians = larger_sum_of_hessians;
+    larger_leaf_splits->sum_of_gradients_hessians = larger_sum_of_gradients_hessians;
+    larger_leaf_splits->num_data_in_leaf = larger_num_data_in_leaf;
+    const bool use_l1 = lambda_l1 > 0.0f;
+    if (!use_l1) {
+      // no smoothing on root node
+      larger_leaf_splits->gain = CUDALeafSplits::GetLeafGain<false, false>(larger_sum_of_gradients, larger_sum_of_hessians, lambda_l1, lambda_l2, 0.0f, 0, 0.0f);
+    } else {
+      // no smoothing on root node
+      larger_leaf_splits->gain = CUDALeafSplits::GetLeafGain<true, false>(larger_sum_of_gradients, larger_sum_of_hessians, lambda_l1, lambda_l2, 0.0f, 0, 0.0f);
+    }
+    if (!use_l1) {
+      // no smoothing on root node
+      larger_leaf_splits->leaf_value =
+        CUDALeafSplits::CalculateSplittedLeafOutput<false, false>(larger_sum_of_gradients, larger_sum_of_hessians, lambda_l1, lambda_l2, 0.0f, 0, 0.0f);
+    } else {
+      // no smoothing on root node
+      larger_leaf_splits->leaf_value =
+        CUDALeafSplits::CalculateSplittedLeafOutput<true, false>(larger_sum_of_gradients, larger_sum_of_hessians, lambda_l1, lambda_l2, 0.0f, 0, 0.0f);
+    }
   }
 }
 
-void CUDAExpTreeLearner::LaunchReduceRootNodeInformationKernel(CUDALeafSplitsStruct* out) {
-  ReduceRootNodeInformationKernel<<<1, 1>>>(
-    leaf_splits_buffer_[0].RawData(),
-    config_->num_gpu,
-    config_->lambda_l1,
-    config_->lambda_l2,
-    // TODO(shiyu1994): bagging is not supported by now
-    train_data_->num_data(),
-    out,
-    cuda_root_sum_hessians_.RawData());
+void CUDAExpTreeLearner::LaunchReduceLeafInformationKernel() {
+  if (larger_leaf_index_ < 0) {
+    // is root node
+    Log::Warning("is root !!!!!");
+    ReduceRootNodeInformationKernel<true><<<1, 1>>>(
+      smaller_leaf_splits_buffer_[0].RawData(),
+      nullptr,
+      config_->num_gpu,
+      config_->lambda_l1,
+      config_->lambda_l2,
+      // TODO(shiyu1994): bagging is not supported by now
+      train_data_->num_data(),
+      cuda_smaller_leaf_splits_->GetCUDAStructRef(),
+      nullptr,
+      cuda_root_sum_hessians_.RawData());
+  } else {
+    Log::Warning("is not root !!!!!");
+    ReduceRootNodeInformationKernel<false><<<1, 1>>>(
+      smaller_leaf_splits_buffer_[0].RawData(),
+      larger_leaf_splits_buffer_[0].RawData(),
+      config_->num_gpu,
+      config_->lambda_l1,
+      config_->lambda_l2,
+      // TODO(shiyu1994): bagging is not supported by now
+      train_data_->num_data(),
+      cuda_smaller_leaf_splits_->GetCUDAStructRef(),
+      cuda_larger_leaf_splits_->GetCUDAStructRef(),
+      nullptr);
+  }
 }
 
 __global__ void ReduceBestSplitsForLeafKernel(
@@ -113,7 +178,7 @@ __global__ void ReduceBestSplitsForLeafKernel(
 
 void CUDAExpTreeLearner::LaunchReduceBestSplitsForLeafKernel() {
   ReduceBestSplitsForLeafKernel<<<1, 1>>>(
-    best_split_info_buffer_.RawData(),
+    best_split_info_buffer_[0]->RawData(),
     config_->num_gpu);
 }
 

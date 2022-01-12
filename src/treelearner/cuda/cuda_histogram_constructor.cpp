@@ -99,6 +99,8 @@ void CUDAHistogramConstructor::Init(const Dataset* train_data, TrainingShareStat
   AllocateCUDAMemory<hist_t>(&cuda_hist_, num_total_bin_ * 2 * num_leaves_, __FILE__, __LINE__);
   SetCUDAMemory<hist_t>(cuda_hist_, 0, num_total_bin_ * 2 * num_leaves_, __FILE__, __LINE__);
 
+  Log::Warning("num_total_bin_ = %d", num_total_bin_);
+
   InitCUDAMemoryFromHostMemory<uint32_t>(&cuda_feature_num_bins_,
     feature_num_bins_.data(), feature_num_bins_.size(), __FILE__, __LINE__);
 

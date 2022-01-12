@@ -74,12 +74,16 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
 
   void CUDASplit(int right_leaf_index);
 
-  hist_t* smaller_leaf_hist() {
-    return cuda_smaller_leaf_splits_->GetCUDAStruct()->hist_in_leaf;
+  hist_t* cuda_hist_pointer() {
+    return cuda_histogram_constructor_->cuda_hist_pointer();
   }
 
   const CUDALeafSplitsStruct* GetSmallerLeafSplitsStruct() const {
     return cuda_smaller_leaf_splits_->GetCUDAStruct();
+  }
+
+  const CUDALeafSplitsStruct* GetLargerLeafSplitsStruct() const {
+    return cuda_larger_leaf_splits_->GetCUDAStruct();
   }
 
   const int* cuda_best_split_info_buffer() const {
@@ -100,6 +104,19 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
     const uint32_t larger_leaf_best_split_threshold,
     const uint8_t larger_leaf_best_split_default_left,
     const double larger_leaf_best_split_gain);
+
+  data_size_t leaf_num_data(const int leaf_index) const {
+    return leaf_num_data_[leaf_index];
+  }
+
+  double leaf_sum_hessians(const int leaf_index) const {
+    return leaf_sum_hessians_[leaf_index];
+  }
+
+  void SetSmallerAndLargerLeaves(const int smaller_leaf_index, const int larger_leaf_index) {
+    smaller_leaf_index_ = smaller_leaf_index;
+    larger_leaf_index_ = larger_leaf_index;
+  }
 
  protected:
   void ReduceLeafStat(CUDATree* old_tree, const score_t* gradients, const score_t* hessians, const data_size_t* num_data_in_leaf) const;
