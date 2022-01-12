@@ -313,6 +313,8 @@ void CUDABestSplitFinder::BeforeTrain(const std::vector<int8_t>& is_feature_used
 void CUDABestSplitFinder::FindBestSplitsForLeaf(
   const CUDALeafSplitsStruct* smaller_leaf_splits,
   const CUDALeafSplitsStruct* larger_leaf_splits,
+  const CUDALeafSplitsStruct* local_smaller_leaf_splits,
+  const CUDALeafSplitsStruct* local_larger_leaf_splits,
   const int smaller_leaf_index,
   const int larger_leaf_index,
   const data_size_t num_data_in_smaller_leaf,
@@ -327,10 +329,12 @@ void CUDABestSplitFinder::FindBestSplitsForLeaf(
     sum_hessians_in_larger_leaf > min_sum_hessian_in_leaf_ && larger_leaf_index >= 0);
   if (grad_scale != nullptr && hess_scale != nullptr) {
     LaunchFindBestSplitsDiscretizedForLeafKernel(smaller_leaf_splits, larger_leaf_splits,
+      local_smaller_leaf_splits, local_larger_leaf_splits,
       smaller_leaf_index, larger_leaf_index, is_smaller_leaf_valid, is_larger_leaf_valid,
       grad_scale, hess_scale);
   } else {
     LaunchFindBestSplitsForLeafKernel(smaller_leaf_splits, larger_leaf_splits,
+      local_smaller_leaf_splits, local_larger_leaf_splits,
       smaller_leaf_index, larger_leaf_index, is_smaller_leaf_valid, is_larger_leaf_valid);
   }
   global_timer.Start("CUDABestSplitFinder::LaunchSyncBestSplitForLeafKernel");

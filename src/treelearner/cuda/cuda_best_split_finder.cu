@@ -764,6 +764,8 @@ __global__ void FindBestSplitsForLeafKernel(
   // input leaf information
   const CUDALeafSplitsStruct* smaller_leaf_splits,
   const CUDALeafSplitsStruct* larger_leaf_splits,
+  const CUDALeafSplitsStruct* local_smaller_leaf_splits,
+  const CUDALeafSplitsStruct* local_larger_leaf_splits,
   // input config parameter values
   const data_size_t min_data_in_leaf,
   const double min_sum_hessian_in_leaf,
@@ -791,7 +793,7 @@ __global__ void FindBestSplitsForLeafKernel(
   CUDARandom* cuda_random = USE_RAND ?
     (IS_LARGER ? cuda_randoms + task_index * 2 + 1 : cuda_randoms + task_index * 2) : nullptr;
   if (is_feature_used_bytree[inner_feature_index]) {
-    const hist_t* hist_ptr = (IS_LARGER ? larger_leaf_splits->hist_in_leaf : smaller_leaf_splits->hist_in_leaf) + task->hist_offset * 2;
+    const hist_t* hist_ptr = (IS_LARGER ? local_larger_leaf_splits->hist_in_leaf : local_smaller_leaf_splits->hist_in_leaf) + task->hist_offset * 2;
     if (task->is_categorical) {
       FindBestSplitsForLeafKernelCategoricalInner<USE_RAND, USE_L1, USE_SMOOTHING>(
         // input feature information
@@ -881,6 +883,8 @@ __global__ void FindBestSplitsDiscretizedForLeafKernel(
   // input leaf information
   const CUDALeafSplitsStruct* smaller_leaf_splits,
   const CUDALeafSplitsStruct* larger_leaf_splits,
+  const CUDALeafSplitsStruct* local_smaller_leaf_splits,
+  const CUDALeafSplitsStruct* local_larger_leaf_splits,
   // input config parameter values
   const data_size_t min_data_in_leaf,
   const double min_sum_hessian_in_leaf,
@@ -911,7 +915,7 @@ __global__ void FindBestSplitsDiscretizedForLeafKernel(
     (IS_LARGER ? cuda_randoms + task_index * 2 + 1 : cuda_randoms + task_index * 2) : nullptr;
   if (is_feature_used_bytree[inner_feature_index]) {
     const int64_t* hist_ptr = 
-      reinterpret_cast<const int64_t*>(IS_LARGER ? larger_leaf_splits->hist_in_leaf : smaller_leaf_splits->hist_in_leaf) + task->hist_offset;
+      reinterpret_cast<const int64_t*>(IS_LARGER ? local_larger_leaf_splits->hist_in_leaf : local_smaller_leaf_splits->hist_in_leaf) + task->hist_offset;
     if (task->is_categorical) {
       // TODO(shiyu1994)
     } else {
@@ -1464,6 +1468,8 @@ __global__ void FindBestSplitsForLeafKernel_GlobalMemory(
   // input leaf information
   const CUDALeafSplitsStruct* smaller_leaf_splits,
   const CUDALeafSplitsStruct* larger_leaf_splits,
+  const CUDALeafSplitsStruct* local_smaller_leaf_splits,
+  const CUDALeafSplitsStruct* local_larger_leaf_splits,
   // input config parameter values
   const data_size_t min_data_in_leaf,
   const double min_sum_hessian_in_leaf,
@@ -1496,7 +1502,7 @@ __global__ void FindBestSplitsForLeafKernel_GlobalMemory(
     (IS_LARGER ? cuda_randoms + task_index * 2 + 1: cuda_randoms + task_index * 2) : nullptr;
   if (is_feature_used_bytree[task->inner_feature_index]) {
     const uint32_t hist_offset = task->hist_offset;
-    const hist_t* hist_ptr = (IS_LARGER ? larger_leaf_splits->hist_in_leaf : smaller_leaf_splits->hist_in_leaf) + hist_offset * 2;
+    const hist_t* hist_ptr = (IS_LARGER ? local_larger_leaf_splits->hist_in_leaf : local_smaller_leaf_splits->hist_in_leaf) + hist_offset * 2;
     hist_t* hist_grad_buffer_ptr = feature_hist_grad_buffer + hist_offset * 2;
     hist_t* hist_hess_buffer_ptr = feature_hist_hess_buffer + hist_offset * 2;
     hist_t* hist_stat_buffer_ptr = feature_hist_stat_buffer + hist_offset * 2;
@@ -1593,6 +1599,8 @@ __global__ void FindBestSplitsForLeafKernel_GlobalMemory(
 #define LaunchFindBestSplitsForLeafKernel_PARAMS \
   const CUDALeafSplitsStruct* smaller_leaf_splits, \
   const CUDALeafSplitsStruct* larger_leaf_splits, \
+  const CUDALeafSplitsStruct* local_smaller_leaf_splits, \
+  const CUDALeafSplitsStruct* local_larger_leaf_splits, \
   const int smaller_leaf_index, \
   const int larger_leaf_index, \
   const bool is_smaller_leaf_valid, \
@@ -1601,6 +1609,8 @@ __global__ void FindBestSplitsForLeafKernel_GlobalMemory(
 #define LaunchFindBestSplitsForLeafKernel_ARGS \
   smaller_leaf_splits, \
   larger_leaf_splits, \
+  local_smaller_leaf_splits, \
+  local_larger_leaf_splits, \
   smaller_leaf_index, \
   larger_leaf_index, \
   is_smaller_leaf_valid, \
@@ -1613,6 +1623,8 @@ __global__ void FindBestSplitsForLeafKernel_GlobalMemory(
     cuda_randoms_.RawData(), \
     smaller_leaf_splits, \
     larger_leaf_splits, \
+    local_smaller_leaf_splits, \
+    local_larger_leaf_splits, \
     min_data_in_leaf_, \
     min_sum_hessian_in_leaf_, \
     min_gain_to_split_, \
@@ -1699,6 +1711,8 @@ void CUDABestSplitFinder::LaunchFindBestSplitsForLeafKernelInner2(LaunchFindBest
 #define LaunchFindBestSplitsDiscretizedForLeafKernel_PARAMS \
   const CUDALeafSplitsStruct* smaller_leaf_splits, \
   const CUDALeafSplitsStruct* larger_leaf_splits, \
+  const CUDALeafSplitsStruct* local_smaller_leaf_splits, \
+  const CUDALeafSplitsStruct* local_larger_leaf_splits, \
   const int smaller_leaf_index, \
   const int larger_leaf_index, \
   const bool is_smaller_leaf_valid, \
@@ -1709,6 +1723,8 @@ void CUDABestSplitFinder::LaunchFindBestSplitsForLeafKernelInner2(LaunchFindBest
 #define LaunchFindBestSplitsDiscretizedForLeafKernel_ARGS \
   smaller_leaf_splits, \
   larger_leaf_splits, \
+  local_smaller_leaf_splits, \
+  local_larger_leaf_splits, \
   smaller_leaf_index, \
   larger_leaf_index, \
   is_smaller_leaf_valid, \
@@ -1723,6 +1739,8 @@ void CUDABestSplitFinder::LaunchFindBestSplitsForLeafKernelInner2(LaunchFindBest
     cuda_randoms_.RawData(), \
     smaller_leaf_splits, \
     larger_leaf_splits, \
+    local_smaller_leaf_splits, \
+    local_larger_leaf_splits, \
     min_data_in_leaf_, \
     min_sum_hessian_in_leaf_, \
     min_gain_to_split_, \

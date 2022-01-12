@@ -78,7 +78,6 @@ __global__ void CUDAInitValuesKernel2(
     }
     cuda_struct->data_indices_in_leaf = cuda_data_indices_in_leaf;
     cuda_struct->hist_in_leaf = cuda_hist_in_leaf;
-    printf("cuda_struct->hist_in_leaf = %ld\n", cuda_struct->hist_in_leaf);
   }
 }
 

@@ -29,9 +29,21 @@ __global__ void ReduceRootNodeInformationKernel(
     const double smaller_gpu_sum_of_hessians = leaf_splits->sum_of_hessians;
     const int64_t smaller_gpu_sum_of_gradients_hessians = leaf_splits->sum_of_gradients_hessians;
     const data_size_t smaller_gpu_num_data_in_leaf = leaf_splits->num_data_in_leaf;
-    smaller_sum_of_gradients += smaller_gpu_sum_of_gradients;
-    smaller_sum_of_hessians += smaller_gpu_sum_of_hessians;
-    smaller_sum_of_gradients_hessians += smaller_gpu_sum_of_gradients_hessians;
+    if (IS_ROOT) {
+      smaller_sum_of_gradients += smaller_gpu_sum_of_gradients;
+      smaller_sum_of_hessians += smaller_gpu_sum_of_hessians;
+      smaller_sum_of_gradients_hessians += smaller_gpu_sum_of_gradients_hessians;
+    } else {
+      if (gpu_index == 0) {
+        smaller_sum_of_gradients = smaller_gpu_sum_of_gradients;
+        smaller_sum_of_hessians = smaller_gpu_sum_of_hessians;
+        smaller_sum_of_gradients_hessians = smaller_gpu_sum_of_gradients_hessians;
+      } else {
+        assert(smaller_sum_of_gradients == smaller_gpu_sum_of_gradients);
+        assert(smaller_sum_of_hessians == smaller_gpu_sum_of_hessians);
+        assert(smaller_sum_of_gradients_hessians == smaller_gpu_sum_of_gradients_hessians);
+      }
+    }
     smaller_num_data_in_leaf += smaller_gpu_num_data_in_leaf;
   }
   smaller_leaf_splits->sum_of_gradients = smaller_sum_of_gradients;
@@ -74,9 +86,15 @@ __global__ void ReduceRootNodeInformationKernel(
       const double larger_gpu_sum_of_hessians = leaf_splits->sum_of_hessians;
       const int64_t larger_gpu_sum_of_gradients_hessians = leaf_splits->sum_of_gradients_hessians;
       const data_size_t larger_gpu_num_data_in_leaf = leaf_splits->num_data_in_leaf;
-      larger_sum_of_gradients += larger_gpu_sum_of_gradients;
-      larger_sum_of_hessians += larger_gpu_sum_of_hessians;
-      larger_sum_of_gradients_hessians += larger_gpu_sum_of_gradients_hessians;
+      if (gpu_index == 0) {
+        larger_sum_of_gradients = larger_gpu_sum_of_gradients;
+        larger_sum_of_hessians = larger_gpu_sum_of_hessians;
+        larger_sum_of_gradients_hessians = larger_gpu_sum_of_gradients_hessians;
+      } else {
+        assert(larger_sum_of_gradients == larger_gpu_sum_of_gradients);
+        assert(larger_sum_of_hessians == larger_gpu_sum_of_hessians);
+        assert(larger_sum_of_gradients_hessians == larger_gpu_sum_of_gradients_hessians);
+      }
       larger_num_data_in_leaf += larger_gpu_num_data_in_leaf;
     }
     larger_leaf_splits->sum_of_gradients = larger_sum_of_gradients;
@@ -106,7 +124,6 @@ __global__ void ReduceRootNodeInformationKernel(
 void CUDAExpTreeLearner::LaunchReduceLeafInformationKernel() {
   if (larger_leaf_index_ < 0) {
     // is root node
-    Log::Warning("is root !!!!!");
     ReduceRootNodeInformationKernel<true><<<1, 1>>>(
       smaller_leaf_splits_buffer_[0].RawData(),
       nullptr,
@@ -119,7 +136,6 @@ void CUDAExpTreeLearner::LaunchReduceLeafInformationKernel() {
       nullptr,
       cuda_root_sum_hessians_.RawData());
   } else {
-    Log::Warning("is not root !!!!!");
     ReduceRootNodeInformationKernel<false><<<1, 1>>>(
       smaller_leaf_splits_buffer_[0].RawData(),
       larger_leaf_splits_buffer_[0].RawData(),

@@ -102,7 +102,6 @@ void CUDASingleGPUTreeLearner::BeforeTrainWithGrad(const score_t* gradients, con
       cuda_gradient_discretizer_->hess_scale());
   } else {
     cuda_histogram_constructor_->BeforeTrain(gradients_, hessians_);
-    Log::Warning("here !!!! init cuda smaller leaf splits");
     cuda_smaller_leaf_splits_->InitValues(
       config_->lambda_l1,
       config_->lambda_l2,
@@ -115,9 +114,7 @@ void CUDASingleGPUTreeLearner::BeforeTrainWithGrad(const score_t* gradients, con
       &leaf_sum_hessians_[0]);
   }
   leaf_num_data_[0] = root_num_data;
-  Log::Warning("before init values");
   cuda_larger_leaf_splits_->InitValues();
-  Log::Warning("after init values");
   col_sampler_.ResetByTree();
   cuda_best_split_finder_->BeforeTrain(is_feature_used_by_tree);
   leaf_data_start_[0] = 0;
@@ -139,7 +136,6 @@ void CUDASingleGPUTreeLearner::CUDAConstructHistograms(
   const data_size_t local_num_data_in_larger_leaf = larger_leaf_index_ < 0 ? 0 : leaf_num_data_[larger_leaf_index_];
   const double local_sum_hessians_in_smaller_leaf = leaf_sum_hessians_[smaller_leaf_index_];
   const double local_sum_hessians_in_larger_leaf = larger_leaf_index_ < 0 ? 0 : leaf_sum_hessians_[larger_leaf_index_];
-  Log::Warning("CUDASingleGPUTreeLearner::CUDAConstructHistograms step 0");
   cuda_histogram_constructor_->ConstructHistogramForLeaf(
     cuda_smaller_leaf_splits_->GetCUDAStruct(),
     cuda_larger_leaf_splits_->GetCUDAStruct(),
@@ -152,9 +148,7 @@ void CUDASingleGPUTreeLearner::CUDAConstructHistograms(
     local_sum_hessians_in_smaller_leaf,
     local_sum_hessians_in_larger_leaf);
   global_timer.Stop("CUDASingleGPUTreeLearner::ConstructHistogramForLeaf");
-  Log::Warning("CUDASingleGPUTreeLearner::CUDAConstructHistograms step 1");
   SynchronizeCUDADevice(__FILE__, __LINE__);
-  Log::Warning("CUDASingleGPUTreeLearner::CUDAConstructHistograms step 2");
 }
 
 void CUDASingleGPUTreeLearner::CUDASubtractHistograms(
@@ -180,6 +174,8 @@ void CUDASingleGPUTreeLearner::CUDAFindBestSplitsForLeaf(
     cuda_best_split_finder_->FindBestSplitsForLeaf(
       global_smaller_leaf_splits,
       global_larger_leaf_splits,
+      cuda_smaller_leaf_splits_->GetCUDAStruct(),
+      cuda_larger_leaf_splits_->GetCUDAStruct(),
       smaller_leaf_index_, larger_leaf_index_,
       global_num_data_in_smaller_leaf, global_num_data_in_larger_leaf,
       global_sum_hessians_in_smaller_leaf, global_sum_hessians_in_larger_leaf,
@@ -189,6 +185,8 @@ void CUDASingleGPUTreeLearner::CUDAFindBestSplitsForLeaf(
     cuda_best_split_finder_->FindBestSplitsForLeaf(
       global_smaller_leaf_splits,
       global_larger_leaf_splits,
+      cuda_smaller_leaf_splits_->GetCUDAStruct(),
+      cuda_larger_leaf_splits_->GetCUDAStruct(),
       smaller_leaf_index_, larger_leaf_index_,
       global_num_data_in_smaller_leaf, global_num_data_in_larger_leaf,
       global_sum_hessians_in_smaller_leaf, global_sum_hessians_in_larger_leaf,
@@ -246,6 +244,10 @@ void CUDASingleGPUTreeLearner::CUDASplit(int right_leaf_index) {
                               &leaf_sum_hessians_[right_leaf_index],
                               &sum_left_gradients,
                               &sum_right_gradients);
+  //Log::Warning("gpu index = %d, num_data_ = %d, best_leaf_index_ = %d, right_leaf_index = %d, leaf_num_data_[%d] = %d, leaf_num_data_[%d] = %d",
+  //  gpu_device_id_, num_data_, best_leaf_index_, right_leaf_index, best_leaf_index_, leaf_num_data_[best_leaf_index_], right_leaf_index, leaf_num_data_[right_leaf_index]);
+  //Log::Warning("gpu index = %d, best_leaf_index_ = %d, right_leaf_index = %d, leaf_sum_hessians_[%d] = %f, leaf_sum_hessians_[%d] = %f",
+  //  gpu_device_id_, num_data_, best_leaf_index_, right_leaf_index, best_leaf_index_, leaf_sum_hessians_[best_leaf_index_], right_leaf_index, leaf_sum_hessians_[right_leaf_index]);
 }
 
 Tree* CUDASingleGPUTreeLearner::Train(const score_t* gradients,

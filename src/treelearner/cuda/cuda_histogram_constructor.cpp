@@ -99,8 +99,6 @@ void CUDAHistogramConstructor::Init(const Dataset* train_data, TrainingShareStat
   AllocateCUDAMemory<hist_t>(&cuda_hist_, num_total_bin_ * 2 * num_leaves_, __FILE__, __LINE__);
   SetCUDAMemory<hist_t>(cuda_hist_, 0, num_total_bin_ * 2 * num_leaves_, __FILE__, __LINE__);
 
-  Log::Warning("num_total_bin_ = %d", num_total_bin_);
-
   InitCUDAMemoryFromHostMemory<uint32_t>(&cuda_feature_num_bins_,
     feature_num_bins_.data(), feature_num_bins_.size(), __FILE__, __LINE__);
 
@@ -138,16 +136,12 @@ void CUDAHistogramConstructor::ConstructHistogramForLeaf(
   const double global_sum_hessians_in_larger_leaf,
   const double /*local_sum_hessians_in_smaller_leaf*/,
   const double /*local_sum_hessians_in_larger_leaf*/) {
-  Log::Warning("CUDAHistogramConstructor::ConstructHistogramForLeaf step 0");
   if ((global_num_data_in_smaller_leaf <= min_data_in_leaf_ || global_sum_hessians_in_smaller_leaf <= min_sum_hessian_in_leaf_) &&
     (global_num_data_in_larger_leaf <= min_data_in_leaf_ || global_sum_hessians_in_larger_leaf <= min_sum_hessian_in_leaf_)) {
     return;
   }
-  Log::Warning("CUDAHistogramConstructor::ConstructHistogramForLeaf step 1");
   LaunchConstructHistogramKernel(cuda_smaller_leaf_splits, local_num_data_in_smaller_leaf);
-  Log::Warning("CUDAHistogramConstructor::ConstructHistogramForLeaf step 2");
   SynchronizeCUDADevice(__FILE__, __LINE__);
-  Log::Warning("CUDAHistogramConstructor::ConstructHistogramForLeaf step 3");
 }
 
 void CUDAHistogramConstructor::SubtractHistogramForLeaf(

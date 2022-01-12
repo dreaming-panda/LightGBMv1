@@ -62,6 +62,8 @@ class CUDABestSplitFinder {
   void FindBestSplitsForLeaf(
     const CUDALeafSplitsStruct* smaller_leaf_splits,
     const CUDALeafSplitsStruct* larger_leaf_splits,
+    const CUDALeafSplitsStruct* local_smaller_leaf_splits,
+    const CUDALeafSplitsStruct* local_larger_leaf_splits,
     const int smaller_leaf_index,
     const int larger_leaf_index,
     const data_size_t num_data_in_smaller_leaf,
@@ -106,6 +108,8 @@ class CUDABestSplitFinder {
   #define LaunchFindBestSplitsForLeafKernel_PARAMS \
     const CUDALeafSplitsStruct* smaller_leaf_splits, \
     const CUDALeafSplitsStruct* larger_leaf_splits, \
+    const CUDALeafSplitsStruct* local_smaller_leaf_splits, \
+    const CUDALeafSplitsStruct* local_larger_leaf_splits, \
     const int smaller_leaf_index, \
     const int larger_leaf_index, \
     const bool is_smaller_leaf_valid, \
@@ -127,6 +131,8 @@ class CUDABestSplitFinder {
   #define LaunchFindBestSplitsDiscretizedForLeafKernel_PARAMS \
   const CUDALeafSplitsStruct* smaller_leaf_splits, \
   const CUDALeafSplitsStruct* larger_leaf_splits, \
+  const CUDALeafSplitsStruct* local_smaller_leaf_splits, \
+  const CUDALeafSplitsStruct* local_larger_leaf_splits, \
   const int smaller_leaf_index, \
   const int larger_leaf_index, \
   const bool is_smaller_leaf_valid, \
