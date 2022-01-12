@@ -463,6 +463,7 @@ Tree* CUDAExpTreeLearner::Train(const score_t* gradients, const score_t* hessian
       SynchronizeCUDADevice(__FILE__, __LINE__);
     }
     for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
+      CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
       tree_learners_[gpu_index]->CUDASubtractHistograms(
         per_gpu_smaller_leaf_splits_[gpu_index]->RawData(),
         per_gpu_larger_leaf_splits_[gpu_index]->RawData());
