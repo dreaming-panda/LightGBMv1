@@ -28,6 +28,15 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort =
 
 #define CUDASUCCESS_OR_FATAL_OUTER(ans) { gpuAssert((ans), file, line); }
 
+#define NCCLCHECK(cmd) do {                         \
+  ncclResult_t r = cmd;                             \
+  if (r!= ncclSuccess) {                            \
+    printf("Failed, NCCL error %s:%d '%s'\n",             \
+        __FILE__,__LINE__,ncclGetErrorString(r));   \
+    exit(EXIT_FAILURE);                             \
+  }                                                 \
+} while(0)
+
 template <typename T>
 void AllocateCUDAMemory(T** out_ptr, size_t size, const char* file, const int line) {
   void* tmp_ptr = nullptr;
@@ -79,6 +88,14 @@ void CopyFromCUDADeviceToCUDADeviceAsync(T* dst_ptr, const T* src_ptr, size_t si
   const void* void_src_ptr = reinterpret_cast<const void*>(src_ptr);
   size_t size_in_bytes = size * sizeof(T);
   CUDASUCCESS_OR_FATAL_OUTER(cudaMemcpyAsync(void_dst_ptr, void_src_ptr, size_in_bytes, cudaMemcpyDeviceToDevice));
+}
+
+template <typename T>
+void CopyPeerFromCUDADeviceToCUDADevice(T* dst_ptr, const int dst_device, const T* src_ptr, const int src_device, size_t size, const char* file, const int line) {
+  void* void_dst_ptr = reinterpret_cast<void*>(dst_ptr);
+  const void* void_src_ptr = reinterpret_cast<const void*>(src_ptr);
+  size_t size_in_bytes = size * sizeof(T);
+  CUDASUCCESS_OR_FATAL_OUTER(cudaMemcpyPeer(void_dst_ptr, dst_device, void_src_ptr, src_device, size_in_bytes));
 }
 
 void SynchronizeCUDADevice(const char* file, const int line);

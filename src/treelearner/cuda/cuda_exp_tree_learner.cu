@@ -14,22 +14,18 @@ __global__ void ReduceRootNodeInformationKernel(
   const double lambda_l1,
   const double lambda_l2,
   const data_size_t num_data,
-  CUDALeafSplitsStruct* out) {
-  const int* buffer = reinterpret_cast<const int*>(leaf_splits_buffer);
-  const size_t count = (sizeof(int) + sizeof(double) + sizeof(double) + sizeof(int64_t) + sizeof(data_size_t)) / sizeof(int);
+  CUDALeafSplitsStruct* out,
+  double* out_sum_hessians) {
   double sum_of_gradients = 0.0;
   double sum_of_hessians = 0.0f;
   int64_t sum_of_gradients_hessians = 0;
   data_size_t num_data_in_leaf = 0;
   for (int gpu_index = 0; gpu_index < num_gpu; ++gpu_index) {
-    const int* gpu_buffer = buffer + gpu_index * count;
-    const double gpu_sum_of_gradients = (reinterpret_cast<const double*>(gpu_buffer + 1))[0];
-    const double gpu_sum_of_hessians = (reinterpret_cast<const double*>(gpu_buffer + 1))[1];
-    gpu_buffer += (sizeof(int) + sizeof(double) * 2) / sizeof(int);
-    const int64_t gpu_sum_of_gradients_hessians = (reinterpret_cast<const int64_t*>(gpu_buffer))[0];
-    gpu_buffer += sizeof(int64_t) / sizeof(int);
-    const data_size_t gpu_num_data_in_leaf = (reinterpret_cast<const data_size_t*>(gpu_buffer))[0];
-
+    const CUDALeafSplitsStruct* leaf_splits = leaf_splits_buffer + gpu_index;
+    const double gpu_sum_of_gradients = leaf_splits->sum_of_gradients;
+    const double gpu_sum_of_hessians = leaf_splits->sum_of_hessians;
+    const int64_t gpu_sum_of_gradients_hessians = leaf_splits->sum_of_gradients_hessians;
+    const data_size_t gpu_num_data_in_leaf = leaf_splits->num_data_in_leaf;
     sum_of_gradients += gpu_sum_of_gradients;
     sum_of_hessians += gpu_sum_of_hessians;
     sum_of_gradients_hessians += gpu_sum_of_gradients_hessians;
@@ -37,6 +33,7 @@ __global__ void ReduceRootNodeInformationKernel(
   }
   out->sum_of_gradients = sum_of_gradients;
   out->sum_of_hessians = sum_of_hessians;
+  *out_sum_hessians = sum_of_hessians;
   out->sum_of_gradients_hessians = sum_of_gradients_hessians;
   out->num_data_in_leaf = num_data_in_leaf;
   assert(num_data_in_leaf == num_data);
@@ -62,13 +59,14 @@ __global__ void ReduceRootNodeInformationKernel(
 
 void CUDAExpTreeLearner::LaunchReduceRootNodeInformationKernel(CUDALeafSplitsStruct* out) {
   ReduceRootNodeInformationKernel<<<1, 1>>>(
-    leaf_splits_buffer_.RawData(),
+    leaf_splits_buffer_[0].RawData(),
     config_->num_gpu,
     config_->lambda_l1,
     config_->lambda_l2,
     // TODO(shiyu1994): bagging is not supported by now
     train_data_->num_data(),
-    out);
+    out,
+    cuda_root_sum_hessians_.RawData());
 }
 
 __global__ void ReduceBestSplitsForLeafKernel(

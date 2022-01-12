@@ -430,7 +430,8 @@ class Dataset {
   void CopySubrow(const Dataset* fullset, const data_size_t* used_indices, data_size_t num_used_indices, bool need_meta_data);
 
   #ifdef USE_CUDA
-  void CopySubrow(const Dataset* fullset, const data_size_t* used_indices, data_size_t num_used_indices, bool need_meta_data, int gpu_index);
+  void CopySubrow(const Dataset* fullset, const data_size_t* used_indices, data_size_t num_used_indices, bool need_meta_data,
+                  data_size_t data_start, data_size_t data_end, int gpu_index);
   #endif  // USE_CUDA
 
   MultiValBin* GetMultiBinFromSparseFeatures(const std::vector<uint32_t>& offsets) const;

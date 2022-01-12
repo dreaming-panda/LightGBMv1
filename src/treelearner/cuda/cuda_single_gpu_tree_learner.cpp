@@ -102,6 +102,7 @@ void CUDASingleGPUTreeLearner::BeforeTrainWithGrad(const score_t* gradients, con
       cuda_gradient_discretizer_->hess_scale());
   } else {
     cuda_histogram_constructor_->BeforeTrain(gradients_, hessians_);
+    Log::Warning("here !!!! init cuda smaller leaf splits");
     cuda_smaller_leaf_splits_->InitValues(
       config_->lambda_l1,
       config_->lambda_l2,
@@ -136,6 +137,7 @@ void CUDASingleGPUTreeLearner::CUDAConstructHistograms(
   const data_size_t local_num_data_in_larger_leaf = larger_leaf_index_ < 0 ? 0 : leaf_num_data_[larger_leaf_index_];
   const double local_sum_hessians_in_smaller_leaf = leaf_sum_hessians_[smaller_leaf_index_];
   const double local_sum_hessians_in_larger_leaf = larger_leaf_index_ < 0 ? 0 : leaf_sum_hessians_[larger_leaf_index_];
+  Log::Warning("CUDASingleGPUTreeLearner::CUDAConstructHistograms step 0");
   cuda_histogram_constructor_->ConstructHistogramForLeaf(
     cuda_smaller_leaf_splits_->GetCUDAStruct(),
     cuda_larger_leaf_splits_->GetCUDAStruct(),
@@ -148,12 +150,17 @@ void CUDASingleGPUTreeLearner::CUDAConstructHistograms(
     local_sum_hessians_in_smaller_leaf,
     local_sum_hessians_in_larger_leaf);
   global_timer.Stop("CUDASingleGPUTreeLearner::ConstructHistogramForLeaf");
+  Log::Warning("CUDASingleGPUTreeLearner::CUDAConstructHistograms step 1");
+  SynchronizeCUDADevice(__FILE__, __LINE__);
+  Log::Warning("CUDASingleGPUTreeLearner::CUDAConstructHistograms step 2");
 }
 
 void CUDASingleGPUTreeLearner::CUDASubtractHistograms(
   const CUDALeafSplitsStruct* global_smaller_leaf_splits,
   const CUDALeafSplitsStruct* global_larger_leaf_splits) {
   cuda_histogram_constructor_->SubtractHistogramForLeaf(
+    cuda_smaller_leaf_splits_->GetCUDAStruct(),
+    cuda_larger_leaf_splits_->GetCUDAStruct(),
     global_smaller_leaf_splits,
     global_larger_leaf_splits,
     config_->gpu_use_discretized_grad);

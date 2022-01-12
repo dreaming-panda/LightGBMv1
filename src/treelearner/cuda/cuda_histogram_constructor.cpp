@@ -136,20 +136,31 @@ void CUDAHistogramConstructor::ConstructHistogramForLeaf(
   const double global_sum_hessians_in_larger_leaf,
   const double /*local_sum_hessians_in_smaller_leaf*/,
   const double /*local_sum_hessians_in_larger_leaf*/) {
+  Log::Warning("CUDAHistogramConstructor::ConstructHistogramForLeaf step 0");
   if ((global_num_data_in_smaller_leaf <= min_data_in_leaf_ || global_sum_hessians_in_smaller_leaf <= min_sum_hessian_in_leaf_) &&
     (global_num_data_in_larger_leaf <= min_data_in_leaf_ || global_sum_hessians_in_larger_leaf <= min_sum_hessian_in_leaf_)) {
     return;
   }
+  Log::Warning("CUDAHistogramConstructor::ConstructHistogramForLeaf step 1");
   LaunchConstructHistogramKernel(cuda_smaller_leaf_splits, local_num_data_in_smaller_leaf);
+  Log::Warning("CUDAHistogramConstructor::ConstructHistogramForLeaf step 2");
   SynchronizeCUDADevice(__FILE__, __LINE__);
+  Log::Warning("CUDAHistogramConstructor::ConstructHistogramForLeaf step 3");
 }
 
 void CUDAHistogramConstructor::SubtractHistogramForLeaf(
-  const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
-  const CUDALeafSplitsStruct* cuda_larger_leaf_splits,
+  const CUDALeafSplitsStruct* local_cuda_smaller_leaf_splits,
+  const CUDALeafSplitsStruct* local_cuda_larger_leaf_splits,
+  const CUDALeafSplitsStruct* global_cuda_smaller_leaf_splits,
+  const CUDALeafSplitsStruct* global_cuda_larger_leaf_splits,
   const bool gpu_use_discretized_grad) {
   global_timer.Start("CUDAHistogramConstructor::ConstructHistogramForLeaf::LaunchSubtractHistogramKernel");
-  LaunchSubtractHistogramKernel(cuda_smaller_leaf_splits, cuda_larger_leaf_splits, gpu_use_discretized_grad);
+  LaunchSubtractHistogramKernel(
+    local_cuda_smaller_leaf_splits,
+    local_cuda_larger_leaf_splits,
+    global_cuda_smaller_leaf_splits,
+    global_cuda_larger_leaf_splits,
+    gpu_use_discretized_grad);
   global_timer.Stop("CUDAHistogramConstructor::ConstructHistogramForLeaf::LaunchSubtractHistogramKernel");
 }
 

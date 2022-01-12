@@ -42,7 +42,7 @@ TreeLearner* TreeLearner::CreateTreeLearner(const std::string& learner_type, con
     }
   } else if (device_type == std::string("cuda")) {
     if (learner_type == std::string("serial")) {
-      if (config->num_gpu == 1) {
+      if (config->num_gpu <= 1) {
         return new CUDASingleGPUTreeLearner(config);
       } else {
         return new CUDAExpTreeLearner(config);

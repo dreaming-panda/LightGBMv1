@@ -17,6 +17,7 @@ CUDAColumnData::CUDAColumnData(const data_size_t num_data, const int gpu_device_
   } else {
     CUDASUCCESS_OR_FATAL(cudaSetDevice(0));
   }
+  gpu_device_id_ = gpu_device_id;
   cuda_used_indices_ = nullptr;
   cuda_data_by_column_ = nullptr;
   cuda_column_bit_type_ = nullptr;
@@ -214,6 +215,96 @@ void CUDAColumnData::CopySubrow(
   CopyFromHostToCUDADevice<data_size_t>(cuda_used_indices_, used_indices, static_cast<size_t>(num_used_indices), __FILE__, __LINE__);
   num_used_indices_ = num_used_indices;
   LaunchCopySubrowKernel(full_set->cuda_data_by_column());
+  SynchronizeCUDADevice(__FILE__, __LINE__);
+}
+
+void CUDAColumnData::CopyBlock(
+  const CUDAColumnData* full_set,
+  const data_size_t start,
+  const data_size_t end,
+  const data_size_t* used_indices,
+  const data_size_t num_used_indices) {
+  num_threads_ = full_set->num_threads_;
+  num_columns_ = full_set->num_columns_;
+  column_bit_type_ = full_set->column_bit_type_;
+  feature_min_bin_ = full_set->feature_min_bin_;
+  feature_max_bin_ = full_set->feature_max_bin_;
+  feature_offset_ = full_set->feature_offset_;
+  feature_most_freq_bin_ = full_set->feature_most_freq_bin_;
+  feature_default_bin_ = full_set->feature_default_bin_;
+  feature_missing_is_zero_ = full_set->feature_missing_is_zero_;
+  feature_missing_is_na_ = full_set->feature_missing_is_na_;
+  feature_mfb_is_zero_ = full_set->feature_mfb_is_zero_;
+  feature_mfb_is_na_ = full_set->feature_mfb_is_na_;
+  feature_to_column_ = full_set->feature_to_column_;
+  if (cuda_used_indices_ == nullptr) {
+    // initialize the subset cuda column data
+    CHECK_EQ(end - start, num_used_indices);
+    const size_t num_used_indices_size = static_cast<size_t>(num_used_indices);
+    AllocateCUDAMemory<data_size_t>(&cuda_used_indices_, num_used_indices_size, __FILE__, __LINE__);
+    data_by_column_.resize(num_columns_, nullptr);
+    OMP_INIT_EX();
+    #pragma omp parallel for schedule(static) num_threads(num_threads_)
+    for (int column_index = 0; column_index < num_columns_; ++column_index) {
+      OMP_LOOP_EX_BEGIN();
+      const uint8_t bit_type = column_bit_type_[column_index];
+      if (bit_type == 8) {
+        uint8_t* column_data = nullptr;
+        AllocateCUDAMemory<uint8_t>(&column_data, num_used_indices_size, __FILE__, __LINE__);
+        data_by_column_[column_index] = reinterpret_cast<void*>(column_data);
+      } else if (bit_type == 16) {
+        uint16_t* column_data = nullptr;
+        AllocateCUDAMemory<uint16_t>(&column_data, num_used_indices_size, __FILE__, __LINE__);
+        data_by_column_[column_index] = reinterpret_cast<void*>(column_data);
+      } else if (bit_type == 32) {
+        uint32_t* column_data = nullptr;
+        AllocateCUDAMemory<uint32_t>(&column_data, num_used_indices_size, __FILE__, __LINE__);
+        data_by_column_[column_index] = reinterpret_cast<void*>(column_data);
+      }
+      OMP_LOOP_EX_END();
+    }
+    OMP_THROW_EX();
+    InitCUDAMemoryFromHostMemory<void*>(&cuda_data_by_column_, data_by_column_.data(), data_by_column_.size(), __FILE__, __LINE__);
+    InitColumnMetaInfo();
+    cur_subset_buffer_size_ = num_used_indices;
+  } else {
+    if (num_used_indices > cur_subset_buffer_size_) {
+      ResizeWhenCopySubrow(num_used_indices);
+      cur_subset_buffer_size_ = num_used_indices;
+    }
+  }
+  CopyFromHostToCUDADevice<data_size_t>(cuda_used_indices_, used_indices, static_cast<size_t>(num_used_indices), __FILE__, __LINE__);
+  num_used_indices_ = num_used_indices;
+  for (int column_index = 0; column_index < num_columns_; ++column_index) {
+    const uint8_t bit_type = column_bit_type_[column_index];
+    if (bit_type == 8) {
+      CopyPeerFromCUDADeviceToCUDADevice<uint8_t>(
+        reinterpret_cast<uint8_t*>(data_by_column_[column_index]),
+        gpu_device_id_,
+        reinterpret_cast<const uint8_t*>(full_set->GetColumnData(column_index)) + start,
+        full_set->gpu_device_id(),
+        static_cast<size_t>(num_used_indices),
+        __FILE__, __LINE__);
+    }
+    else if (bit_type == 16) {
+      CopyPeerFromCUDADeviceToCUDADevice<uint16_t>(
+          reinterpret_cast<uint16_t*>(data_by_column_[column_index]),
+          gpu_device_id_,
+          reinterpret_cast<const uint16_t*>(full_set->GetColumnData(column_index)) + start,
+          full_set->gpu_device_id(),
+          static_cast<size_t>(num_used_indices),
+          __FILE__, __LINE__);
+    } else if (bit_type == 32) {
+      CopyPeerFromCUDADeviceToCUDADevice<uint32_t>(
+          reinterpret_cast<uint32_t*>(data_by_column_[column_index]),
+          gpu_device_id_,
+          reinterpret_cast<const uint32_t*>(full_set->GetColumnData(column_index)) + start,
+          full_set->gpu_device_id(),
+          static_cast<size_t>(num_used_indices),
+          __FILE__, __LINE__);
+    }
+  }
+  SynchronizeCUDADevice(__FILE__, __LINE__);
 }
 
 void CUDAColumnData::ResizeWhenCopySubrow(const data_size_t num_used_indices) {

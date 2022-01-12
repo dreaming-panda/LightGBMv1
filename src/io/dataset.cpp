@@ -868,9 +868,10 @@ void Dataset::CopySubrow(const Dataset* fullset,
 void Dataset::CopySubrow(const Dataset* fullset,
                          const data_size_t* used_indices,
                          data_size_t num_used_indices, bool need_meta_data,
+                         data_size_t data_start,
+                         data_size_t data_end,
                          int gpu_index) {
   CHECK_EQ(num_used_indices, num_data_);
-  Log::Warning("step 0");
   std::vector<int> group_ids, subfeature_ids;
   group_ids.reserve(num_features_);
   subfeature_ids.reserve(num_features_);
@@ -888,7 +889,6 @@ void Dataset::CopySubrow(const Dataset* fullset,
   }
   int num_copy_tasks = static_cast<int>(group_ids.size());
 
-  Log::Warning("step 1");
   OMP_INIT_EX();
   #pragma omp parallel for schedule(dynamic)
   for (int task_id = 0; task_id < num_copy_tasks; ++task_id) {
@@ -901,7 +901,6 @@ void Dataset::CopySubrow(const Dataset* fullset,
   }
   OMP_THROW_EX();
 
-  Log::Warning("step 2");
   if (need_meta_data) {
     metadata_.Init(fullset->metadata_, used_indices, num_used_indices);
   }
@@ -917,7 +916,6 @@ void Dataset::CopySubrow(const Dataset* fullset,
       }
     }
   }
-  Log::Warning("step 3");
   // update CUDA storage for column data and metadata
   device_type_ = fullset->device_type_;
   gpu_device_id_ = gpu_index;
@@ -928,9 +926,8 @@ void Dataset::CopySubrow(const Dataset* fullset,
       cuda_column_data_.reset(new CUDAColumnData(fullset->num_data(), gpu_device_id_));
       metadata_.CreateCUDAMetadata(gpu_device_id_);
     }
-  Log::Warning("step 4");
     global_timer.Start("copy subset cuda column data");
-    cuda_column_data_->CopySubrow(fullset->cuda_column_data(), used_indices, num_used_indices);
+    cuda_column_data_->CopyBlock(fullset->cuda_column_data(), data_start, data_end, used_indices, num_used_indices);
     global_timer.Stop("copy subset cuda column data");
     global_timer.Stop("prepare subset cuda column data");
   }

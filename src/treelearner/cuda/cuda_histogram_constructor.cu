@@ -809,16 +809,17 @@ __global__ void FixHistogramKernel(
   const uint32_t* cuda_feature_most_freq_bins,
   const int* cuda_need_fix_histogram_features,
   const uint32_t* cuda_need_fix_histogram_features_num_bin_aligned,
-  const CUDALeafSplitsStruct* cuda_smaller_leaf_splits) {
+  const CUDALeafSplitsStruct* global_cuda_smaller_leaf_splits,
+  const CUDALeafSplitsStruct* local_cuda_smaller_leaf_splits) {
   __shared__ hist_t shared_mem_buffer[32];
   const unsigned int blockIdx_x = blockIdx.x;
   const int feature_index = cuda_need_fix_histogram_features[blockIdx_x];
   const uint32_t num_bin_aligned = cuda_need_fix_histogram_features_num_bin_aligned[blockIdx_x];
   const uint32_t feature_hist_offset = cuda_feature_hist_offsets[feature_index];
   const uint32_t most_freq_bin = cuda_feature_most_freq_bins[feature_index];
-  const double leaf_sum_gradients = cuda_smaller_leaf_splits->sum_of_gradients;
-  const double leaf_sum_hessians = cuda_smaller_leaf_splits->sum_of_hessians;
-  hist_t* feature_hist = cuda_smaller_leaf_splits->hist_in_leaf + feature_hist_offset * 2;
+  const double leaf_sum_gradients = global_cuda_smaller_leaf_splits->sum_of_gradients;
+  const double leaf_sum_hessians = global_cuda_smaller_leaf_splits->sum_of_hessians;
+  hist_t* feature_hist = local_cuda_smaller_leaf_splits->hist_in_leaf + feature_hist_offset * 2;
   const unsigned int threadIdx_x = threadIdx.x;
   const uint32_t num_bin = cuda_feature_num_bins[feature_index];
   const uint32_t hist_pos = threadIdx_x << 1;
@@ -872,8 +873,10 @@ __global__ void FixHistogramDiscretizedKernel(
 }
 
 void CUDAHistogramConstructor::LaunchSubtractHistogramKernel(
-  const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
-  const CUDALeafSplitsStruct* cuda_larger_leaf_splits,
+  const CUDALeafSplitsStruct* local_cuda_smaller_leaf_splits,
+  const CUDALeafSplitsStruct* local_cuda_larger_leaf_splits,
+  const CUDALeafSplitsStruct* global_cuda_smaller_leaf_splits,
+  const CUDALeafSplitsStruct* global_cuda_larger_leaf_splits,
   const bool gpu_use_discretized_grad) {
   if (!gpu_use_discretized_grad) {
     const int num_subtract_threads = 2 * num_total_bin_;
@@ -886,14 +889,17 @@ void CUDAHistogramConstructor::LaunchSubtractHistogramKernel(
         cuda_feature_most_freq_bins_,
         cuda_need_fix_histogram_features_,
         cuda_need_fix_histogram_features_num_bin_aligned_,
-        cuda_smaller_leaf_splits);
+        global_cuda_smaller_leaf_splits,
+        local_cuda_smaller_leaf_splits);
     }
+    SynchronizeCUDADevice(__FILE__, __LINE__);
     global_timer.Stop("CUDAHistogramConstructor::FixHistogramKernel");
     global_timer.Start("CUDAHistogramConstructor::SubtractHistogramKernel");
     SubtractHistogramKernel<<<num_subtract_blocks, SUBTRACT_BLOCK_SIZE, 0, cuda_stream_>>>(
       num_total_bin_,
-      cuda_smaller_leaf_splits,
-      cuda_larger_leaf_splits);
+      local_cuda_smaller_leaf_splits,
+      local_cuda_larger_leaf_splits);
+    SynchronizeCUDADevice(__FILE__, __LINE__);
     global_timer.Stop("CUDAHistogramConstructor::SubtractHistogramKernel");
   } else {
     const int num_subtract_threads = 2 * num_total_bin_;
@@ -906,14 +912,14 @@ void CUDAHistogramConstructor::LaunchSubtractHistogramKernel(
         cuda_feature_most_freq_bins_,
         cuda_need_fix_histogram_features_,
         cuda_need_fix_histogram_features_num_bin_aligned_,
-        cuda_smaller_leaf_splits);
+        local_cuda_smaller_leaf_splits);
     }
     global_timer.Stop("CUDAHistogramConstructor::FixHistogramDiscretizedKernel");
     global_timer.Start("CUDAHistogramConstructor::SubtractHistogramDiscretizedKernel");
     SubtractHistogramDiscretizedKernel<<<num_subtract_blocks, SUBTRACT_BLOCK_SIZE, 0, cuda_stream_>>>(
       num_total_bin_,
-      cuda_smaller_leaf_splits,
-      cuda_larger_leaf_splits);
+      local_cuda_smaller_leaf_splits,
+      local_cuda_larger_leaf_splits);
     global_timer.Stop("CUDAHistogramConstructor::SubtractHistogramDiscretizedKernel");
   }
 }

@@ -42,6 +42,8 @@ class CUDAColumnData {
 
   void CopySubrow(const CUDAColumnData* full_set, const data_size_t* used_indices, const data_size_t num_used_indices);
 
+  void CopyBlock(const CUDAColumnData* full_set, const data_size_t start, const data_size_t end, const data_size_t* used_indices, const data_size_t num_used_indices);
+
   void* const* cuda_data_by_column() const { return cuda_data_by_column_; }
 
   uint32_t feature_min_bin(const int feature_index) const { return feature_min_bin_[feature_index]; }
@@ -88,6 +90,8 @@ class CUDAColumnData {
 
   uint8_t column_bit_type(const int column_index) const { return column_bit_type_[column_index]; }
 
+  int gpu_device_id() const { return gpu_device_id_; }
+
  private:
   template <bool IS_SPARSE, bool IS_4BIT, typename BIN_TYPE>
   void InitOneColumnData(const void* in_column_data, BinIterator* bin_iterator, void** out_column_data_pointer);
@@ -131,6 +135,8 @@ class CUDAColumnData {
   data_size_t* cuda_used_indices_;
   data_size_t num_used_indices_;
   data_size_t cur_subset_buffer_size_;
+  
+  int gpu_device_id_;
 };
 
 }  // namespace LightGBM

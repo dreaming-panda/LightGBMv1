@@ -61,13 +61,20 @@ class CUDAExpTreeLearner: public CUDASingleGPUTreeLearner {
   std::vector<std::unique_ptr<Config>> configs_;
   data_size_t num_data_per_gpu_;
   std::vector<ncclComm_t> nccl_communicators_;
-  std::vector<cudaStream_t> cuda_streams_;
+  std::vector<cudaStream_t> cuda_send_streams_;
+  std::vector<cudaStream_t> cuda_recv_streams_;
   std::vector<std::vector<int8_t>> is_feature_used_by_tree_per_gpu_;
+  std::vector<std::unique_ptr<CUDAVector<score_t>>> per_gpu_gradients_;
+  std::vector<std::unique_ptr<CUDAVector<score_t>>> per_gpu_hessians_;
+
   int num_total_bin_;
 
-  CUDAVector<CUDALeafSplitsStruct> leaf_splits_buffer_;
+  std::vector<CUDAVector<CUDALeafSplitsStruct>> leaf_splits_buffer_;
+  std::vector<std::unique_ptr<CUDAVector<CUDALeafSplitsStruct>>> per_gpu_smaller_leaf_splits_;
+  std::vector<std::unique_ptr<CUDAVector<CUDALeafSplitsStruct>>> per_gpu_larger_leaf_splits_;
   CUDAVector<int> best_split_info_buffer_;
   int* host_split_info_buffer_;
+  CUDAVector<double> cuda_root_sum_hessians_;
 };
 
 }  // namespace LightGBM
