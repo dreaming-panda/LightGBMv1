@@ -56,7 +56,7 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
   Tree* FitByExistingTree(const Tree* old_tree, const std::vector<int>& leaf_pred,
                           const score_t* gradients, const score_t* hessians) const override;
 
-  virtual void BeforeTrainWithGrad(const score_t* gradients, const score_t* hessians, const std::vector<int8_t>& is_feature_used_by_tree);
+  virtual void BeforeTrainWithGrad(const score_t* gradients, const score_t* hessians, const std::vector<int8_t>& is_feature_used_by_tree, ncclComm_t* comm = nullptr, cudaStream_t* stream = nullptr);
 
   void CUDAConstructHistograms(
     data_size_t global_num_data_in_smaller_leaf,
@@ -64,17 +64,13 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
     double global_sum_hessians_in_smaller_leaf,
     double global_sum_hessians_in_larger_leaf);
 
-  void CUDASubtractHistograms(
-    const CUDALeafSplitsStruct* global_smaller_leaf_splits,
-    const CUDALeafSplitsStruct* global_larger_leaf_splits);
+  void CUDASubtractHistograms();
 
   void CUDAFindBestSplitsForLeaf(
     data_size_t global_num_data_in_smaller_leaf,
     data_size_t global_num_data_in_larger_leaf,
     double global_sum_hessians_in_smaller_leaf,
-    double global_sum_hessians_in_larger_leaf,
-    const CUDALeafSplitsStruct* global_smaller_leaf_splits,
-    const CUDALeafSplitsStruct* global_larger_leaf_splits);
+    double global_sum_hessians_in_larger_leaf);
 
   void CUDASplit(int right_leaf_index, ncclComm_t* comm = nullptr);
 

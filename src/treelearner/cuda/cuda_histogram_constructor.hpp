@@ -57,8 +57,6 @@ class CUDAHistogramConstructor {
   void SubtractHistogramForLeaf(
     const CUDALeafSplitsStruct* local_cuda_smaller_leaf_splits,
     const CUDALeafSplitsStruct* local_cuda_larger_leaf_splits,
-    const CUDALeafSplitsStruct* global_cuda_smaller_leaf_splits,
-    const CUDALeafSplitsStruct* global_cuda_larger_leaf_splits,
     const bool gpu_use_discretized_grad);
 
   void ResetTrainingData(const Dataset* train_data, TrainingShareStates* share_states);
@@ -107,8 +105,6 @@ class CUDAHistogramConstructor {
   void LaunchSubtractHistogramKernel(
     const CUDALeafSplitsStruct* local_cuda_smaller_leaf_splits,
     const CUDALeafSplitsStruct* local_cuda_larger_leaf_splits,
-    const CUDALeafSplitsStruct* global_cuda_smaller_leaf_splits,
-    const CUDALeafSplitsStruct* global_cuda_larger_leaf_splits,
     const bool gpu_use_discretized_grad);
 
   // Host memory

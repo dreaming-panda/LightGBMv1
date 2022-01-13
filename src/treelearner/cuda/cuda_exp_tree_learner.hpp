@@ -41,12 +41,10 @@ class CUDAExpTreeLearner: public CUDASingleGPUTreeLearner {
   Tree* FitByExistingTree(const Tree* old_tree, const std::vector<int>& leaf_pred,
                           const score_t* gradients, const score_t* hessians) const override;*/
 
-  void BeforeTrainWithGrad(const score_t* gradients, const score_t* hessians, const std::vector<int8_t>& is_feature_used_by_tree) override;
+  void BeforeTrainWithGrad(const score_t* gradients, const score_t* hessians, const std::vector<int8_t>& is_feature_used_by_tree, ncclComm_t* comm = nullptr, cudaStream_t* stream = nullptr) override;
 
  private:
   void NCCLReduceHistograms();
-
-  void NCCLReduceLeafInformation();
 
   void LaunchReduceLeafInformationKernel();
 
@@ -73,8 +71,8 @@ class CUDAExpTreeLearner: public CUDASingleGPUTreeLearner {
 
   std::vector<CUDAVector<CUDALeafSplitsStruct>> smaller_leaf_splits_buffer_;
   std::vector<CUDAVector<CUDALeafSplitsStruct>> larger_leaf_splits_buffer_;
-  std::vector<std::unique_ptr<CUDAVector<CUDALeafSplitsStruct>>> per_gpu_smaller_leaf_splits_;
-  std::vector<std::unique_ptr<CUDAVector<CUDALeafSplitsStruct>>> per_gpu_larger_leaf_splits_;
+  //std::vector<std::unique_ptr<CUDAVector<CUDALeafSplitsStruct>>> per_gpu_smaller_leaf_splits_;
+  //std::vector<std::unique_ptr<CUDAVector<CUDALeafSplitsStruct>>> per_gpu_larger_leaf_splits_;
   std::vector<std::unique_ptr<CUDAVector<int>>> best_split_info_buffer_;
   int* host_split_info_buffer_;
   CUDAVector<double> cuda_root_sum_hessians_;

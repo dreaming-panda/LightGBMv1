@@ -60,8 +60,6 @@ class CUDABestSplitFinder {
   void BeforeTrain(const std::vector<int8_t>& is_feature_used_bytree);
 
   void FindBestSplitsForLeaf(
-    const CUDALeafSplitsStruct* smaller_leaf_splits,
-    const CUDALeafSplitsStruct* larger_leaf_splits,
     const CUDALeafSplitsStruct* local_smaller_leaf_splits,
     const CUDALeafSplitsStruct* local_larger_leaf_splits,
     const int smaller_leaf_index,
@@ -106,8 +104,6 @@ class CUDABestSplitFinder {
  private:
 
   #define LaunchFindBestSplitsForLeafKernel_PARAMS \
-    const CUDALeafSplitsStruct* smaller_leaf_splits, \
-    const CUDALeafSplitsStruct* larger_leaf_splits, \
     const CUDALeafSplitsStruct* local_smaller_leaf_splits, \
     const CUDALeafSplitsStruct* local_larger_leaf_splits, \
     const int smaller_leaf_index, \
@@ -129,8 +125,6 @@ class CUDABestSplitFinder {
   #undef LaunchFindBestSplitsForLeafKernel_PARAMS
 
   #define LaunchFindBestSplitsDiscretizedForLeafKernel_PARAMS \
-  const CUDALeafSplitsStruct* smaller_leaf_splits, \
-  const CUDALeafSplitsStruct* larger_leaf_splits, \
   const CUDALeafSplitsStruct* local_smaller_leaf_splits, \
   const CUDALeafSplitsStruct* local_larger_leaf_splits, \
   const int smaller_leaf_index, \

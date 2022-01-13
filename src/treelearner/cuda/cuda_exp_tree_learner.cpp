@@ -42,8 +42,6 @@ void CUDAExpTreeLearner::Init(const Dataset* train_data, bool is_constant_hessia
   per_gpu_hessians_.resize(config_->num_gpu);
   smaller_leaf_splits_buffer_.resize(config_->num_gpu);
   larger_leaf_splits_buffer_.resize(config_->num_gpu);
-  per_gpu_smaller_leaf_splits_.resize(config_->num_gpu);
-  per_gpu_larger_leaf_splits_.resize(config_->num_gpu);
   per_gpu_scores_.resize(config_->num_gpu);
   best_split_info_buffer_.resize(config_->num_gpu);
   #pragma omp parallel for schedule(static, 1) num_threads(config_->num_gpu)
@@ -66,20 +64,12 @@ void CUDAExpTreeLearner::Init(const Dataset* train_data, bool is_constant_hessia
     larger_leaf_splits_buffer_[gpu_index].Resize(config_->num_gpu);
     best_split_info_buffer_[gpu_index].reset(new CUDAVector<int>());
     best_split_info_buffer_[gpu_index]->Resize(12 * config_->num_gpu);
-    per_gpu_smaller_leaf_splits_[gpu_index].reset(new CUDAVector<CUDALeafSplitsStruct>());
-    per_gpu_larger_leaf_splits_[gpu_index].reset(new CUDAVector<CUDALeafSplitsStruct>());
-    per_gpu_smaller_leaf_splits_[gpu_index]->Resize(1);
-    per_gpu_larger_leaf_splits_[gpu_index]->Resize(1);
     per_gpu_scores_[gpu_index].reset(new CUDAVector<double>());
     per_gpu_scores_[gpu_index]->Resize(num_data_in_gpu);
     SynchronizeCUDADevice(__FILE__, __LINE__);
   }
 
   CUDASUCCESS_OR_FATAL(cudaSetDevice(0));
-  cuda_smaller_leaf_splits_.reset(new CUDALeafSplits(num_data_));
-  cuda_smaller_leaf_splits_->Init(config_->gpu_use_discretized_grad);
-  cuda_larger_leaf_splits_.reset(new CUDALeafSplits(num_data_));
-  cuda_larger_leaf_splits_->Init(config_->gpu_use_discretized_grad);
 
   leaf_best_split_feature_.resize(config_->num_leaves, -1);
   leaf_best_split_threshold_.resize(config_->num_leaves, 0);
@@ -144,37 +134,7 @@ void CUDAExpTreeLearner::ResetTrainingData(const Dataset* train_data, bool is_co
   }
 }
 
-void CUDAExpTreeLearner::NCCLReduceLeafInformation() {
-  NCCLCHECK(ncclGroupStart());
-  for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
-    NCCLCHECK(ncclAllGather(tree_learners_[gpu_index]->GetSmallerLeafSplitsStruct(),
-      smaller_leaf_splits_buffer_[gpu_index].RawData(),
-      sizeof(CUDALeafSplitsStruct) / sizeof(int32_t),
-      ncclInt32,
-      nccl_communicators_[gpu_index],
-      cuda_send_streams_[gpu_index]));
-    if (larger_leaf_index_ >= 0) {
-      NCCLCHECK(ncclAllGather(tree_learners_[gpu_index]->GetLargerLeafSplitsStruct(),
-        larger_leaf_splits_buffer_[gpu_index].RawData(),
-        sizeof(CUDALeafSplitsStruct) / sizeof(int32_t),
-        ncclInt32,
-        nccl_communicators_[gpu_index],
-        cuda_send_streams_[gpu_index]));
-    }
-  }
-  NCCLCHECK(ncclGroupEnd());
-
-  for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
-    CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
-    CUDASUCCESS_OR_FATAL(cudaStreamSynchronize(cuda_send_streams_[gpu_index]));
-  }
-
-  CUDASUCCESS_OR_FATAL(cudaSetDevice(0));
-  LaunchReduceLeafInformationKernel();
-  SynchronizeCUDADevice(__FILE__, __LINE__);
-}
-
-void CUDAExpTreeLearner::BeforeTrainWithGrad(const score_t* gradients, const score_t* hessians, const std::vector<int8_t>& is_feature_used_by_tree) {
+void CUDAExpTreeLearner::BeforeTrainWithGrad(const score_t* gradients, const score_t* hessians, const std::vector<int8_t>& is_feature_used_by_tree, ncclComm_t* /*comm*/, cudaStream_t* /*stream*/) {
   gradients_ = gradients;
   hessians_ = hessians;
 
@@ -200,7 +160,7 @@ void CUDAExpTreeLearner::BeforeTrainWithGrad(const score_t* gradients, const sco
     }
   }
 
-  //#pragma omp parallel for schedule(static, 1) num_threads(config_->num_gpu)
+  #pragma omp parallel for schedule(static, 1) num_threads(config_->num_gpu)
   for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
     CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
     const int gpu_device_id = config_->gpu_device_id >= 0 ? config_->gpu_device_id : 0;
@@ -226,9 +186,11 @@ void CUDAExpTreeLearner::BeforeTrainWithGrad(const score_t* gradients, const sco
     tree_learners_[gpu_index]->BeforeTrainWithGrad(
       per_gpu_gradients_[gpu_index]->RawData(),
       per_gpu_hessians_[gpu_index]->RawData(),
-      is_feature_used_by_tree_per_gpu_[gpu_index]);
+      is_feature_used_by_tree_per_gpu_[gpu_index],
+      &nccl_communicators_[gpu_index],
+      &cuda_send_streams_[gpu_index]);
   }
-  
+
   leaf_to_hist_index_map_[0] = 0;
   #pragma omp parallel for schedule(static) num_threads(num_threads_)
   for (int leaf_index = 1; leaf_index < config_->num_leaves; ++leaf_index) {
@@ -236,39 +198,11 @@ void CUDAExpTreeLearner::BeforeTrainWithGrad(const score_t* gradients, const sco
   }
 
   leaf_num_data_[0] = train_data_->num_data();
+  leaf_sum_hessians_[0] = tree_learners_[0]->leaf_sum_hessians(0);
   col_sampler_.ResetByTree();
   leaf_data_start_[0] = 0;
   smaller_leaf_index_ = 0;
   larger_leaf_index_ = -1;
-
-  // reduce root node information
-  NCCLReduceLeafInformation();
-  CopyFromCUDADeviceToHost<double>(&leaf_sum_hessians_[0], cuda_root_sum_hessians_.RawData(), 1, __FILE__, __LINE__);
-  cuda_larger_leaf_splits_->InitValues();
-
-  NCCLCHECK(ncclGroupStart());
-  for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
-    NCCLCHECK(ncclBroadcast(cuda_smaller_leaf_splits_->GetCUDAStruct(), per_gpu_smaller_leaf_splits_[gpu_index]->RawData(),
-      sizeof(CUDALeafSplitsStruct) / sizeof(int32_t), ncclInt32, 0, nccl_communicators_[gpu_index], cuda_send_streams_[gpu_index]));
-  }
-  NCCLCHECK(ncclGroupEnd());
-
-  for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
-    CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
-    CUDASUCCESS_OR_FATAL(cudaStreamSynchronize(cuda_send_streams_[gpu_index]));
-  }
-
-  NCCLCHECK(ncclGroupStart());
-  for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
-    NCCLCHECK(ncclBroadcast(cuda_larger_leaf_splits_->GetCUDAStruct(), per_gpu_larger_leaf_splits_[gpu_index]->RawData(),
-      sizeof(CUDALeafSplitsStruct) / sizeof(int32_t), ncclInt32, 0, nccl_communicators_[gpu_index], cuda_send_streams_[gpu_index]));
-  }
-  NCCLCHECK(ncclGroupEnd());
-
-  for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
-    CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
-    CUDASUCCESS_OR_FATAL(cudaStreamSynchronize(cuda_send_streams_[gpu_index]));
-  }
 }
 
 void CUDAExpTreeLearner::NCCLReduceHistograms() {
@@ -310,58 +244,67 @@ void CUDAExpTreeLearner::NCCLReduceHistograms() {
 }
 
 void CUDAExpTreeLearner::NCCLReduceBestSplitsForLeaf(CUDATree* tree) {
-  NCCLCHECK(ncclGroupStart());
+  //NCCLCHECK(ncclGroupStart());
+  #pragma omp parallel for schedule(static, 1) num_threads(config_->num_gpu)
   for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
+    CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
     NCCLCHECK(ncclAllGather(tree_learners_[gpu_index]->cuda_best_split_info_buffer(),
       best_split_info_buffer_[gpu_index]->RawData(),
       10, ncclInt32, nccl_communicators_[gpu_index], cuda_send_streams_[gpu_index]));
-  }
-  NCCLCHECK(ncclGroupEnd());
-  for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
-    CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
     CUDASUCCESS_OR_FATAL(cudaStreamSynchronize(cuda_send_streams_[gpu_index]));
   }
+  //NCCLCHECK(ncclGroupEnd());
+  /*for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
+    CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
+    CUDASUCCESS_OR_FATAL(cudaStreamSynchronize(cuda_send_streams_[gpu_index]));
+  }*/
   CUDASUCCESS_OR_FATAL(cudaSetDevice(0));
+  global_timer.Start("CUDAExpTreeLearner::LaunchReduceBestSplitsForLeafKernel");
   LaunchReduceBestSplitsForLeafKernel();
   CopyFromCUDADeviceToHost<int>(
     host_split_info_buffer_,
     best_split_info_buffer_[0]->RawData(),
     12, __FILE__, __LINE__);
+  global_timer.Stop("CUDAExpTreeLearner::LaunchReduceBestSplitsForLeafKernel");
   const int smaller_leaf_best_gpu_index = host_split_info_buffer_[10];
   const int larger_leaf_best_gpu_index = host_split_info_buffer_[11];
   const size_t count = sizeof(CUDASplitInfo) / sizeof(int8_t);
 
   // synchronize best split info across devices
   if (smaller_leaf_best_gpu_index >= 0) {
-    NCCLCHECK(ncclGroupStart());
+    //NCCLCHECK(ncclGroupStart());
+    #pragma omp parallel for schedule(static, 1) num_threads(config_->num_gpu)
     for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
       CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
       NCCLCHECK(ncclBroadcast(tree_learners_[gpu_index]->cuda_leaf_best_split_info() + smaller_leaf_index_,
         tree_learners_[gpu_index]->cuda_leaf_best_split_info() + smaller_leaf_index_,
         count, ncclInt8, smaller_leaf_best_gpu_index, nccl_communicators_[gpu_index], cuda_send_streams_[gpu_index]));
-    }
-    NCCLCHECK(ncclGroupEnd());
-
-    for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
-      CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
       CUDASUCCESS_OR_FATAL(cudaStreamSynchronize(cuda_send_streams_[gpu_index]));
     }
+    //NCCLCHECK(ncclGroupEnd());
+
+    /*for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
+      CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
+      CUDASUCCESS_OR_FATAL(cudaStreamSynchronize(cuda_send_streams_[gpu_index]));
+    }*/
   }
 
   if (larger_leaf_index_ >= 0 && larger_leaf_best_gpu_index >= 0) {
-    NCCLCHECK(ncclGroupStart());
+    //NCCLCHECK(ncclGroupStart());
+    #pragma omp parallel for schedule(static, 1) num_threads(config_->num_gpu)
     for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
       CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
       NCCLCHECK(ncclBroadcast(tree_learners_[gpu_index]->cuda_leaf_best_split_info() + larger_leaf_index_,
         tree_learners_[gpu_index]->cuda_leaf_best_split_info() + larger_leaf_index_,
         count, ncclInt8, larger_leaf_best_gpu_index, nccl_communicators_[gpu_index], cuda_send_streams_[gpu_index]));
-    }
-    NCCLCHECK(ncclGroupEnd());
-
-    for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
-      CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
       CUDASUCCESS_OR_FATAL(cudaStreamSynchronize(cuda_send_streams_[gpu_index]));
     }
+    //NCCLCHECK(ncclGroupEnd());
+
+    /*for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
+      CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
+      CUDASUCCESS_OR_FATAL(cudaStreamSynchronize(cuda_send_streams_[gpu_index]));
+    }*/
   }
 
   const double* gain_buffer = reinterpret_cast<const double*>(host_split_info_buffer_ + 6);
@@ -450,55 +393,26 @@ Tree* CUDAExpTreeLearner::Train(const score_t* gradients, const score_t* hessian
     const double sum_hessians_in_smaller_leaf = leaf_sum_hessians_[smaller_leaf_index_];
     const double sum_hessians_in_larger_leaf = larger_leaf_index_ < 0 ? 0 : leaf_sum_hessians_[larger_leaf_index_];
 
-  global_timer.Start("CUDAExpTreeLearner::NCCLReduceLeafInformation");
-    if (i > 0) {
-      // only reduce for non root nodes, root node is handled in before train method
-      NCCLReduceLeafInformation();
-
-      NCCLCHECK(ncclGroupStart());
-      for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
-        NCCLCHECK(ncclBroadcast(cuda_smaller_leaf_splits_->GetCUDAStruct(), per_gpu_smaller_leaf_splits_[gpu_index]->RawData(),
-          sizeof(CUDALeafSplitsStruct) / sizeof(int32_t), ncclInt32, 0, nccl_communicators_[gpu_index], cuda_send_streams_[gpu_index]));
-      }
-      NCCLCHECK(ncclGroupEnd());
-
-      NCCLCHECK(ncclGroupStart());
-      for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
-        NCCLCHECK(ncclBroadcast(cuda_larger_leaf_splits_->GetCUDAStruct(), per_gpu_larger_leaf_splits_[gpu_index]->RawData(),
-          sizeof(CUDALeafSplitsStruct) / sizeof(int32_t), ncclInt32, 0, nccl_communicators_[gpu_index], cuda_send_streams_[gpu_index]));
-      }
-      NCCLCHECK(ncclGroupEnd());
-    }
-
-    SynchronizeCUDADevice(__FILE__, __LINE__);
-  global_timer.Stop("CUDAExpTreeLearner::NCCLReduceLeafInformation");
-    //#pragma omp parallel for schedule(static, 1) num_threads(config_->num_gpu)
   global_timer.Start("CUDAExpTreeLearner::CUDAConstructHistograms");
-    for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
-      CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
-      tree_learners_[gpu_index]->CUDAConstructHistograms(
-        num_data_in_smaller_leaf,
-        num_data_in_larger_leaf,
-        sum_hessians_in_smaller_leaf,
-        sum_hessians_in_larger_leaf);
-    }
-    for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
-      CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
-      SynchronizeCUDADevice(__FILE__, __LINE__);
-    }
+  #pragma omp parallel for schedule(static, 1) num_threads(config_->num_gpu)
+  for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
+    CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
+    tree_learners_[gpu_index]->CUDAConstructHistograms(
+      num_data_in_smaller_leaf,
+      num_data_in_larger_leaf,
+      sum_hessians_in_smaller_leaf,
+      sum_hessians_in_larger_leaf);
+    SynchronizeCUDADevice(__FILE__, __LINE__);
+  }
   global_timer.Stop("CUDAExpTreeLearner::CUDAConstructHistograms");
   global_timer.Start("CUDAExpTreeLearner::NCCLReduceHistograms");
     NCCLReduceHistograms();
   global_timer.Stop("CUDAExpTreeLearner::NCCLReduceHistograms");
   global_timer.Start("CUDAExpTreeLearner::CUDASubtractHistograms");
+  #pragma omp parallel for schedule(static, 1) num_threads(config_->num_gpu)
     for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
       CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
-      tree_learners_[gpu_index]->CUDASubtractHistograms(
-        per_gpu_smaller_leaf_splits_[gpu_index]->RawData(),
-        per_gpu_larger_leaf_splits_[gpu_index]->RawData());
-    }
-    for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
-      CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
+      tree_learners_[gpu_index]->CUDASubtractHistograms();
       SynchronizeCUDADevice(__FILE__, __LINE__);
     }
   global_timer.Stop("CUDAExpTreeLearner::CUDASubtractHistograms");
@@ -521,20 +435,15 @@ Tree* CUDAExpTreeLearner::Train(const score_t* gradients, const score_t* hessian
         }
       }
     }*/
-    //#pragma omp parallel for schedule(static, 1) num_threads(config_->num_gpu)
   global_timer.Start("CUDAExpTreeLearner::CUDAFindBestSplitsForLeaf");
+    #pragma omp parallel for schedule(static, 1) num_threads(config_->num_gpu)
     for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
       CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
       tree_learners_[gpu_index]->CUDAFindBestSplitsForLeaf(
         num_data_in_smaller_leaf,
         num_data_in_larger_leaf,
         sum_hessians_in_smaller_leaf,
-        sum_hessians_in_larger_leaf,
-        per_gpu_smaller_leaf_splits_[gpu_index]->RawData(),
-        per_gpu_larger_leaf_splits_[gpu_index]->RawData());
-    }
-    for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
-      CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
+        sum_hessians_in_larger_leaf);
       SynchronizeCUDADevice(__FILE__, __LINE__);
     }
   global_timer.Stop("CUDAExpTreeLearner::CUDAFindBestSplitsForLeaf");
@@ -564,9 +473,6 @@ Tree* CUDAExpTreeLearner::Train(const score_t* gradients, const score_t* hessian
     for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
       CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
       tree_learners_[gpu_index]->CUDASplit(right_leaf_index, &nccl_communicators_[gpu_index]);
-    }
-    for (int gpu_index = 0; gpu_index < config_->num_gpu; ++gpu_index) {
-      CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
       SynchronizeCUDADevice(__FILE__, __LINE__);
     }
   global_timer.Stop("CUDAExpTreeLearner::CUDASplit");

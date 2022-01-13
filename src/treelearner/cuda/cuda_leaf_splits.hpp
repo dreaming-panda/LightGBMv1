@@ -13,6 +13,8 @@
 #include <LightGBM/utils/log.h>
 #include <LightGBM/meta.h>
 
+#include <nccl.h>
+
 #define NUM_THRADS_PER_BLOCK_LEAF_SPLITS (1024)
 #define NUM_DATA_THREAD_ADD_LEAF_SPLITS (6)
 
@@ -53,6 +55,25 @@ class CUDALeafSplits {
     const data_size_t* cuda_data_indices_in_leaf, const data_size_t num_used_indices,
     hist_t* cuda_hist_in_leaf, double* root_sum_hessians,
     const score_t* grad_scale, const score_t* hess_scale);
+
+  void InitValuesNCCL(
+    const double lambda_l1, const double lambda_l2,
+    const score_t* cuda_gradients, const score_t* cuda_hessians,
+    const data_size_t* cuda_bagging_data_indices,
+    const data_size_t* cuda_data_indices_in_leaf, const data_size_t num_used_indices,
+    hist_t* cuda_hist_in_leaf, double* root_sum_hessians,
+    ncclComm_t* comm,
+    cudaStream_t* stream);
+
+  void InitValuesNCCL(
+    const double lambda_l1, const double lambda_l2,
+    const int16_t* cuda_gradients_and_hessians,
+    const data_size_t* cuda_bagging_data_indices,
+    const data_size_t* cuda_data_indices_in_leaf, const data_size_t num_used_indices,
+    hist_t* cuda_hist_in_leaf, double* root_sum_hessians,
+    const score_t* grad_scale, const score_t* hess_scale,
+    ncclComm_t* comm,
+    cudaStream_t* stream);
 
   void InitValues();
 
@@ -149,6 +170,15 @@ class CUDALeafSplits {
     const data_size_t num_used_indices,
     hist_t* cuda_hist_in_leaf);
 
+  void LaunchInitValuesNCCLKernal(
+    const double lambda_l1, const double lambda_l2,
+    const data_size_t* cuda_bagging_data_indices,
+    const data_size_t* cuda_data_indices_in_leaf,
+    const data_size_t num_used_indices,
+    hist_t* cuda_hist_in_leaf,
+    ncclComm_t* comm,
+    cudaStream_t* stream);
+
   void LaunchInitValuesKernal(
     const double lambda_l1, const double lambda_l2,
     const data_size_t* cuda_bagging_data_indices,
@@ -158,6 +188,17 @@ class CUDALeafSplits {
     const score_t* grad_scale,
     const score_t* hess_scale);
 
+  void LaunchInitValuesNCCLKernal(
+    const double lambda_l1, const double lambda_l2,
+    const data_size_t* cuda_bagging_data_indices,
+    const data_size_t* cuda_data_indices_in_leaf,
+    const data_size_t num_used_indices,
+    hist_t* cuda_hist_in_leaf,
+    const score_t* grad_scale,
+    const score_t* hess_scale,
+    ncclComm_t* comm,
+    cudaStream_t* stream);
+
   // Host memory
   data_size_t num_data_;
   int num_blocks_init_from_gradients_;
@@ -166,6 +207,7 @@ class CUDALeafSplits {
   CUDALeafSplitsStruct* cuda_struct_;
   double* cuda_sum_of_gradients_buffer_;
   double* cuda_sum_of_hessians_buffer_;
+  CUDAVector<data_size_t> num_data_buffer_;
   int64_t* cuda_sum_of_gradients_hessians_buffer_;
 
   // CUDA memory, held by other object
