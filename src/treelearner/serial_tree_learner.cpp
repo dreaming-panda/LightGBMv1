@@ -16,6 +16,8 @@
 
 #include "cost_effective_gradient_boosting.hpp"
 
+#include <fstream>
+
 namespace LightGBM {
 
 SerialTreeLearner::SerialTreeLearner(const Config* config)
@@ -345,6 +347,22 @@ void SerialTreeLearner::FindBestSplits(const Tree* tree) {
   ConstructHistograms(is_feature_used, use_subtract);
 #endif
   FindBestSplitsFromHistograms(is_feature_used, use_subtract, tree);
+
+  /*if (larger_leaf_splits_->leaf_index() == -1) {
+    std::ofstream fout("serial_gradients.txt");
+    const hist_t* hist_pointer = smaller_leaf_histogram_array_[0].RawData() - kHistOffset;
+    for (int real_feature_index = 0; real_feature_index < train_data_->num_total_features(); ++real_feature_index) {
+      const int inner_feature_index = train_data_->InnerFeatureIndex(real_feature_index);
+      if (inner_feature_index >= 0) {
+        const auto bin_start = share_state_->feature_hist_offsets()[inner_feature_index];
+        const auto bin_end = share_state_->feature_hist_offsets()[inner_feature_index + 1];
+        fout << "feature " << real_feature_index << " inner feature " << train_data_->InnerFeatureIndex(real_feature_index) << " offset " << (train_data_->FeatureBinMapper(inner_feature_index)->GetMostFreqBin() == 0) << std::endl;
+        for (auto bin = bin_start; bin < bin_end; ++bin) {
+          fout << hist_pointer[2 * bin] << "," << hist_pointer[2 * bin + 1] << std::endl;
+        }
+      }
+    }
+  }*/
 }
 
 void SerialTreeLearner::ConstructHistograms(
@@ -581,12 +599,18 @@ void SerialTreeLearner::SplitInner(Tree* tree, int best_leaf, int* left_leaf,
   bool is_numerical_split =
       train_data_->FeatureBinMapper(inner_feature_index)->bin_type() ==
       BinType::NumericalBin;
+  /*Log::Warning("best_split_info.feature = %d", best_split_info.feature);
+  Log::Warning("inner feature index = %d", train_data_->InnerFeatureIndex(best_split_info.feature));
+  Log::Warning("best_split_info.threshold = %d", best_split_info.threshold);
+  Log::Warning("best_split_info.gain = %f", best_split_info.gain);*/
   if (is_numerical_split) {
     auto threshold_double = train_data_->RealThreshold(
         inner_feature_index, best_split_info.threshold);
     data_partition_->Split(best_leaf, train_data_, inner_feature_index,
                            &best_split_info.threshold, 1,
                            best_split_info.default_left, next_leaf_id);
+    //Log::Warning("data_partition_->leaf_count(*left_leaf) = %d", data_partition_->leaf_count(*left_leaf));
+    //Log::Warning("data_partition_->leaf_count(next_leaf_id) = %d", data_partition_->leaf_count(next_leaf_id));
     if (update_cnt) {
       // don't need to update this in data-based parallel model
       best_split_info.left_count = data_partition_->leaf_count(*left_leaf);

@@ -150,13 +150,14 @@ void CUDAExpTreeLearner::LaunchReduceLeafInformationKernel() {
   }
 }
 
+template <bool IS_ROOT>
 __global__ void ReduceBestSplitsForLeafKernel(
   int* leaf_best_split_info_buffer,
   const int num_gpu) {
   int best_gpu_for_smaller_leaf = -1;
   double best_gain = kMinScore;
   for (int gpu_index = 0; gpu_index < num_gpu; ++gpu_index) {
-    const double gain = (reinterpret_cast<const double*>(leaf_best_split_info_buffer + 6))[0];
+    const double gain = (reinterpret_cast<const double*>(leaf_best_split_info_buffer + gpu_index * 10 + 6))[0];
     if (gain > best_gain) {
       best_gain = gain;
       best_gpu_for_smaller_leaf = gpu_index;
@@ -170,32 +171,47 @@ __global__ void ReduceBestSplitsForLeafKernel(
     double* gain_buffer = reinterpret_cast<double*>(leaf_best_split_info_buffer + 6);
     gain_buffer[0] = (reinterpret_cast<const double*>(buffer + 6))[0];
   }
-  
+
   int best_gpu_for_larger_leaf = -1;
-  best_gain = kMinScore;
-  for (int gpu_index = 0; gpu_index < num_gpu; ++gpu_index) {
-    const double gain = (reinterpret_cast<const double*>(leaf_best_split_info_buffer + 6))[1];
-    if (gain > best_gain) {
-      best_gain = gain;
-      best_gpu_for_larger_leaf = gpu_index;
+  if (!IS_ROOT) {
+    best_gain = kMinScore;
+    for (int gpu_index = 0; gpu_index < num_gpu; ++gpu_index) {
+      const double gain = (reinterpret_cast<const double*>(leaf_best_split_info_buffer + gpu_index * 10 + 6))[1];
+      if (gain > best_gain) {
+        best_gain = gain;
+        best_gpu_for_larger_leaf = gpu_index;
+      }
     }
-  }
-  if (best_gpu_for_larger_leaf >= 0) {
-    const int* buffer = leaf_best_split_info_buffer + best_gpu_for_larger_leaf * 10;
-    leaf_best_split_info_buffer[3] = buffer[3];
-    leaf_best_split_info_buffer[4] = buffer[4];
-    leaf_best_split_info_buffer[5] = buffer[5];
+    if (best_gpu_for_larger_leaf >= 0) {
+      const int* buffer = leaf_best_split_info_buffer + best_gpu_for_larger_leaf * 10;
+      leaf_best_split_info_buffer[3] = buffer[3];
+      leaf_best_split_info_buffer[4] = buffer[4];
+      leaf_best_split_info_buffer[5] = buffer[5];
+      double* gain_buffer = reinterpret_cast<double*>(leaf_best_split_info_buffer + 6);
+      gain_buffer[1] = (reinterpret_cast<const double*>(buffer + 6))[1];
+    }
+  } else {
+    leaf_best_split_info_buffer[3] = -1;
+    leaf_best_split_info_buffer[4] = 0;
+    leaf_best_split_info_buffer[5] = 0;
     double* gain_buffer = reinterpret_cast<double*>(leaf_best_split_info_buffer + 6);
-    gain_buffer[1] = (reinterpret_cast<const double*>(buffer + 6))[1];
+    gain_buffer[1] = kMinScore;
   }
   leaf_best_split_info_buffer[10] = best_gpu_for_smaller_leaf;
   leaf_best_split_info_buffer[11] = best_gpu_for_larger_leaf;
 }
 
 void CUDAExpTreeLearner::LaunchReduceBestSplitsForLeafKernel() {
-  ReduceBestSplitsForLeafKernel<<<1, 1>>>(
-    best_split_info_buffer_[0]->RawData(),
-    config_->num_gpu);
+  if (larger_leaf_index_ < 0) {
+    ReduceBestSplitsForLeafKernel<true><<<1, 1>>>(
+      best_split_info_buffer_[0]->RawData(),
+      config_->num_gpu);
+  } else {
+    ReduceBestSplitsForLeafKernel<false><<<1, 1>>>(
+      best_split_info_buffer_[0]->RawData(),
+      config_->num_gpu);
+  }
+  SynchronizeCUDADevice(__FILE__, __LINE__);
 }
 
 }  // namespace LightGBM

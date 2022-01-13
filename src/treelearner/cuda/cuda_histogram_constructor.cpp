@@ -141,7 +141,6 @@ void CUDAHistogramConstructor::ConstructHistogramForLeaf(
     return;
   }
   LaunchConstructHistogramKernel(cuda_smaller_leaf_splits, local_num_data_in_smaller_leaf);
-  SynchronizeCUDADevice(__FILE__, __LINE__);
 }
 
 void CUDAHistogramConstructor::SubtractHistogramForLeaf(

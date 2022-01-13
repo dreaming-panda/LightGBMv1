@@ -19,6 +19,8 @@
 #include "cuda_gradient_discretizer.hpp"
 #include "../serial_tree_learner.h"
 
+#include <nccl.h>
+
 namespace LightGBM {
 
 #define CUDA_SINGLE_GPU_TREE_LEARNER_BLOCK_SIZE (1024)
@@ -41,6 +43,8 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
   void SetBaggingData(const Dataset* subset, const data_size_t* used_indices, data_size_t num_data) override;
 
   void AddPredictionToScore(const Tree* tree, double* out_score) const override;
+
+  void AddPredictionToScore(double* out_score, const int num_leaves, const double shrinkage_rate) const;
 
   void RenewTreeOutput(Tree* tree, const ObjectiveFunction* obj, std::function<double(const label_t*, int)> residual_getter,
                        const double* score, data_size_t total_num_data, const data_size_t* bag_indices, data_size_t bag_cnt) const override;
@@ -72,7 +76,7 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
     const CUDALeafSplitsStruct* global_smaller_leaf_splits,
     const CUDALeafSplitsStruct* global_larger_leaf_splits);
 
-  void CUDASplit(int right_leaf_index);
+  void CUDASplit(int right_leaf_index, ncclComm_t* comm = nullptr);
 
   hist_t* cuda_hist_pointer() {
     return cuda_histogram_constructor_->cuda_hist_pointer();

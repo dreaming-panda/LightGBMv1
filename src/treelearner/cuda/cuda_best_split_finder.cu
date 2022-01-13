@@ -1681,7 +1681,6 @@ void CUDABestSplitFinder::LaunchFindBestSplitsForLeafKernelInner2(LaunchFindBest
         <<<num_tasks_, NUM_THREADS_PER_BLOCK_BEST_SPLIT_FINDER, 0, cuda_streams_[0]>>>
         (FindBestSplitsForLeafKernel_ARGS);
     }
-    SynchronizeCUDADevice(__FILE__, __LINE__);
     if (is_larger_leaf_valid) {
       FindBestSplitsForLeafKernel<USE_RAND, USE_L1, USE_SMOOTHING, true>
         <<<num_tasks_, NUM_THREADS_PER_BLOCK_BEST_SPLIT_FINDER, 0, cuda_streams_[1]>>>
@@ -1693,7 +1692,6 @@ void CUDABestSplitFinder::LaunchFindBestSplitsForLeafKernelInner2(LaunchFindBest
         <<<num_tasks_, NUM_THREADS_PER_BLOCK_BEST_SPLIT_FINDER, 0, cuda_streams_[0]>>>
         (FindBestSplitsForLeafKernel_ARGS, GlobalMemory_Buffer_ARGS);
     }
-    SynchronizeCUDADevice(__FILE__, __LINE__);
     if (is_larger_leaf_valid) {
       FindBestSplitsForLeafKernel_GlobalMemory<USE_RAND, USE_L1, USE_SMOOTHING, true>
         <<<num_tasks_, NUM_THREADS_PER_BLOCK_BEST_SPLIT_FINDER, 0, cuda_streams_[1]>>>

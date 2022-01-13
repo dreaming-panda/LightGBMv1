@@ -27,9 +27,9 @@ class CUDAExpTreeLearner: public CUDASingleGPUTreeLearner {
 
   Tree* Train(const score_t* gradients, const score_t *hessians, bool is_first_tree) override;
 
-  /*void SetBaggingData(const Dataset* subset, const data_size_t* used_indices, data_size_t num_data) override;
-
   void AddPredictionToScore(const Tree* tree, double* out_score) const override;
+
+  /*void SetBaggingData(const Dataset* subset, const data_size_t* used_indices, data_size_t num_data) override;
 
   void RenewTreeOutput(Tree* tree, const ObjectiveFunction* obj, std::function<double(const label_t*, int)> residual_getter,
                        const double* score, data_size_t total_num_data, const data_size_t* bag_indices, data_size_t bag_cnt) const override;
@@ -56,7 +56,7 @@ class CUDAExpTreeLearner: public CUDASingleGPUTreeLearner {
 
   void BroadCastBestSplit();
 
-  void ReduceLeafInformationAfterSplit();
+  void ReduceLeafInformationAfterSplit(const int best_leaf_index, const int right_leaf_index);
 
   std::vector<std::unique_ptr<CUDASingleGPUTreeLearner>> tree_learners_;
   std::vector<std::unique_ptr<Dataset>> datasets_;
@@ -79,6 +79,8 @@ class CUDAExpTreeLearner: public CUDASingleGPUTreeLearner {
   int* host_split_info_buffer_;
   CUDAVector<double> cuda_root_sum_hessians_;
   std::vector<int> leaf_to_hist_index_map_;
+  std::vector<std::unique_ptr<CUDAVector<double>>> per_gpu_scores_;
+  mutable int cur_iter_;
 };
 
 }  // namespace LightGBM

@@ -20,6 +20,8 @@
 
 #include "cuda_leaf_splits.hpp"
 
+#include <nccl.h>
+
 #define FILL_INDICES_BLOCK_SIZE_DATA_PARTITION (1024)
 #define SPLIT_INDICES_BLOCK_SIZE_DATA_PARTITION (1024)
 #define AGGREGATE_BLOCK_SIZE_DATA_PARTITION (1024)
@@ -33,6 +35,7 @@ class CUDADataPartition {
     const int num_total_bin,
     const int num_leaves,
     const int num_threads,
+    const int num_gpu,
     hist_t* cuda_hist);
 
   ~CUDADataPartition();
@@ -64,9 +67,12 @@ class CUDADataPartition {
     double* left_leaf_sum_of_hessians,
     double* right_leaf_sum_of_hessians,
     double* left_leaf_sum_of_gradients,
-    double* right_leaf_sum_of_gradients);
+    double* right_leaf_sum_of_gradients,
+    ncclComm_t* comm = nullptr);
 
   void UpdateTrainScore(const Tree* tree, double* cuda_scores);
+
+  void UpdateTrainScore(double* cuda_scores, const int num_leaves, const double shrinkage_rate);
 
   void SetUsedDataIndices(const data_size_t* used_indices, const data_size_t num_used_indices);
 
@@ -131,7 +137,8 @@ class CUDADataPartition {
     double* left_leaf_sum_of_hessians,
     double* right_leaf_sum_of_hessians,
     double* left_leaf_sum_of_gradients,
-    double* right_leaf_sum_of_gradients);
+    double* right_leaf_sum_of_gradients,
+    ncclComm_t* comm = nullptr);
 
   // kernel launch functions
   void LaunchFillDataIndicesBeforeTrain();
@@ -153,7 +160,8 @@ class CUDADataPartition {
     double* left_leaf_sum_of_hessians,
     double* right_leaf_sum_of_hessians,
     double* left_leaf_sum_of_gradients,
-    double* right_leaf_sum_of_gradients);
+    double* right_leaf_sum_of_gradients,
+    ncclComm_t* comm = nullptr);
 
   void LaunchGenDataToLeftBitVectorKernel(
     const data_size_t num_data_in_leaf,
@@ -272,7 +280,7 @@ class CUDADataPartition {
 
 #undef UpdateDataIndexToLeafIndexKernel_PARAMS
 
-  void LaunchAddPredictionToScoreKernel(const double* leaf_value, double* cuda_scores, const int num_leaves);
+  void LaunchAddPredictionToScoreKernel(const double* leaf_value, double* cuda_scores, const int num_leaves, const double shrinkage_rate = 1.0f);
 
   void LaunchFillDataIndexToLeafIndex();
 
@@ -378,6 +386,11 @@ class CUDADataPartition {
   // dataset information
   /*! \brief beginning of histograms, for initialization of cuda_hist_pool_ */
   hist_t* cuda_hist_;
+
+  // for nccl training, to accumulate global leaf size
+  int num_gpu_;
+  CUDAVector<data_size_t> global_left_leaf_num_data_;
+  CUDAVector<data_size_t> global_right_leaf_num_data_;
 };
 
 }  // namespace LightGBM

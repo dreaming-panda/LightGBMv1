@@ -826,8 +826,11 @@ __global__ void FixHistogramKernel(
   const hist_t bin_gradient = (threadIdx_x < num_bin && threadIdx_x != most_freq_bin) ? feature_hist[hist_pos] : 0.0f;
   const hist_t bin_hessian = (threadIdx_x < num_bin && threadIdx_x != most_freq_bin) ? feature_hist[hist_pos + 1] : 0.0f;
   const hist_t sum_gradient = ShuffleReduceSum<hist_t>(bin_gradient, shared_mem_buffer, num_bin_aligned);
+  // TODO(shiyu1994): fix this in all other branches !!!
+  __syncthreads();
   const hist_t sum_hessian = ShuffleReduceSum<hist_t>(bin_hessian, shared_mem_buffer, num_bin_aligned);
   if (threadIdx_x == 0) {
+    //printf("fixing feature %d offset %d bin %d gradient %f hessian %f\n", feature_index, feature_hist_offset, most_freq_bin, leaf_sum_gradients - sum_gradient, leaf_sum_hessians - sum_hessian);
     feature_hist[most_freq_bin << 1] = leaf_sum_gradients - sum_gradient;
     feature_hist[(most_freq_bin << 1) + 1] = leaf_sum_hessians - sum_hessian;
   }
@@ -892,14 +895,12 @@ void CUDAHistogramConstructor::LaunchSubtractHistogramKernel(
         global_cuda_smaller_leaf_splits,
         local_cuda_smaller_leaf_splits);
     }
-    SynchronizeCUDADevice(__FILE__, __LINE__);
     global_timer.Stop("CUDAHistogramConstructor::FixHistogramKernel");
     global_timer.Start("CUDAHistogramConstructor::SubtractHistogramKernel");
     SubtractHistogramKernel<<<num_subtract_blocks, SUBTRACT_BLOCK_SIZE, 0, cuda_stream_>>>(
       num_total_bin_,
       local_cuda_smaller_leaf_splits,
       local_cuda_larger_leaf_splits);
-    SynchronizeCUDADevice(__FILE__, __LINE__);
     global_timer.Stop("CUDAHistogramConstructor::SubtractHistogramKernel");
   } else {
     const int num_subtract_threads = 2 * num_total_bin_;
