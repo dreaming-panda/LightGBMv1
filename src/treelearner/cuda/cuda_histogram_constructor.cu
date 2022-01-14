@@ -786,6 +786,7 @@ void CUDAHistogramConstructor::LaunchConstructHistogramKernelInner(
       }
     }
   }
+  CUDASUCCESS_OR_FATAL(cudaStreamSynchronize(cuda_stream_));
 }
 
 __global__ void SubtractHistogramKernel(
@@ -919,6 +920,7 @@ void CUDAHistogramConstructor::LaunchSubtractHistogramKernel(
       local_cuda_larger_leaf_splits);
     global_timer.Stop("CUDAHistogramConstructor::SubtractHistogramDiscretizedKernel");
   }
+  CUDASUCCESS_OR_FATAL(cudaStreamSynchronize(cuda_stream_));
 }
 
 }  // namespace LightGBM

@@ -1998,7 +1998,7 @@ void CUDABestSplitFinder::LaunchSyncBestSplitForLeafKernel(
     const int offset = static_cast<int>(larger_only) * 3;
     if (larger_only) {
       if (num_blocks_per_leaf > 1) {
-        SyncBestSplitForLeafKernel<false, true><<<num_blocks_per_leaf, NUM_TASKS_PER_SYNC_BLOCK>>>(
+        SyncBestSplitForLeafKernel<false, true><<<num_blocks_per_leaf, NUM_TASKS_PER_SYNC_BLOCK, 0, cuda_streams_[0]>>>(
           host_larger_leaf_index,
           cuda_leaf_best_split_info_,
           cuda_split_find_tasks_.RawData(),
@@ -2006,14 +2006,14 @@ void CUDABestSplitFinder::LaunchSyncBestSplitForLeafKernel(
           num_tasks_,
           num_leaves_,
           nullptr);
-        SyncBestSplitForLeafKernelAllBlocks<true><<<1, 1>>>(
+        SyncBestSplitForLeafKernelAllBlocks<true><<<1, 1, 0, cuda_streams_[0]>>>(
           host_larger_leaf_index,
           num_blocks_per_leaf,
           num_leaves_,
           cuda_leaf_best_split_info_,
           cuda_best_split_info_buffer_ + offset);
       } else {
-        SyncBestSplitForLeafKernel<true, true><<<num_blocks_per_leaf, NUM_TASKS_PER_SYNC_BLOCK>>>(
+        SyncBestSplitForLeafKernel<true, true><<<num_blocks_per_leaf, NUM_TASKS_PER_SYNC_BLOCK, 0, cuda_streams_[0]>>>(
           host_larger_leaf_index,
           cuda_leaf_best_split_info_,
           cuda_split_find_tasks_.RawData(),
@@ -2024,7 +2024,7 @@ void CUDABestSplitFinder::LaunchSyncBestSplitForLeafKernel(
       }
     } else {
       if (num_blocks_per_leaf > 1) {
-        SyncBestSplitForLeafKernel<false, false><<<num_blocks_per_leaf, NUM_TASKS_PER_SYNC_BLOCK>>>(
+        SyncBestSplitForLeafKernel<false, false><<<num_blocks_per_leaf, NUM_TASKS_PER_SYNC_BLOCK, 0, cuda_streams_[0]>>>(
           host_smaller_leaf_index,
           cuda_leaf_best_split_info_,
           cuda_split_find_tasks_.RawData(),
@@ -2032,14 +2032,14 @@ void CUDABestSplitFinder::LaunchSyncBestSplitForLeafKernel(
           num_tasks_,
           num_leaves_,
           nullptr);
-        SyncBestSplitForLeafKernelAllBlocks<false><<<1, 1>>>(
+        SyncBestSplitForLeafKernelAllBlocks<false><<<1, 1, 0, cuda_streams_[0]>>>(
           host_smaller_leaf_index,
           num_blocks_per_leaf,
           num_leaves_,
           cuda_leaf_best_split_info_,
           cuda_best_split_info_buffer_ + offset);
       } else {
-        SyncBestSplitForLeafKernel<true, false><<<num_blocks_per_leaf, NUM_TASKS_PER_SYNC_BLOCK>>>(
+        SyncBestSplitForLeafKernel<true, false><<<num_blocks_per_leaf, NUM_TASKS_PER_SYNC_BLOCK, 0, cuda_streams_[0]>>>(
           host_smaller_leaf_index,
           cuda_leaf_best_split_info_,
           cuda_split_find_tasks_.RawData(),
@@ -2050,6 +2050,8 @@ void CUDABestSplitFinder::LaunchSyncBestSplitForLeafKernel(
       }
     }
   }
+  CUDASUCCESS_OR_FATAL(cudaStreamSynchronize(cuda_streams_[0]));
+  CUDASUCCESS_OR_FATAL(cudaStreamSynchronize(cuda_streams_[1]));
 }
 
 __global__ void FindBestFromAllSplitsKernel(const int cur_num_leaves,
