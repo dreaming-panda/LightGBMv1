@@ -11,10 +11,16 @@
 namespace LightGBM {
 
 CUDABinaryLogloss::CUDABinaryLogloss(const Config& config):
-BinaryLogloss(config), ova_class_id_(-1) {}
+BinaryLogloss(config), ova_class_id_(-1) {
+  use_nccl_ = false;
+  nccl_comm_ = nullptr;
+}
 
 CUDABinaryLogloss::CUDABinaryLogloss(const Config& config, const int ova_class_id):
-BinaryLogloss(config, [ova_class_id](label_t label) { return static_cast<int>(label) == ova_class_id; }), ova_class_id_(ova_class_id) {}
+BinaryLogloss(config, [ova_class_id](label_t label) { return static_cast<int>(label) == ova_class_id; }), ova_class_id_(ova_class_id) {
+  use_nccl_ = false;
+  nccl_comm_ = nullptr;
+}
 
 CUDABinaryLogloss::CUDABinaryLogloss(const std::vector<std::string>& strs): BinaryLogloss(strs) {}
 
@@ -57,6 +63,11 @@ double CUDABinaryLogloss::BoostFromScore(int) const {
 
 void CUDABinaryLogloss::ConvertOutputCUDA(const data_size_t num_data, const double* input, double* output) const {
   LaunchConvertOutputCUDAKernel(num_data, input, output);
+}
+
+void CUDABinaryLogloss::SetNCCLComm(ncclComm_t* nccl_comm) {
+  use_nccl_ = true;
+  nccl_comm_ = nccl_comm;
 }
 
 }  // namespace LightGBM

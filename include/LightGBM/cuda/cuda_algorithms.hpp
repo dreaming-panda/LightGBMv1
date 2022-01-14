@@ -36,6 +36,9 @@ __device__ __forceinline__ T ShufflePrefixSum(T value, T* shared_mem_buffer) {
   const uint32_t mask = 0xffffffff;
   const uint32_t warpLane = threadIdx.x % warpSize;
   const uint32_t warpID = threadIdx.x / warpSize;
+  if (warpLane >= 32 || warpID >= 32) {
+    printf("error !!!! warpLane = %d, warpID = %d\n", warpLane, warpID);
+  }
   const uint32_t num_warp = blockDim.x / warpSize;
   for (uint32_t offset = 1; offset < warpSize; offset <<= 1) {
     const T other_value = __shfl_up_sync(mask, value, offset);
@@ -58,6 +61,9 @@ __device__ __forceinline__ T ShufflePrefixSum(T value, T* shared_mem_buffer) {
     shared_mem_buffer[warpLane] = warp_sum;
   }
   __syncthreads();
+  if (warpID != 0 && (warpID - 1) >= 32) {
+    printf("error !!!! warpLane = %d, warpID = %d\n", warpLane, warpID);
+  }
   const T warp_base = warpID == 0 ? 0 : shared_mem_buffer[warpID - 1];
   return warp_base + value;
 }

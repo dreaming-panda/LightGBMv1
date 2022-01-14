@@ -45,9 +45,26 @@ void CUDABinaryLogloss::LaunchBoostFromScoreKernel() const {
   const data_size_t num_data_per_block = CALC_INIT_SCORE_BLOCK_SIZE_BINARY * NUM_DATA_THREAD_ADD_CALC_INIT_SCORE_BINARY;
   const int num_blocks = (num_data_ + num_data_per_block - 1) / num_data_per_block;
   BoostFromScoreKernel_1_BinaryLogloss<<<num_blocks, CALC_INIT_SCORE_BLOCK_SIZE_BINARY>>>(cuda_label_, num_data_, cuda_boost_from_score_);
-  SynchronizeCUDADevice(__FILE__, __LINE__);
-  BoostFromScoreKernel_2_BinaryLogloss<<<1, 1>>>(cuda_boost_from_score_, num_data_, sigmoid_);
-  SynchronizeCUDADevice(__FILE__, __LINE__);
+  if (use_nccl_) {
+    CUDAVector<data_size_t> tmp_num_data(1);
+    CopyFromHostToCUDADevice<data_size_t>(tmp_num_data.RawData(), &num_data_, 1, __FILE__, __LINE__);
+    cudaStream_t nccl_stream;
+    CUDASUCCESS_OR_FATAL(cudaStreamCreate(&nccl_stream));
+    CHECK(nccl_comm_ != nullptr);
+    NCCLCHECK(ncclGroupStart());
+    NCCLCHECK(ncclAllReduce(cuda_boost_from_score_, cuda_boost_from_score_, 1, ncclFloat64, ncclSum, *nccl_comm_, nccl_stream));
+    NCCLCHECK(ncclAllReduce(tmp_num_data.RawData(), cuda_boost_from_score_, 1, ncclFloat64, ncclSum, *nccl_comm_, nccl_stream));
+    NCCLCHECK(ncclGroupEnd());
+    CUDASUCCESS_OR_FATAL(cudaStreamSynchronize(nccl_stream));
+    CUDASUCCESS_OR_FATAL(cudaStreamDestroy(nccl_stream));
+    data_size_t global_num_data = 0;
+    CopyFromCUDADeviceToHost<data_size_t>(&global_num_data, tmp_num_data.RawData(), 1, __FILE__, __LINE__);
+    BoostFromScoreKernel_2_BinaryLogloss<<<1, 1>>>(cuda_boost_from_score_, global_num_data, sigmoid_);
+  } else {
+    SynchronizeCUDADevice(__FILE__, __LINE__);
+    BoostFromScoreKernel_2_BinaryLogloss<<<1, 1>>>(cuda_boost_from_score_, num_data_, sigmoid_);
+    SynchronizeCUDADevice(__FILE__, __LINE__);
+  }
 }
 
 template <bool USE_LABEL_WEIGHT, bool USE_WEIGHT, bool IS_OVA>

@@ -335,8 +335,7 @@ void Config::CheckParamConflict() {
     }
   }
   // force col-wise for gpu, and non-single GPU CUDA version
-  if (device_type == std::string("gpu") ||
-    (device_type == std::string("cuda") && (num_gpu > 1 || tree_learner != std::string("serial")))) {
+  if (device_type == std::string("gpu")) {
     force_col_wise = true;
     force_row_wise = false;
     if (deterministic) {
@@ -349,7 +348,7 @@ void Config::CheckParamConflict() {
   }
   // force gpu_use_dp for non-single GPU CUDA version
   if (device_type == std::string("cuda") &&
-    (num_gpu > 1 || tree_learner != std::string("serial")) && !gpu_use_dp) {
+    tree_learner != std::string("serial") && !gpu_use_dp) {
     Log::Warning("CUDA currently requires double precision calculations.");
     gpu_use_dp = true;
   }

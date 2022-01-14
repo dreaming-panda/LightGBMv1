@@ -42,6 +42,8 @@ class CUDABinaryLogloss : public CUDAObjectiveInterface, public BinaryLogloss {
     };
   }
 
+  void SetNCCLComm(ncclComm_t* nccl_comm) override;
+
  private:
   void LaunchGetGradientsKernel(const double* scores, score_t* gradients, score_t* hessians) const;
 
@@ -60,6 +62,9 @@ class CUDABinaryLogloss : public CUDAObjectiveInterface, public BinaryLogloss {
   double* cuda_boost_from_score_;
   double* cuda_label_weights_;
   const int ova_class_id_ = -1;
+
+  bool use_nccl_;
+  ncclComm_t* nccl_comm_;
 };
 
 }  // namespace LightGBM

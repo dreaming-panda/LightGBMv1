@@ -12,6 +12,10 @@
 #include <string>
 #include <vector>
 
+#ifdef USE_CUDA
+#include <nccl.h>
+#endif  // USE_CUDA
+
 namespace LightGBM {
 
 using json11::Json;
@@ -104,6 +108,10 @@ class TreeLearner {
   static TreeLearner* CreateTreeLearner(const std::string& learner_type,
                                         const std::string& device_type,
                                         const Config* config);
+
+  #ifdef USE_CUDA
+  virtual void SetNCCL(ncclComm_t* /*comm*/, int /*gpu_rank*/, int /*gpu_device_id*/) {}
+  #endif  // USE_CUDA
 };
 
 }  // namespace LightGBM

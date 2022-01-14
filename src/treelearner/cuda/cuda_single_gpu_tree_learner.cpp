@@ -18,7 +18,17 @@
 
 namespace LightGBM {
 
-CUDASingleGPUTreeLearner::CUDASingleGPUTreeLearner(const Config* config): SerialTreeLearner(config) {}
+CUDASingleGPUTreeLearner::CUDASingleGPUTreeLearner(const Config* config): SerialTreeLearner(config) {
+  nccl_comm_ = nullptr;
+  gpu_rank_ = -1;
+  gpu_device_id_ = -1;
+}
+
+void CUDASingleGPUTreeLearner::SetNCCL(ncclComm_t* comm, int gpu_rank, int gpu_device_id) {
+  nccl_comm_ = comm;
+  gpu_rank_ = gpu_rank;
+  gpu_device_id_ = gpu_device_id;
+}
 
 CUDASingleGPUTreeLearner::~CUDASingleGPUTreeLearner() {}
 
@@ -26,8 +36,10 @@ void CUDASingleGPUTreeLearner::Init(const Dataset* train_data, bool is_constant_
   SerialTreeLearner::Init(train_data, is_constant_hessian);
   num_threads_ = OMP_NUM_THREADS();
   // use the first gpu by default
-  gpu_device_id_ = config_->gpu_device_id >= 0 ? config_->gpu_device_id : 0;
-  CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_device_id_));
+  if (nccl_comm_ == nullptr) {
+    gpu_device_id_ = config_->gpu_device_id >= 0 ? config_->gpu_device_id : 0;
+    CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_device_id_));
+  }
 
   cuda_smaller_leaf_splits_.reset(new CUDALeafSplits(num_data_));
   cuda_smaller_leaf_splits_->Init(config_->gpu_use_discretized_grad);
@@ -128,7 +140,7 @@ Tree* CUDASingleGPUTreeLearner::Train(const score_t* gradients,
   global_timer.Stop("CUDASingleGPUTreeLearner::BeforeTrain");
   const bool track_branch_features = !(config_->interaction_constraints_vector.empty());
   std::unique_ptr<CUDATree> tree(new CUDATree(config_->num_leaves, track_branch_features,
-    config_->linear_tree, config_->gpu_device_id, has_categorical_feature_));
+    config_->linear_tree, gpu_device_id_, has_categorical_feature_));
   for (int i = 0; i < config_->num_leaves - 1; ++i) {
     global_timer.Start("CUDASingleGPUTreeLearner::ConstructHistogramForLeaf");
     const data_size_t num_data_in_smaller_leaf = leaf_num_data_[smaller_leaf_index_];
@@ -142,14 +154,6 @@ Tree* CUDASingleGPUTreeLearner::Train(const score_t* gradients,
       num_data_in_larger_leaf,
       sum_hessians_in_smaller_leaf,
       sum_hessians_in_larger_leaf);
-
-    /*if (config_->gpu_use_discretized_grad) {
-      const auto& feature_hist_offsets = share_state_->feature_hist_offsets();
-      const int num_total_bin = feature_hist_offsets.empty() ? 0 : static_cast<int>(feature_hist_offsets.back());
-      //Log::Warning("smaller_leaf_index = %d, larger_leaf_index = %d", smaller_leaf_index_, larger_leaf_index_);
-      cuda_gradient_discretizer_->ScaleHistogram(num_total_bin, cuda_smaller_leaf_splits_->GetCUDAStructRef(),
-        cuda_histogram_constructor_->cuda_stream());
-    }*/
     global_timer.Stop("CUDASingleGPUTreeLearner::ConstructHistogramForLeaf");
 
     cuda_histogram_constructor_->SubtractHistogramForLeaf(
@@ -312,6 +316,7 @@ void CUDASingleGPUTreeLearner::ResetTrainingData(
 void CUDASingleGPUTreeLearner::ResetConfig(const Config* config) {
   const int old_num_leaves = config_->num_leaves;
   SerialTreeLearner::ResetConfig(config);
+  // TODO(shiyu1994): be careful here when using with NCCLGBDT
   if (config_->gpu_device_id >= 0 && config_->gpu_device_id != gpu_device_id_) {
     Log::Fatal("Changing gpu device ID by resetting configuration parameter is not allowed for CUDA tree learner.");
   }
@@ -375,8 +380,8 @@ void CUDASingleGPUTreeLearner::RenewTreeOutput(Tree* tree, const ObjectiveFuncti
         tree->SetLeafOutput(i, outputs[i] / n_nozeroworker_perleaf[i]);
       }
     }
+    cuda_tree->SyncLeafOutputFromHostToCUDA();
   }
-  cuda_tree->SyncLeafOutputFromHostToCUDA();
 }
 
 Tree* CUDASingleGPUTreeLearner::FitByExistingTree(const Tree* old_tree, const score_t* gradients, const score_t* hessians) const {

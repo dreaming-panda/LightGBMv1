@@ -50,6 +50,8 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
   Tree* FitByExistingTree(const Tree* old_tree, const std::vector<int>& leaf_pred,
                           const score_t* gradients, const score_t* hessians) const override;
 
+  void SetNCCL(ncclComm_t* comm, int gpu_rank, int gpu_device_id) override;
+
  protected:
   void BeforeTrain() override;
 
@@ -117,6 +119,8 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
   size_t* cuda_block_bitset_len_buffer_;
   int* cuda_categorical_bin_to_value_;
   int* cuda_categorical_bin_offsets_;
+  ncclComm_t* nccl_comm_;
+  int gpu_rank_;
 };
 
 }  // namespace LightGBM

@@ -12,6 +12,7 @@
 #include <LightGBM/cuda/cuda_utils.h>
 #include <LightGBM/objective_function.h>
 #include <LightGBM/meta.h>
+#include <nccl.h>
 
 namespace LightGBM {
 

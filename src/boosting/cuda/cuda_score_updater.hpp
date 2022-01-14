@@ -3,6 +3,11 @@
  * Licensed under the MIT License. See LICENSE file in the project root for license information.
  */
 
+#ifndef LIGHTGBM_BOOSTING_CUDA_CUDA_SCORE_UPDATER_HPP_
+#define LIGHTGBM_BOOSTING_CUDA_CUDA_SCORE_UPDATER_HPP_
+
+#ifdef USE_CUDA
+
 #include <LightGBM/cuda/cuda_utils.h>
 
 #include "../score_updater.hpp"
@@ -46,3 +51,6 @@ class CUDAScoreUpdater: public ScoreUpdater {
 };
 
 }  // namespace LightGBM
+
+#endif  // LightGBM
+#endif  // LIGHTGBM_BOOSTING_CUDA_CUDA_SCORE_UPDATER_HPP_

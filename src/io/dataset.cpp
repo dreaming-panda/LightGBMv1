@@ -863,6 +863,75 @@ void Dataset::CopySubrow(const Dataset* fullset,
   #endif  // USE_CUDA
 }
 
+#ifdef USE_CUDA
+void Dataset::CopySubrow(const Dataset* fullset,
+                         const data_size_t* used_indices,
+                         data_size_t num_used_indices, bool need_meta_data,
+                         data_size_t data_start,
+                         data_size_t data_end,
+                         int gpu_index) {
+  CHECK_EQ(num_used_indices, num_data_);
+  std::vector<int> group_ids, subfeature_ids;
+  group_ids.reserve(num_features_);
+  subfeature_ids.reserve(num_features_);
+  for (int group = 0; group < num_groups_; ++group) {
+    if (fullset->IsMultiGroup(group)) {
+      for (int sub_feature = 0; sub_feature <
+          fullset->feature_groups_[group]->num_feature_; ++sub_feature) {
+        group_ids.emplace_back(group);
+        subfeature_ids.emplace_back(sub_feature);
+      }
+    } else {
+      group_ids.emplace_back(group);
+      subfeature_ids.emplace_back(-1);
+    }
+  }
+  int num_copy_tasks = static_cast<int>(group_ids.size());
+
+  OMP_INIT_EX();
+  #pragma omp parallel for schedule(dynamic)
+  for (int task_id = 0; task_id < num_copy_tasks; ++task_id) {
+    OMP_LOOP_EX_BEGIN();
+    int group = group_ids[task_id];
+    int subfeature = subfeature_ids[task_id];
+    feature_groups_[group]->CopySubrowByCol(fullset->feature_groups_[group].get(),
+                                            used_indices, num_used_indices, subfeature);
+    OMP_LOOP_EX_END();
+  }
+  OMP_THROW_EX();
+
+  if (need_meta_data) {
+    metadata_.Init(fullset->metadata_, used_indices, num_used_indices);
+  }
+  is_finish_load_ = true;
+  numeric_feature_map_ = fullset->numeric_feature_map_;
+  num_numeric_features_ = fullset->num_numeric_features_;
+  if (has_raw_) {
+    ResizeRaw(num_used_indices);
+#pragma omp parallel for schedule(static)
+    for (int i = 0; i < num_used_indices; ++i) {
+      for (int j = 0; j < num_numeric_features_; ++j) {
+        raw_data_[j][i] = fullset->raw_data_[j][used_indices[i]];
+      }
+    }
+  }
+  // update CUDA storage for column data and metadata
+  device_type_ = fullset->device_type_;
+  gpu_device_id_ = gpu_index;
+
+  if (device_type_ == std::string("cuda")) {
+    global_timer.Start("prepare subset cuda column data");
+    cuda_column_data_.reset(new CUDAColumnData(fullset->num_data(), gpu_device_id_));
+    metadata_.CreateCUDAMetadata(gpu_device_id_);
+    global_timer.Start("copy subset cuda column data");
+    cuda_column_data_->CopyBlock(fullset->cuda_column_data(), data_start, data_end, used_indices, num_used_indices);
+    global_timer.Stop("copy subset cuda column data");
+    global_timer.Stop("prepare subset cuda column data");
+  }
+}
+
+#endif  // USE_CUDA
+
 bool Dataset::SetFloatField(const char* field_name, const float* field_data,
                             data_size_t num_element) {
   std::string name(field_name);

@@ -9,6 +9,8 @@
 #include "goss.hpp"
 #include "rf.hpp"
 
+#include "cuda/nccl_gbdt.hpp"
+
 namespace LightGBM {
 
 std::string GetBoostingTypeFromModelFile(const char* filename) {
@@ -32,10 +34,14 @@ bool Boosting::LoadFileToBoosting(Boosting* boosting, const char* filename) {
   return true;
 }
 
-Boosting* Boosting::CreateBoosting(const std::string& type, const char* filename) {
+Boosting* Boosting::CreateBoosting(const std::string& type, const char* filename, const std::string& device_type, const int num_gpu) {
   if (filename == nullptr || filename[0] == '\0') {
     if (type == std::string("gbdt")) {
-      return new GBDT();
+      if (device_type == std::string("cuda") && num_gpu > 1) {
+        return new NCCLGBDT<GBDT>();
+      } else {
+        return new GBDT();
+      }
     } else if (type == std::string("dart")) {
       return new DART();
     } else if (type == std::string("goss")) {

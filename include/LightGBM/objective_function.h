@@ -12,6 +12,10 @@
 #include <string>
 #include <functional>
 
+#ifdef USE_CUDA
+#include <nccl.h>
+#endif  // USE_CUDA
+
 namespace LightGBM {
 /*!
 * \brief The interface of Objective Function.
@@ -95,6 +99,10 @@ class ObjectiveFunction {
   virtual std::function<void(data_size_t, const double*, double*)> GetCUDAConvertOutputFunc() const {
     return [] (data_size_t, const double*, double*) {};
   }
+
+  #ifdef USE_CUDA
+  virtual void SetNCCLComm(ncclComm_t* /*nccl_comm*/) {}
+  #endif  // USE_CUDA
 };
 
 }  // namespace LightGBM
