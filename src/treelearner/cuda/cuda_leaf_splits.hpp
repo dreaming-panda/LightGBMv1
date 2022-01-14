@@ -13,6 +13,8 @@
 #include <LightGBM/utils/log.h>
 #include <LightGBM/meta.h>
 
+#include <nccl.h>
+
 #define NUM_THRADS_PER_BLOCK_LEAF_SPLITS (1024)
 #define NUM_DATA_THREAD_ADD_LEAF_SPLITS (6)
 
@@ -38,6 +40,11 @@ class CUDALeafSplits {
   ~CUDALeafSplits();
 
   void Init(const bool gpu_use_discretized_grad);
+
+  void SetNCCL(ncclComm_t* nccl_comm) {
+    use_nccl_ = true;
+    nccl_comm_ = nccl_comm;
+  }
 
   void InitValues(
     const double lambda_l1, const double lambda_l2,
@@ -171,6 +178,9 @@ class CUDALeafSplits {
   // CUDA memory, held by other object
   const score_t* cuda_gradients_;
   const score_t* cuda_hessians_;
+
+  bool use_nccl_;
+  ncclComm_t* nccl_comm_;
 };
 
 }  // namespace LightGBM

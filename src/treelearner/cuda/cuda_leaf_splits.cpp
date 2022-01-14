@@ -15,6 +15,7 @@ num_data_(num_data) {
   cuda_struct_ = nullptr;
   cuda_sum_of_gradients_buffer_ = nullptr;
   cuda_sum_of_hessians_buffer_ = nullptr;
+  use_nccl_ = false;
 }
 
 CUDALeafSplits::~CUDALeafSplits() {

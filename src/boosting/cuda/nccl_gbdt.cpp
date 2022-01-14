@@ -80,7 +80,7 @@ void NCCLGBDT<GBDT_T>::Init(
       this->config_->tree_learner,
       this->config_->device_type,
       this->config_.get()));
-    per_gpu_tree_learners_[gpu_index]->SetNCCL(&nccl_communicators_[gpu_index], nccl_gpu_rank_[gpu_index], gpu_index);
+    per_gpu_tree_learners_[gpu_index]->SetNCCL(&nccl_communicators_[gpu_index], nccl_gpu_rank_[gpu_index], gpu_index, this->num_data_);
     per_gpu_tree_learners_[gpu_index]->Init(per_gpu_datasets_[gpu_index].get(), this->is_constant_hessian_);
   }
 

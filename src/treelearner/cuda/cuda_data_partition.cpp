@@ -61,6 +61,8 @@ CUDADataPartition::CUDADataPartition(
   host_split_info_buffer_ = nullptr;
   cuda_num_data_ = nullptr;
   cuda_add_train_score_ = nullptr;
+
+  nccl_comm_ = nullptr;
 }
 
 CUDADataPartition::~CUDADataPartition() {
@@ -104,8 +106,13 @@ void CUDADataPartition::Init() {
   AllocateCUDAMemory<hist_t*>(&cuda_hist_pool_, static_cast<size_t>(num_leaves_), __FILE__, __LINE__);
   CopyFromHostToCUDADevice<hist_t*>(cuda_hist_pool_, &cuda_hist_, 1, __FILE__, __LINE__);
 
-  AllocateCUDAMemory<int>(&cuda_split_info_buffer_, 16, __FILE__, __LINE__);
-  CUDASUCCESS_OR_FATAL(cudaMallocHost(&host_split_info_buffer_, 16 * sizeof(int)));
+  if (nccl_comm_ == nullptr) {
+    AllocateCUDAMemory<int>(&cuda_split_info_buffer_, 16, __FILE__, __LINE__);
+    CUDASUCCESS_OR_FATAL(cudaMallocHost(&host_split_info_buffer_, 16 * sizeof(int)));
+  } else {
+    AllocateCUDAMemory<int>(&cuda_split_info_buffer_, 18, __FILE__, __LINE__);
+    CUDASUCCESS_OR_FATAL(cudaMallocHost(&host_split_info_buffer_, 18 * sizeof(int)));
+  }
 
   AllocateCUDAMemory<double>(&cuda_leaf_output_, static_cast<size_t>(num_leaves_), __FILE__, __LINE__);
 
@@ -121,6 +128,10 @@ void CUDADataPartition::Init() {
   use_bagging_ = false;
   used_indices_ = nullptr;
   leaf_indices_sorted_by_leaf_start_.Resize(num_leaves_);
+}
+
+void CUDADataPartition::SetNCCL(ncclComm_t* nccl_comm) {
+  nccl_comm_ = nccl_comm;
 }
 
 void CUDADataPartition::BeforeTrain() {
@@ -165,7 +176,9 @@ void CUDADataPartition::Split(
   double* left_leaf_sum_of_hessians,
   double* right_leaf_sum_of_hessians,
   double* left_leaf_sum_of_gradients,
-  double* right_leaf_sum_of_gradients) {
+  double* right_leaf_sum_of_gradients,
+  data_size_t* global_left_leaf_num_data,
+  data_size_t* global_right_leaf_num_data) {
   CalcBlockDim(num_data_in_leaf);
   global_timer.Start("GenDataToLeftBitVector");
   GenDataToLeftBitVector(num_data_in_leaf,
@@ -193,7 +206,9 @@ void CUDADataPartition::Split(
              left_leaf_sum_of_hessians,
              right_leaf_sum_of_hessians,
              left_leaf_sum_of_gradients,
-             right_leaf_sum_of_gradients);
+             right_leaf_sum_of_gradients,
+             global_left_leaf_num_data,
+             global_right_leaf_num_data);
   global_timer.Stop("SplitInner");
 }
 
@@ -244,7 +259,9 @@ void CUDADataPartition::SplitInner(
   double* left_leaf_sum_of_hessians,
   double* right_leaf_sum_of_hessians,
   double* left_leaf_sum_of_gradients,
-  double* right_leaf_sum_of_gradients) {
+  double* right_leaf_sum_of_gradients,
+  data_size_t* global_left_leaf_num_data,
+  data_size_t* global_right_leaf_num_data) {
   LaunchSplitInnerKernel(
     num_data_in_leaf,
     best_split_info,
@@ -259,7 +276,9 @@ void CUDADataPartition::SplitInner(
     left_leaf_sum_of_hessians,
     right_leaf_sum_of_hessians,
     left_leaf_sum_of_gradients,
-    right_leaf_sum_of_gradients);
+    right_leaf_sum_of_gradients,
+    global_left_leaf_num_data,
+    global_right_leaf_num_data);
   ++cur_num_leaves_;
 }
 

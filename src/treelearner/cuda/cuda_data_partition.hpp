@@ -39,6 +39,8 @@ class CUDADataPartition {
 
   void Init();
 
+  void SetNCCL(ncclComm_t* nccl_comm);
+
   void BeforeTrain();
 
   void Split(
@@ -64,7 +66,9 @@ class CUDADataPartition {
     double* left_leaf_sum_of_hessians,
     double* right_leaf_sum_of_hessians,
     double* left_leaf_sum_of_gradients,
-    double* right_leaf_sum_of_gradients);
+    double* right_leaf_sum_of_gradients,
+    data_size_t* global_left_leaf_num_data,
+    data_size_t* global_right_leaf_num_data);
 
   void UpdateTrainScore(const Tree* tree, double* cuda_scores);
 
@@ -131,7 +135,9 @@ class CUDADataPartition {
     double* left_leaf_sum_of_hessians,
     double* right_leaf_sum_of_hessians,
     double* left_leaf_sum_of_gradients,
-    double* right_leaf_sum_of_gradients);
+    double* right_leaf_sum_of_gradients,
+    data_size_t* global_left_leaf_num_data,
+    data_size_t* global_right_leaf_num_data);
 
   // kernel launch functions
   void LaunchFillDataIndicesBeforeTrain();
@@ -153,7 +159,9 @@ class CUDADataPartition {
     double* left_leaf_sum_of_hessians,
     double* right_leaf_sum_of_hessians,
     double* left_leaf_sum_of_gradients,
-    double* right_leaf_sum_of_gradients);
+    double* right_leaf_sum_of_gradients,
+    data_size_t* global_left_leaf_num_data,
+    data_size_t* global_right_leaf_num_data);
 
   void LaunchGenDataToLeftBitVectorKernel(
     const data_size_t num_data_in_leaf,
@@ -378,6 +386,9 @@ class CUDADataPartition {
   // dataset information
   /*! \brief beginning of histograms, for initialization of cuda_hist_pool_ */
   hist_t* cuda_hist_;
+
+  // for NCCL
+  ncclComm_t* nccl_comm_;
 };
 
 }  // namespace LightGBM

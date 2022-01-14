@@ -50,7 +50,7 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
   Tree* FitByExistingTree(const Tree* old_tree, const std::vector<int>& leaf_pred,
                           const score_t* gradients, const score_t* hessians) const override;
 
-  void SetNCCL(ncclComm_t* comm, int gpu_rank, int gpu_device_id) override;
+  void SetNCCL(ncclComm_t* comm, int gpu_rank, int gpu_device_id, data_size_t global_num_data) override;
 
  protected:
   void BeforeTrain() override;
@@ -74,6 +74,8 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
   void RenewDiscretizedTreeLeaves(CUDATree* cuda_tree);
 
   void LaunchCalcLeafValuesGivenGradStat(CUDATree* cuda_tree, const data_size_t* num_data_in_leaf);
+
+  void NCCLReduceHistogram();
 
   // GPU device ID
   int gpu_device_id_;
@@ -121,6 +123,13 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
   int* cuda_categorical_bin_offsets_;
   ncclComm_t* nccl_comm_;
   int gpu_rank_;
+
+  // used with NCCL
+  std::vector<int> leaf_to_hist_index_map_;
+  int num_total_bin_;
+  cudaStream_t nccl_stream_;
+  std::vector<data_size_t> global_num_data_in_leaf_;
+  data_size_t global_num_data_;
 };
 
 }  // namespace LightGBM

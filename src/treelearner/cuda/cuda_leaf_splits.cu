@@ -33,6 +33,65 @@ __global__ void CUDAInitValuesKernel1(const score_t* cuda_gradients, const score
   }
 }
 
+__global__ void ReduceGradKernel(
+  const int num_blocks_to_reduce,
+  double* cuda_sum_of_gradients,
+  double* cuda_sum_of_hessians,
+  const data_size_t num_data) {
+  __shared__ double shared_mem_buffer[32];
+  double thread_sum_of_gradients = 0.0f;
+  double thread_sum_of_hessians = 0.0f;
+  for (int block_index = static_cast<int>(threadIdx.x); block_index < num_blocks_to_reduce; block_index += static_cast<int>(blockDim.x)) {
+    thread_sum_of_gradients += cuda_sum_of_gradients[block_index];
+    thread_sum_of_hessians += cuda_sum_of_hessians[block_index];
+  }
+  const double sum_of_gradients = ShuffleReduceSum<double>(thread_sum_of_gradients, shared_mem_buffer, blockDim.x);
+  __syncthreads();
+  const double sum_of_hessians = ShuffleReduceSum<double>(thread_sum_of_hessians, shared_mem_buffer, blockDim.x);
+  if (threadIdx.x == 0) {
+    cuda_sum_of_gradients[0] = sum_of_gradients;
+    cuda_sum_of_hessians[0] = sum_of_hessians;
+  }
+}
+
+__global__ void CUDAInitSetValuesKernel(
+  const double lambda_l1,
+  const double lambda_l2,
+  double* cuda_sum_of_gradients,
+  double* cuda_sum_of_hessians,
+  const data_size_t num_data,
+  const data_size_t* cuda_data_indices_in_leaf,
+  hist_t* cuda_hist_in_leaf,
+  CUDALeafSplitsStruct* cuda_struct) {
+  if (threadIdx.x == 0) {
+    const double sum_of_gradients = cuda_sum_of_gradients[0];
+    const double sum_of_hessians = cuda_sum_of_hessians[0];
+    cuda_struct->leaf_index = 0;
+    cuda_struct->sum_of_gradients = sum_of_gradients;
+    cuda_struct->sum_of_hessians = sum_of_hessians;
+    cuda_struct->num_data_in_leaf = num_data;
+    const bool use_l1 = lambda_l1 > 0.0f;
+    if (!use_l1) {
+      // no smoothing on root node
+      cuda_struct->gain = CUDALeafSplits::GetLeafGain<false, false>(sum_of_gradients, sum_of_hessians, lambda_l1, lambda_l2, 0.0f, 0, 0.0f);
+    } else {
+      // no smoothing on root node
+      cuda_struct->gain = CUDALeafSplits::GetLeafGain<true, false>(sum_of_gradients, sum_of_hessians, lambda_l1, lambda_l2, 0.0f, 0, 0.0f);
+    }
+    if (!use_l1) {
+      // no smoothing on root node
+      cuda_struct->leaf_value =
+        CUDALeafSplits::CalculateSplittedLeafOutput<false, false>(sum_of_gradients, sum_of_hessians, lambda_l1, lambda_l2, 0.0f, 0, 0.0f);
+    } else {
+      // no smoothing on root node
+      cuda_struct->leaf_value =
+        CUDALeafSplits::CalculateSplittedLeafOutput<true, false>(sum_of_gradients, sum_of_hessians, lambda_l1, lambda_l2, 0.0f, 0, 0.0f);
+    }
+    cuda_struct->data_indices_in_leaf = cuda_data_indices_in_leaf;
+    cuda_struct->hist_in_leaf = cuda_hist_in_leaf;
+  }
+}
+
 __global__ void CUDAInitValuesKernel2(
   const double lambda_l1,
   const double lambda_l2,
@@ -105,6 +164,77 @@ __global__ void CUDAInitValuesKernel3(const int16_t* cuda_gradients_and_hessians
     cuda_sum_of_gradients[blockIdx.x] = block_sum_gradient * grad_scale;
     cuda_sum_of_hessians[blockIdx.x] = block_sum_hessian * hess_scale;
     cuda_sum_of_hessians_hessians[blockIdx.x] = ((block_sum_gradient << 32) | block_sum_hessian);
+  }
+}
+
+__global__ void ReduceGradKernel(
+  const int num_blocks_to_reduce,
+  double* cuda_sum_of_gradients,
+  double* cuda_sum_of_hessians,
+  int64_t* cuda_sum_of_gradients_hessians,
+  const data_size_t num_data) {
+  __shared__ double shared_mem_buffer[32];
+  double thread_sum_of_gradients = 0.0f;
+  double thread_sum_of_hessians = 0.0f;
+  int64_t thread_sum_of_gradients_hessians = 0;
+  for (int block_index = static_cast<int>(threadIdx.x); block_index < num_blocks_to_reduce; block_index += static_cast<int>(blockDim.x)) {
+    thread_sum_of_gradients += cuda_sum_of_gradients[block_index];
+    thread_sum_of_hessians += cuda_sum_of_hessians[block_index];
+    thread_sum_of_gradients_hessians += cuda_sum_of_gradients_hessians[block_index];
+  }
+  const double sum_of_gradients = ShuffleReduceSum<double>(thread_sum_of_gradients, shared_mem_buffer, blockDim.x);
+  __syncthreads();
+  const double sum_of_hessians = ShuffleReduceSum<double>(thread_sum_of_hessians, shared_mem_buffer, blockDim.x);
+  __syncthreads();
+  const int64_t sum_of_gradients_hessians = ShuffleReduceSum<int64_t>(
+    thread_sum_of_gradients_hessians,
+    reinterpret_cast<int64_t*>(shared_mem_buffer),
+    blockDim.x);
+  if (threadIdx.x == 0) {
+    cuda_sum_of_gradients[0] = sum_of_gradients;
+    cuda_sum_of_hessians[0] = sum_of_hessians;
+    cuda_sum_of_gradients_hessians[0] = sum_of_gradients_hessians;
+  }
+}
+
+__global__ void CUDAInitSetValuesKernel(
+  const double lambda_l1,
+  const double lambda_l2,
+  double* cuda_sum_of_gradients,
+  double* cuda_sum_of_hessians,
+  int64_t* cuda_sum_of_gradients_hessians,
+  const data_size_t num_data,
+  const data_size_t* cuda_data_indices_in_leaf,
+  hist_t* cuda_hist_in_leaf,
+  CUDALeafSplitsStruct* cuda_struct) {
+  if (threadIdx.x == 0) {
+    const double sum_of_gradients = cuda_sum_of_gradients[0];
+    const double sum_of_hessians = cuda_sum_of_hessians[0];
+    const int64_t sum_of_gradients_hessians = cuda_sum_of_gradients_hessians[0];
+    cuda_struct->leaf_index = 0;
+    cuda_struct->sum_of_gradients = sum_of_gradients;
+    cuda_struct->sum_of_hessians = sum_of_hessians;
+    cuda_struct->sum_of_gradients_hessians = sum_of_gradients_hessians;
+    cuda_struct->num_data_in_leaf = num_data;
+    const bool use_l1 = lambda_l1 > 0.0f;
+    if (!use_l1) {
+      // no smoothing on root node
+      cuda_struct->gain = CUDALeafSplits::GetLeafGain<false, false>(sum_of_gradients, sum_of_hessians, lambda_l1, lambda_l2, 0.0f, 0, 0.0f);
+    } else {
+      // no smoothing on root node
+      cuda_struct->gain = CUDALeafSplits::GetLeafGain<true, false>(sum_of_gradients, sum_of_hessians, lambda_l1, lambda_l2, 0.0f, 0, 0.0f);
+    }
+    if (!use_l1) {
+      // no smoothing on root node
+      cuda_struct->leaf_value =
+        CUDALeafSplits::CalculateSplittedLeafOutput<false, false>(sum_of_gradients, sum_of_hessians, lambda_l1, lambda_l2, 0.0f, 0, 0.0f);
+    } else {
+      // no smoothing on root node
+      cuda_struct->leaf_value =
+        CUDALeafSplits::CalculateSplittedLeafOutput<true, false>(sum_of_gradients, sum_of_hessians, lambda_l1, lambda_l2, 0.0f, 0, 0.0f);
+    }
+    cuda_struct->data_indices_in_leaf = cuda_data_indices_in_leaf;
+    cuda_struct->hist_in_leaf = cuda_hist_in_leaf;
   }
 }
 
@@ -195,17 +325,36 @@ void CUDALeafSplits::LaunchInitValuesKernal(
       cuda_gradients_, cuda_hessians_, num_used_indices, cuda_bagging_data_indices, cuda_sum_of_gradients_buffer_,
       cuda_sum_of_hessians_buffer_);
   }
-  SynchronizeCUDADevice(__FILE__, __LINE__);
-  CUDAInitValuesKernel2<<<1, NUM_THRADS_PER_BLOCK_LEAF_SPLITS>>>(
-    lambda_l1, lambda_l2,
-    num_blocks_init_from_gradients_,
-    cuda_sum_of_gradients_buffer_,
-    cuda_sum_of_hessians_buffer_,
-    num_used_indices,
-    cuda_data_indices_in_leaf,
-    cuda_hist_in_leaf,
-    cuda_struct_);
-  SynchronizeCUDADevice(__FILE__, __LINE__);
+  if (use_nccl_) {
+    ReduceGradKernel<<<1, NUM_THRADS_PER_BLOCK_LEAF_SPLITS>>>(num_blocks_init_from_gradients_, cuda_sum_of_gradients_buffer_,
+      cuda_sum_of_hessians_buffer_, num_used_indices);
+    SynchronizeCUDADevice(__FILE__, __LINE__);
+
+    cudaStream_t cuda_stream;
+    CUDASUCCESS_OR_FATAL(cudaStreamCreate(&cuda_stream));
+    NCCLCHECK(ncclGroupStart());
+    NCCLCHECK(ncclAllReduce(cuda_sum_of_gradients_buffer_, cuda_sum_of_gradients_buffer_, 1, ncclFloat64, ncclSum, *nccl_comm_, cuda_stream));
+    NCCLCHECK(ncclAllReduce(cuda_sum_of_hessians_buffer_, cuda_sum_of_hessians_buffer_, 1, ncclFloat64, ncclSum, *nccl_comm_, cuda_stream));
+    NCCLCHECK(ncclGroupEnd());
+    CUDASUCCESS_OR_FATAL(cudaStreamSynchronize(cuda_stream));
+    CUDASUCCESS_OR_FATAL(cudaStreamDestroy(cuda_stream));
+    CUDAInitSetValuesKernel<<<1, 1>>>(lambda_l1, lambda_l2, cuda_sum_of_gradients_buffer_,
+      cuda_sum_of_hessians_buffer_, num_used_indices,
+      cuda_data_indices_in_leaf, cuda_hist_in_leaf, cuda_struct_);
+    SynchronizeCUDADevice(__FILE__, __LINE__);
+  } else {
+    SynchronizeCUDADevice(__FILE__, __LINE__);
+    CUDAInitValuesKernel2<<<1, NUM_THRADS_PER_BLOCK_LEAF_SPLITS>>>(
+      lambda_l1, lambda_l2,
+      num_blocks_init_from_gradients_,
+      cuda_sum_of_gradients_buffer_,
+      cuda_sum_of_hessians_buffer_,
+      num_used_indices,
+      cuda_data_indices_in_leaf,
+      cuda_hist_in_leaf,
+      cuda_struct_);
+    SynchronizeCUDADevice(__FILE__, __LINE__);
+  }
 }
 
 void CUDALeafSplits::LaunchInitValuesKernal(
@@ -225,18 +374,40 @@ void CUDALeafSplits::LaunchInitValuesKernal(
       reinterpret_cast<const int16_t*>(cuda_gradients_), num_used_indices, cuda_bagging_data_indices, cuda_sum_of_gradients_buffer_,
       cuda_sum_of_hessians_buffer_, cuda_sum_of_gradients_hessians_buffer_, grad_scale, hess_scale);
   }
-  SynchronizeCUDADevice(__FILE__, __LINE__);
-  CUDAInitValuesKernel4<<<1, NUM_THRADS_PER_BLOCK_LEAF_SPLITS>>>(
-    lambda_l1, lambda_l2,
-    num_blocks_init_from_gradients_,
-    cuda_sum_of_gradients_buffer_,
-    cuda_sum_of_hessians_buffer_,
-    cuda_sum_of_gradients_hessians_buffer_,
-    num_used_indices,
-    cuda_data_indices_in_leaf,
-    cuda_hist_in_leaf,
-    cuda_struct_);
-  SynchronizeCUDADevice(__FILE__, __LINE__);
+
+  if (use_nccl_) {
+    ReduceGradKernel<<<1, NUM_THRADS_PER_BLOCK_LEAF_SPLITS>>>(num_blocks_init_from_gradients_,
+      cuda_sum_of_gradients_buffer_, cuda_sum_of_hessians_buffer_, cuda_sum_of_gradients_hessians_buffer_,
+      num_used_indices);
+    SynchronizeCUDADevice(__FILE__, __LINE__);
+
+    cudaStream_t cuda_stream;
+    CUDASUCCESS_OR_FATAL(cudaStreamCreate(&cuda_stream));
+    NCCLCHECK(ncclGroupStart());
+    NCCLCHECK(ncclAllReduce(cuda_sum_of_gradients_buffer_, cuda_sum_of_gradients_buffer_, 1, ncclFloat64, ncclSum, *nccl_comm_, cuda_stream));
+    NCCLCHECK(ncclAllReduce(cuda_sum_of_hessians_buffer_, cuda_sum_of_hessians_buffer_, 1, ncclFloat64, ncclSum, *nccl_comm_, cuda_stream));
+    NCCLCHECK(ncclAllReduce(cuda_sum_of_gradients_hessians_buffer_, cuda_sum_of_gradients_hessians_buffer_, 1, ncclInt64, ncclSum, *nccl_comm_, cuda_stream));
+    NCCLCHECK(ncclGroupEnd());
+    CUDASUCCESS_OR_FATAL(cudaStreamSynchronize(cuda_stream));
+    CUDASUCCESS_OR_FATAL(cudaStreamDestroy(cuda_stream));
+    CUDAInitSetValuesKernel<<<1, 1>>>(lambda_l1, lambda_l2, cuda_sum_of_gradients_buffer_,
+      cuda_sum_of_hessians_buffer_, cuda_sum_of_gradients_hessians_buffer_, num_used_indices,
+      cuda_data_indices_in_leaf, cuda_hist_in_leaf, cuda_struct_);
+    SynchronizeCUDADevice(__FILE__, __LINE__);
+  } else {
+    SynchronizeCUDADevice(__FILE__, __LINE__);
+    CUDAInitValuesKernel4<<<1, NUM_THRADS_PER_BLOCK_LEAF_SPLITS>>>(
+      lambda_l1, lambda_l2,
+      num_blocks_init_from_gradients_,
+      cuda_sum_of_gradients_buffer_,
+      cuda_sum_of_hessians_buffer_,
+      cuda_sum_of_gradients_hessians_buffer_,
+      num_used_indices,
+      cuda_data_indices_in_leaf,
+      cuda_hist_in_leaf,
+      cuda_struct_);
+    SynchronizeCUDADevice(__FILE__, __LINE__);
+  }
 }
 
 }  // namespace LightGBM

@@ -110,7 +110,7 @@ class TreeLearner {
                                         const Config* config);
 
   #ifdef USE_CUDA
-  virtual void SetNCCL(ncclComm_t* /*comm*/, int /*gpu_rank*/, int /*gpu_device_id*/) {}
+  virtual void SetNCCL(ncclComm_t* /*comm*/, int /*gpu_rank*/, int /*gpu_device_id*/, data_size_t /*global_num_data*/) {}
   #endif  // USE_CUDA
 };
 
