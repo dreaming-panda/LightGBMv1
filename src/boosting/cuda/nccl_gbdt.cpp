@@ -304,6 +304,14 @@ bool NCCLGBDT<GBDT_T>::TrainOneIter(const score_t* gradients, const score_t* hes
     
     // add model
     this->models_.push_back(std::move(new_tree[master_gpu_device_id_]));
+
+    for (int gpu_index = 0; gpu_index < num_gpu_; ++gpu_index) {
+      if (gpu_index != master_gpu_device_id_) {
+        CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
+        new_tree[gpu_index].reset(nullptr);
+      }
+    }
+    CUDASUCCESS_OR_FATAL(cudaSetDevice(master_gpu_device_id_));
   }
 
   if (!should_continue) {
