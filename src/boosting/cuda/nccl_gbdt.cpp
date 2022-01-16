@@ -30,11 +30,34 @@ void NCCLGBDT<GBDT_T>::Init(
     num_gpu_ = max_num_gpu;
   }
   int gpu_device_id = this->config_->gpu_device_id;
-  if (gpu_device_id < 0 || gpu_device_id >= num_gpu_) {
-    Log::Warning("Master GPU Device ID %d is not in the valid range [%d, %d], will use GPU 0 as master.", gpu_device_id, 0, max_num_gpu);
-    gpu_device_id = 0;
+  if (this->config_->gpu_device_list == std::string("")) {
+    if (gpu_device_id < 0 || gpu_device_id >= num_gpu_) {
+      Log::Warning("Master GPU Device ID %d is not in the valid range [%d, %d], will use GPU 0 as master.", gpu_device_id, 0, max_num_gpu);
+      gpu_device_id = 0;
+    }
   }
   master_gpu_device_id_ = gpu_device_id;
+  master_gpu_index_ = master_gpu_device_id_;
+
+  if (this->config_->gpu_device_list != std::string("")) {
+    std::vector<std::string> gpu_list_str = Common::Split(this->config_->gpu_device_list.c_str(), ",");
+    for (const auto& gpu_str : gpu_list_str) {
+      int gpu_id = 0;
+      Common::Atoi<int>(gpu_str.c_str(), &gpu_id);
+      gpu_list_.emplace_back(gpu_id);
+    }
+    bool check_master_gpu = false;
+    for (int i = 0; i < static_cast<int>(gpu_list_.size()); ++i) {
+      const int gpu_id = gpu_list_[i];
+      if (gpu_id == master_gpu_device_id_) {
+        master_gpu_index_ = i;
+        check_master_gpu = true;
+      }
+    }
+    if (!check_master_gpu) {
+      Log::Fatal("Master GPU ID %d is not in GPU ID list.", master_gpu_device_id_);
+    }
+  }
 
   InitNCCL();
 
@@ -49,7 +72,7 @@ void NCCLGBDT<GBDT_T>::Init(
   per_gpu_data_end_.resize(num_gpu_);
   per_gpu_datasets_.resize(num_gpu_);
   for (int gpu_index = 0; gpu_index < num_gpu_; ++gpu_index) {
-    CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
+    SetCUDADevice(gpu_index);
     const data_size_t data_start = num_data_per_gpu * gpu_index;
     const data_size_t data_end = std::min(data_start + num_data_per_gpu, this->num_data_);
     const data_size_t num_data_in_gpu = data_end - data_start;
@@ -58,7 +81,7 @@ void NCCLGBDT<GBDT_T>::Init(
     per_gpu_datasets_[gpu_index].reset(new Dataset(num_data_in_gpu));
     per_gpu_datasets_[gpu_index]->ReSize(num_data_in_gpu);
     per_gpu_datasets_[gpu_index]->CopyFeatureMapperFrom(this->train_data_);
-    per_gpu_datasets_[gpu_index]->CopySubrow(this->train_data_, all_data_indices.data() + data_start, num_data_in_gpu, true, data_start, data_end, gpu_index);
+    per_gpu_datasets_[gpu_index]->CopySubrow(this->train_data_, all_data_indices.data() + data_start, num_data_in_gpu, true, data_start, data_end, GetCUDADevice(gpu_index));
   }
 
   // initialize per gpu objectives, training scores and tree learners
@@ -68,7 +91,7 @@ void NCCLGBDT<GBDT_T>::Init(
   per_gpu_hessians_.resize(num_gpu_);
   per_gpu_tree_learners_.resize(num_gpu_);
   for (int gpu_index = 0; gpu_index < num_gpu_; ++gpu_index) {
-    CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
+    SetCUDADevice(gpu_index);
     const data_size_t num_data_in_gpu = per_gpu_data_end_[gpu_index] - per_gpu_data_start_[gpu_index];
     per_gpu_objective_functions_[gpu_index].reset(ObjectiveFunction::CreateObjectiveFunction(this->config_->objective, *(this->config_.get())));
     per_gpu_objective_functions_[gpu_index]->Init(per_gpu_datasets_[gpu_index]->metadata(), per_gpu_datasets_[gpu_index]->num_data());
@@ -80,7 +103,7 @@ void NCCLGBDT<GBDT_T>::Init(
       this->config_->tree_learner,
       this->config_->device_type,
       this->config_.get()));
-    per_gpu_tree_learners_[gpu_index]->SetNCCL(&nccl_communicators_[gpu_index], nccl_gpu_rank_[gpu_index], gpu_index, this->num_data_);
+    per_gpu_tree_learners_[gpu_index]->SetNCCL(&nccl_communicators_[gpu_index], nccl_gpu_rank_[gpu_index], GetCUDADevice(gpu_index), this->num_data_);
     per_gpu_tree_learners_[gpu_index]->Init(per_gpu_datasets_[gpu_index].get(), this->is_constant_hessian_);
   }
 
@@ -90,17 +113,17 @@ void NCCLGBDT<GBDT_T>::Init(
   train_tree_learner_thread_data_.resize(num_gpu_);
   update_score_thread_data_.resize(num_gpu_);
   for (int gpu_index = 0; gpu_index < num_gpu_; ++gpu_index) {
-    boosting_thread_data_[gpu_index].gpu_index = gpu_index;
+    boosting_thread_data_[gpu_index].gpu_index = GetCUDADevice(gpu_index);
     boosting_thread_data_[gpu_index].gpu_objective_function = per_gpu_objective_functions_[gpu_index].get();
     boosting_thread_data_[gpu_index].gradients = per_gpu_gradients_[gpu_index]->RawData();
     boosting_thread_data_[gpu_index].hessians = per_gpu_hessians_[gpu_index]->RawData();
     boosting_thread_data_[gpu_index].score = per_gpu_train_score_updater_[gpu_index]->score();
-    train_tree_learner_thread_data_[gpu_index].gpu_index = gpu_index;
+    train_tree_learner_thread_data_[gpu_index].gpu_index = GetCUDADevice(gpu_index);
     train_tree_learner_thread_data_[gpu_index].gpu_tree_learner = per_gpu_tree_learners_[gpu_index].get();
     train_tree_learner_thread_data_[gpu_index].gradients = per_gpu_gradients_[gpu_index]->RawData();
     train_tree_learner_thread_data_[gpu_index].hessians = per_gpu_hessians_[gpu_index]->RawData();
     train_tree_learner_thread_data_[gpu_index].num_data_in_gpu = per_gpu_data_end_[gpu_index] - per_gpu_data_start_[gpu_index];
-    update_score_thread_data_[gpu_index].gpu_index = gpu_index;
+    update_score_thread_data_[gpu_index].gpu_index = GetCUDADevice(gpu_index);
     update_score_thread_data_[gpu_index].gpu_score_updater = per_gpu_train_score_updater_[gpu_index].get();
     update_score_thread_data_[gpu_index].gpu_tree_learner = per_gpu_tree_learners_[gpu_index].get();
   }
@@ -116,17 +139,18 @@ void NCCLGBDT<GBDT_T>::InitNCCL() {
   ncclUniqueId nccl_unique_id;
   if (Network::num_machines() == 1 || Network::rank() == 0) {
     NCCLCHECK(ncclGetUniqueId(&nccl_unique_id));
-    if (Network::num_machines() > 1) {
-      std::vector<ncclUniqueId> output_buffer(Network::num_machines());
-      Network::Allgather(
-        reinterpret_cast<char*>(&nccl_unique_id),
-        sizeof(ncclUniqueId) / sizeof(char),
-        reinterpret_cast<char*>(output_buffer.data()));
-      if (Network::rank() > 0) {
-        nccl_unique_id = output_buffer[0];
-      }
+  }
+  if (Network::num_machines() > 1) {
+    std::vector<ncclUniqueId> output_buffer(Network::num_machines());
+    Network::Allgather(
+      reinterpret_cast<char*>(&nccl_unique_id),
+      sizeof(ncclUniqueId) / sizeof(char),
+      reinterpret_cast<char*>(output_buffer.data()));
+    if (Network::rank() > 0) {
+      nccl_unique_id = output_buffer[0];
     }
   }
+
   if (Network::num_machines() > 1) {
     std::vector<int> num_gpus_per_machine(Network::num_machines() + 1, 0);
     Network::Allgather(
@@ -139,15 +163,15 @@ void NCCLGBDT<GBDT_T>::InitNCCL() {
     CHECK_EQ(num_gpus_per_machine[Network::rank() + 1] - num_gpus_per_machine[Network::rank()], num_gpu_);
     NCCLCHECK(ncclGroupStart());
     for (int gpu_index = 0; gpu_index < num_gpu_; ++gpu_index) {
-      CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
-      nccl_gpu_rank_[gpu_index] = gpu_index + num_gpus_per_machine[gpu_index];
-      NCCLCHECK(ncclCommInitRank(&nccl_communicators_[gpu_index], num_gpu_, nccl_unique_id, gpu_index + nccl_gpu_rank_[gpu_index]));
+      SetCUDADevice(gpu_index);
+      nccl_gpu_rank_[gpu_index] = gpu_index + num_gpus_per_machine[Network::rank()];
+      NCCLCHECK(ncclCommInitRank(&nccl_communicators_[gpu_index], num_gpus_per_machine.back(), nccl_unique_id, nccl_gpu_rank_[gpu_index]));
     }
     NCCLCHECK(ncclGroupEnd());
   } else {
     NCCLCHECK(ncclGroupStart());
     for (int gpu_index = 0; gpu_index < num_gpu_; ++gpu_index) {
-      CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
+      SetCUDADevice(gpu_index);
       nccl_gpu_rank_[gpu_index] = gpu_index;
       NCCLCHECK(ncclCommInitRank(&nccl_communicators_[gpu_index], num_gpu_, nccl_unique_id, gpu_index));
     }
@@ -194,7 +218,7 @@ template <typename GBDT_T>
 double NCCLGBDT<GBDT_T>::BoostFromAverage(int class_id, bool update_scorer) {
   double init_score = GBDT_T::BoostFromAverage(class_id, update_scorer);
   for (int gpu_index = 0; gpu_index < num_gpu_; ++gpu_index) {
-    CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
+    SetCUDADevice(gpu_index);
     if (std::fabs(init_score) > kEpsilon && update_scorer) {
       per_gpu_train_score_updater_[gpu_index]->AddScore(init_score, class_id);
     }
@@ -231,7 +255,7 @@ bool NCCLGBDT<GBDT_T>::TrainOneIter(const score_t* gradients, const score_t* hes
     Boosting();
   } else {
     for (int gpu_index = 0; gpu_index < num_gpu_; ++gpu_index) {
-      CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
+      SetCUDADevice(gpu_index);
       const data_size_t gpu_data_start = per_gpu_data_start_[gpu_index];
       const data_size_t num_data_in_gpu = per_gpu_data_end_[gpu_index] - gpu_data_start;
       for (int class_id = 0; class_id < this->num_class_; ++class_id) {
@@ -275,14 +299,14 @@ bool NCCLGBDT<GBDT_T>::TrainOneIter(const score_t* gradients, const score_t* hes
       }
     }
 
-    if (new_tree[master_gpu_device_id_]->num_leaves() > 1) {
+    if (new_tree[master_gpu_index_]->num_leaves() > 1) {
       should_continue = true;
       if (this->objective_function_ != nullptr && this->objective_function_->IsRenewTreeOutput()) {
         Log::Fatal("Objective function with renewing is not supported for NCCLGBDT.");
       }
       // shrinkage by learning rate
       for (int gpu_index = 0; gpu_index < num_gpu_; ++gpu_index) {
-        CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
+        SetCUDADevice(gpu_index);
         new_tree[gpu_index]->Shrinkage(this->shrinkage_rate_);
       }
       CUDASUCCESS_OR_FATAL(cudaSetDevice(master_gpu_device_id_));
@@ -290,7 +314,7 @@ bool NCCLGBDT<GBDT_T>::TrainOneIter(const score_t* gradients, const score_t* hes
       UpdateScore(new_tree, cur_tree_id);
       if (std::fabs(init_scores[cur_tree_id]) > kEpsilon) {
         for (int gpu_index = 0; gpu_index < num_gpu_; ++gpu_index) {
-          CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
+          SetCUDADevice(gpu_index);
           new_tree[gpu_index]->AddBias(init_scores[cur_tree_id]);
         }
         CUDASUCCESS_OR_FATAL(cudaSetDevice(master_gpu_device_id_));
@@ -301,13 +325,13 @@ bool NCCLGBDT<GBDT_T>::TrainOneIter(const score_t* gradients, const score_t* hes
         Log::Warning("Training stopped with no splits.");
       }
     }
-    
+
     // add model
-    this->models_.push_back(std::move(new_tree[master_gpu_device_id_]));
+    this->models_.push_back(std::move(new_tree[master_gpu_index_]));
 
     for (int gpu_index = 0; gpu_index < num_gpu_; ++gpu_index) {
       if (gpu_index != master_gpu_device_id_) {
-        CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
+        SetCUDADevice(gpu_index);
         new_tree[gpu_index].reset(nullptr);
       }
     }
@@ -367,7 +391,7 @@ void NCCLGBDT<GBDT_T>::UpdateScore(const std::vector<std::unique_ptr<Tree>>& tre
 
   // update validation score
   for (auto& score_updater : this->valid_score_updater_) {
-    score_updater->AddScore(tree[master_gpu_device_id_].get(), cur_tree_id);
+    score_updater->AddScore(tree[master_gpu_index_].get(), cur_tree_id);
   }
 }
 
@@ -380,7 +404,7 @@ std::vector<double> NCCLGBDT<GBDT_T>::EvalOneMetric(const Metric* metric, const 
       const data_size_t data_start = per_gpu_data_start_[gpu_index];
       const data_size_t num_data_in_gpu = per_gpu_data_end_[gpu_index] - data_start;
       for (int class_id = 0; class_id < this->num_class_; ++class_id) {
-        CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_index));
+        SetCUDADevice(gpu_index);
         CopyFromCUDADeviceToHost<double>(tmp_score.data() + class_id * this->num_data_ + data_start,
           per_gpu_train_score_updater_[gpu_index]->score() + class_id * num_data_in_gpu,
           static_cast<size_t>(num_data_in_gpu), __FILE__, __LINE__);

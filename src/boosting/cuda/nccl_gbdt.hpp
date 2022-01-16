@@ -126,9 +126,27 @@ class NCCLGBDT: public GBDT_T {
 
   std::vector<double> EvalOneMetric(const Metric* metric, const double* score, const data_size_t num_data) const override;
 
+  void SetCUDADevice(int gpu_id) const {
+    if (gpu_list_.empty()) {
+      CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_id));
+    } else {
+      CUDASUCCESS_OR_FATAL(cudaSetDevice(gpu_list_[gpu_id]));
+    }
+  }
+
+  int GetCUDADevice(int gpu_id) const {
+    if (gpu_list_.empty()) {
+      return gpu_id;
+    } else {
+      return gpu_list_[gpu_id];
+    }
+  }
+
   int num_gpu_;
   int num_threads_;
   int master_gpu_device_id_;
+  int master_gpu_index_;
+  std::vector<int> gpu_list_;
   std::vector<std::unique_ptr<ObjectiveFunction>> per_gpu_objective_functions_;
   std::vector<std::unique_ptr<ScoreUpdater>> per_gpu_train_score_updater_;
   std::vector<std::unique_ptr<CUDAVector<score_t>>> per_gpu_gradients_;

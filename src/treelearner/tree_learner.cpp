@@ -40,15 +40,7 @@ TreeLearner* TreeLearner::CreateTreeLearner(const std::string& learner_type, con
       return new VotingParallelTreeLearner<GPUTreeLearner>(config);
     }
   } else if (device_type == std::string("cuda")) {
-    if (learner_type == std::string("serial")) {
-      return new CUDASingleGPUTreeLearner(config);
-    } else if (learner_type == std::string("feature")) {
-      return new FeatureParallelTreeLearner<CUDATreeLearner>(config);
-    } else if (learner_type == std::string("data")) {
-      return new DataParallelTreeLearner<CUDATreeLearner>(config);
-    } else if (learner_type == std::string("voting")) {
-      return new VotingParallelTreeLearner<CUDATreeLearner>(config);
-    }
+    return new CUDASingleGPUTreeLearner(config);
   }
   return nullptr;
 }

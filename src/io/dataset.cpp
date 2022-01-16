@@ -9,6 +9,7 @@
 #include <LightGBM/cuda/vector_cudahost.h>
 #include <LightGBM/utils/array_args.h>
 #include <LightGBM/utils/openmp_wrapper.h>
+#include <LightGBM/network.h>
 #include <LightGBM/utils/threading.h>
 
 #include <chrono>
@@ -241,7 +242,7 @@ std::vector<std::vector<int>> FastFeatureBundling(
     int** sample_indices, double** sample_values, const int* num_per_col,
     int num_sample_col, data_size_t total_sample_cnt,
     const std::vector<int>& used_features, data_size_t num_data,
-    bool is_use_gpu, bool is_sparse, std::vector<int8_t>* multi_val_group) {
+    bool is_use_gpu, bool is_nccl, bool is_sparse, std::vector<int8_t>* multi_val_group) {
   Common::FunctionTimer fun_timer("Dataset::FastFeatureBundling", global_timer);
   std::vector<size_t> feature_non_zero_cnt;
   feature_non_zero_cnt.reserve(used_features.size());
@@ -304,7 +305,11 @@ std::vector<std::vector<int>> FastFeatureBundling(
   }
   // shuffle groups
   int num_group = static_cast<int>(features_in_group.size());
-  Random tmp_rand(num_data);
+  data_size_t seed_num_data = num_data;
+  if (is_nccl) {
+    seed_num_data = Network::GlobalSyncUpByMax(seed_num_data);
+  }
+  Random tmp_rand(seed_num_data);
   for (int i = 0; i < num_group - 1; ++i) {
     int j = tmp_rand.NextShort(i + 1, num_group);
     std::swap(features_in_group[i], features_in_group[j]);
@@ -350,10 +355,13 @@ void Dataset::Construct(std::vector<std::unique_ptr<BinMapper>>* bin_mappers,
   std::vector<int8_t> group_is_multi_val(used_features.size(), 0);
   if (io_config.enable_bundle && !used_features.empty()) {
     bool lgbm_is_gpu_used = io_config.device_type == std::string("gpu") || io_config.device_type == std::string("cuda");
+    bool lgbm_is_nccl = (io_config.device_type == std::string("cuda") &&
+      io_config.tree_learner != std::string("serial") &&
+      Network::num_machines() > 1);
     features_in_group = FastFeatureBundling(
         *bin_mappers, sample_non_zero_indices, sample_values, num_per_col,
         num_sample_col, static_cast<data_size_t>(total_sample_cnt),
-        used_features, num_data_, lgbm_is_gpu_used,
+        used_features, num_data_, lgbm_is_gpu_used, lgbm_is_nccl,
         is_sparse, &group_is_multi_val);
   }
 

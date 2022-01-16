@@ -168,6 +168,10 @@ Tree* SerialTreeLearner::Train(const score_t* gradients, const score_t *hessians
   }
   share_state_->num_threads = num_threads;
 
+  for (int inner_feature_index = 0; inner_feature_index < train_data_->num_features(); ++inner_feature_index) {
+    Log::Warning("inner_feature_index = %d, real_feature_index = %d", inner_feature_index, train_data_->RealFeatureIndex(inner_feature_index));
+  }
+
   // some initial works before training
   BeforeTrain();
 
