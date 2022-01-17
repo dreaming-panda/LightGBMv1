@@ -963,14 +963,14 @@ class Timer {
   ~Timer() { Print(); }
 
 #ifdef TIMETAG
-  void Start(const std::string& name) {
-    auto tid = omp_get_thread_num();
+  void Start(const std::string& name, int nccl_thread_index = -1) {
+    auto tid = (nccl_thread_index == -1) ? omp_get_thread_num() : nccl_thread_index;
     start_time_[tid][name] = std::chrono::steady_clock::now();
   }
 
-  void Stop(const std::string& name) {
+  void Stop(const std::string& name, int nccl_thread_index = -1) {
     auto cur_time = std::chrono::steady_clock::now();
-    auto tid = omp_get_thread_num();
+    auto tid = (nccl_thread_index == -1) ? omp_get_thread_num() : nccl_thread_index;
     if (stats_[tid].find(name) == stats_[tid].end()) {
       stats_[tid][name] = std::chrono::duration<double, std::milli>(0);
     }

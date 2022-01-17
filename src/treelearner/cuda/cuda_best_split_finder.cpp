@@ -40,6 +40,7 @@ CUDABestSplitFinder::CUDABestSplitFinder(
   cuda_best_split_info_ = nullptr;
   cuda_best_split_info_buffer_ = nullptr;
   cuda_is_feature_used_bytree_ = nullptr;
+  nccl_thread_index_ = -1;
 }
 
 CUDABestSplitFinder::~CUDABestSplitFinder() {
@@ -53,6 +54,10 @@ CUDABestSplitFinder::~CUDABestSplitFinder() {
   CUDASUCCESS_OR_FATAL(cudaFreeHost(host_leaf_split_info_buffer_));
   cuda_streams_.clear();
   cuda_streams_.shrink_to_fit();
+}
+
+void CUDABestSplitFinder::SetNCCL(int nccl_thread_index) {
+  nccl_thread_index_ = nccl_thread_index;
 }
 
 void CUDABestSplitFinder::InitFeatureMetaInfo(const Dataset* train_data) {
@@ -333,10 +338,10 @@ void CUDABestSplitFinder::FindBestSplitsForLeaf(
     LaunchFindBestSplitsForLeafKernel(smaller_leaf_splits, larger_leaf_splits,
       smaller_leaf_index, larger_leaf_index, is_smaller_leaf_valid, is_larger_leaf_valid);
   }
-  global_timer.Start("CUDABestSplitFinder::LaunchSyncBestSplitForLeafKernel");
+  global_timer.Start("CUDABestSplitFinder::LaunchSyncBestSplitForLeafKernel", nccl_thread_index_);
   LaunchSyncBestSplitForLeafKernel(smaller_leaf_index, larger_leaf_index, is_smaller_leaf_valid, is_larger_leaf_valid);
   SynchronizeCUDADevice(__FILE__, __LINE__);
-  global_timer.Stop("CUDABestSplitFinder::LaunchSyncBestSplitForLeafKernel");
+  global_timer.Stop("CUDABestSplitFinder::LaunchSyncBestSplitForLeafKernel", nccl_thread_index_);
 }
 
 const CUDASplitInfo* CUDABestSplitFinder::FindBestFromAllSplits(

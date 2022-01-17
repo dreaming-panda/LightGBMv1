@@ -878,7 +878,7 @@ void CUDAHistogramConstructor::LaunchSubtractHistogramKernel(
   if (!gpu_use_discretized_grad) {
     const int num_subtract_threads = 2 * num_total_bin_;
     const int num_subtract_blocks = (num_subtract_threads + SUBTRACT_BLOCK_SIZE - 1) / SUBTRACT_BLOCK_SIZE;
-    global_timer.Start("CUDAHistogramConstructor::FixHistogramKernel");
+    global_timer.Start("CUDAHistogramConstructor::FixHistogramKernel", nccl_thread_index_);
     if (need_fix_histogram_features_.size() > 0) {
       FixHistogramKernel<<<need_fix_histogram_features_.size(), FIX_HISTOGRAM_BLOCK_SIZE, 0, cuda_stream_>>>(
         cuda_feature_num_bins_,
@@ -888,17 +888,17 @@ void CUDAHistogramConstructor::LaunchSubtractHistogramKernel(
         cuda_need_fix_histogram_features_num_bin_aligned_,
         cuda_smaller_leaf_splits);
     }
-    global_timer.Stop("CUDAHistogramConstructor::FixHistogramKernel");
-    global_timer.Start("CUDAHistogramConstructor::SubtractHistogramKernel");
+    global_timer.Stop("CUDAHistogramConstructor::FixHistogramKernel", nccl_thread_index_);
+    global_timer.Start("CUDAHistogramConstructor::SubtractHistogramKernel", nccl_thread_index_);
     SubtractHistogramKernel<<<num_subtract_blocks, SUBTRACT_BLOCK_SIZE, 0, cuda_stream_>>>(
       num_total_bin_,
       cuda_smaller_leaf_splits,
       cuda_larger_leaf_splits);
-    global_timer.Stop("CUDAHistogramConstructor::SubtractHistogramKernel");
+    global_timer.Stop("CUDAHistogramConstructor::SubtractHistogramKernel", nccl_thread_index_);
   } else {
     const int num_subtract_threads = 2 * num_total_bin_;
     const int num_subtract_blocks = (num_subtract_threads + SUBTRACT_BLOCK_SIZE - 1) / SUBTRACT_BLOCK_SIZE;
-    global_timer.Start("CUDAHistogramConstructor::FixHistogramDiscretizedKernel");
+    global_timer.Start("CUDAHistogramConstructor::FixHistogramDiscretizedKernel", nccl_thread_index_);
     if (need_fix_histogram_features_.size() > 0) {
       FixHistogramDiscretizedKernel<<<need_fix_histogram_features_.size(), FIX_HISTOGRAM_BLOCK_SIZE, 0, cuda_stream_>>>(
         cuda_feature_num_bins_,
@@ -908,13 +908,13 @@ void CUDAHistogramConstructor::LaunchSubtractHistogramKernel(
         cuda_need_fix_histogram_features_num_bin_aligned_,
         cuda_smaller_leaf_splits);
     }
-    global_timer.Stop("CUDAHistogramConstructor::FixHistogramDiscretizedKernel");
-    global_timer.Start("CUDAHistogramConstructor::SubtractHistogramDiscretizedKernel");
+    global_timer.Stop("CUDAHistogramConstructor::FixHistogramDiscretizedKernel", nccl_thread_index_);
+    global_timer.Start("CUDAHistogramConstructor::SubtractHistogramDiscretizedKernel", nccl_thread_index_);
     SubtractHistogramDiscretizedKernel<<<num_subtract_blocks, SUBTRACT_BLOCK_SIZE, 0, cuda_stream_>>>(
       num_total_bin_,
       cuda_smaller_leaf_splits,
       cuda_larger_leaf_splits);
-    global_timer.Stop("CUDAHistogramConstructor::SubtractHistogramDiscretizedKernel");
+    global_timer.Stop("CUDAHistogramConstructor::SubtractHistogramDiscretizedKernel", nccl_thread_index_);
   }
 }
 

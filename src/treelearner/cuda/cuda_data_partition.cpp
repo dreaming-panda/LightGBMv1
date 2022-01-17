@@ -63,6 +63,7 @@ CUDADataPartition::CUDADataPartition(
   cuda_add_train_score_ = nullptr;
 
   nccl_comm_ = nullptr;
+  nccl_thread_index_ = -1;
 }
 
 CUDADataPartition::~CUDADataPartition() {
@@ -86,6 +87,11 @@ CUDADataPartition::~CUDADataPartition() {
   CUDASUCCESS_OR_FATAL(cudaStreamDestroy(cuda_streams_[3]));
   cuda_streams_.clear();
   cuda_streams_.shrink_to_fit();
+}
+
+void CUDADataPartition::SetNCCL(int nccl_thread_index, ncclComm_t* nccl_comm) {
+  nccl_thread_index_ = nccl_thread_index;
+  nccl_comm_ = nccl_comm;
 }
 
 void CUDADataPartition::Init() {
@@ -128,10 +134,6 @@ void CUDADataPartition::Init() {
   use_bagging_ = false;
   used_indices_ = nullptr;
   leaf_indices_sorted_by_leaf_start_.Resize(num_leaves_);
-}
-
-void CUDADataPartition::SetNCCL(ncclComm_t* nccl_comm) {
-  nccl_comm_ = nccl_comm;
 }
 
 void CUDADataPartition::BeforeTrain() {
@@ -180,7 +182,7 @@ void CUDADataPartition::Split(
   data_size_t* global_left_leaf_num_data,
   data_size_t* global_right_leaf_num_data) {
   CalcBlockDim(num_data_in_leaf);
-  global_timer.Start("GenDataToLeftBitVector");
+  global_timer.Start("GenDataToLeftBitVector", nccl_thread_index_);
   GenDataToLeftBitVector(num_data_in_leaf,
                          leaf_best_split_feature,
                          leaf_best_split_threshold,
@@ -190,8 +192,8 @@ void CUDADataPartition::Split(
                          leaf_data_start,
                          left_leaf_index,
                          right_leaf_index);
-  global_timer.Stop("GenDataToLeftBitVector");
-  global_timer.Start("SplitInner");
+  global_timer.Stop("GenDataToLeftBitVector", nccl_thread_index_);
+  global_timer.Start("SplitInner", nccl_thread_index_);
 
   SplitInner(num_data_in_leaf,
              best_split_info,
@@ -209,7 +211,7 @@ void CUDADataPartition::Split(
              right_leaf_sum_of_gradients,
              global_left_leaf_num_data,
              global_right_leaf_num_data);
-  global_timer.Stop("SplitInner");
+  global_timer.Stop("SplitInner", nccl_thread_index_);
 }
 
 void CUDADataPartition::GenDataToLeftBitVector(

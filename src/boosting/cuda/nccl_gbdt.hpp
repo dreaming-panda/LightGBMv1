@@ -73,6 +73,7 @@ class NCCLGBDT: public GBDT_T {
     std::unique_ptr<Tree> tree;
 
     TrainTreeLearnerThreadData() {
+      Log::Warning("default constructor");
       gpu_index = 0;
       gpu_tree_learner = nullptr;
       gradients = nullptr;

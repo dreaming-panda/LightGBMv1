@@ -37,9 +37,9 @@ class CUDADataPartition {
 
   ~CUDADataPartition();
 
-  void Init();
+  void SetNCCL(int nccl_thread_index, ncclComm_t* nccl_comm);
 
-  void SetNCCL(ncclComm_t* nccl_comm);
+  void Init();
 
   void BeforeTrain();
 
@@ -389,6 +389,7 @@ class CUDADataPartition {
 
   // for NCCL
   ncclComm_t* nccl_comm_;
+  int nccl_thread_index_;
 };
 
 }  // namespace LightGBM

@@ -59,6 +59,11 @@ void NCCLGBDT<GBDT_T>::Init(
     }
   }
 
+  const int num_threads = OMP_NUM_THREADS();
+  if (num_gpu_ > num_threads) {
+    Log::Fatal("Number of GPUs %d is greather than the number of threads %d. Please use more threads.", num_gpu_, num_threads);
+  }
+
   InitNCCL();
 
   // partition data across GPUs
@@ -127,7 +132,7 @@ void NCCLGBDT<GBDT_T>::Init(
     update_score_thread_data_[gpu_index].gpu_score_updater = per_gpu_train_score_updater_[gpu_index].get();
     update_score_thread_data_[gpu_index].gpu_tree_learner = per_gpu_tree_learners_[gpu_index].get();
   }
-  
+
   // return to master gpu device
   CUDASUCCESS_OR_FATAL(cudaSetDevice(master_gpu_device_id_));
 }
@@ -330,7 +335,7 @@ bool NCCLGBDT<GBDT_T>::TrainOneIter(const score_t* gradients, const score_t* hes
     this->models_.push_back(std::move(new_tree[master_gpu_index_]));
 
     for (int gpu_index = 0; gpu_index < num_gpu_; ++gpu_index) {
-      if (gpu_index != master_gpu_device_id_) {
+      if (gpu_index != master_gpu_index_) {
         SetCUDADevice(gpu_index);
         new_tree[gpu_index].reset(nullptr);
       }

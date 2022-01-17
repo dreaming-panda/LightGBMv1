@@ -130,6 +130,7 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
   cudaStream_t nccl_stream_;
   std::vector<data_size_t> global_num_data_in_leaf_;
   data_size_t global_num_data_;
+  int nccl_thread_index_;
 };
 
 }  // namespace LightGBM

@@ -53,6 +53,8 @@ class CUDABestSplitFinder {
 
   void InitFeatureMetaInfo(const Dataset* train_data);
 
+  void SetNCCL(int nccl_thread_index);
+
   void Init();
 
   void InitCUDAFeatureMetaInfo();
@@ -230,6 +232,8 @@ class CUDABestSplitFinder {
 
   // CUDA memory, held by other object
   const hist_t* cuda_hist_;
+
+  int nccl_thread_index_;
 };
 
 }  // namespace LightGBM

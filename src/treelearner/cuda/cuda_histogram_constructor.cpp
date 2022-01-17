@@ -39,6 +39,7 @@ CUDAHistogramConstructor::CUDAHistogramConstructor(
   cuda_hist_ = nullptr;
   cuda_need_fix_histogram_features_ = nullptr;
   cuda_need_fix_histogram_features_num_bin_aligned_ = nullptr;
+  nccl_thread_index_ = -1;
 }
 
 CUDAHistogramConstructor::~CUDAHistogramConstructor() {
@@ -49,6 +50,10 @@ CUDAHistogramConstructor::~CUDAHistogramConstructor() {
   DeallocateCUDAMemory<int>(&cuda_need_fix_histogram_features_, __FILE__, __LINE__);
   DeallocateCUDAMemory<uint32_t>(&cuda_need_fix_histogram_features_num_bin_aligned_, __FILE__, __LINE__);
   gpuAssert(cudaStreamDestroy(cuda_stream_), __FILE__, __LINE__);
+}
+
+void CUDAHistogramConstructor::SetNCCL(int nccl_thread_index) {
+  nccl_thread_index_ = nccl_thread_index;
 }
 
 void CUDAHistogramConstructor::InitFeatureMetaInfo(const Dataset* train_data, const std::vector<uint32_t>& feature_hist_offsets) {
@@ -146,9 +151,9 @@ void CUDAHistogramConstructor::SubtractHistogramForLeaf(
   const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
   const CUDALeafSplitsStruct* cuda_larger_leaf_splits,
   const bool gpu_use_discretized_grad) {
-  global_timer.Start("CUDAHistogramConstructor::ConstructHistogramForLeaf::LaunchSubtractHistogramKernel");
+  global_timer.Start("CUDAHistogramConstructor::ConstructHistogramForLeaf::LaunchSubtractHistogramKernel", nccl_thread_index_);
   LaunchSubtractHistogramKernel(cuda_smaller_leaf_splits, cuda_larger_leaf_splits, gpu_use_discretized_grad);
-  global_timer.Stop("CUDAHistogramConstructor::ConstructHistogramForLeaf::LaunchSubtractHistogramKernel");
+  global_timer.Stop("CUDAHistogramConstructor::ConstructHistogramForLeaf::LaunchSubtractHistogramKernel", nccl_thread_index_);
 }
 
 void CUDAHistogramConstructor::CalcConstructHistogramKernelDim(

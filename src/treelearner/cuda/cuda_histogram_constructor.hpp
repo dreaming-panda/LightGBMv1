@@ -40,6 +40,8 @@ class CUDAHistogramConstructor {
 
   ~CUDAHistogramConstructor();
 
+  void SetNCCL(int nccl_thread_index);
+
   void Init(const Dataset* train_data, TrainingShareStates* share_state);
 
   void ConstructHistogramForLeaf(
@@ -166,6 +168,8 @@ class CUDAHistogramConstructor {
   const int gpu_device_id_;
   const bool gpu_use_dp_;
   const bool gpu_use_discretized_grad_;
+
+  int nccl_thread_index_;
 };
 
 }  // namespace LightGBM
