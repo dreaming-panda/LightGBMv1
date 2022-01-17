@@ -33,6 +33,7 @@ class CUDADataPartition {
     const int num_total_bin,
     const int num_leaves,
     const int num_threads,
+    const bool use_gradient_discretization,
     hist_t* cuda_hist);
 
   ~CUDADataPartition();
@@ -390,6 +391,9 @@ class CUDADataPartition {
   // for NCCL
   ncclComm_t* nccl_comm_;
   int nccl_thread_index_;
+  
+  // for gradient discretization
+  bool use_gradient_discretization_;
 };
 
 }  // namespace LightGBM

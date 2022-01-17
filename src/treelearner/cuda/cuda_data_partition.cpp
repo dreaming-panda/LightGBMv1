@@ -17,6 +17,7 @@ CUDADataPartition::CUDADataPartition(
   const int num_total_bin,
   const int num_leaves,
   const int num_threads,
+  const bool use_gradient_discretization,
   hist_t* cuda_hist):
 
   num_data_(train_data->num_data()),
@@ -29,6 +30,7 @@ CUDADataPartition::CUDADataPartition(
   max_num_split_indices_blocks_ = grid_dim_;
   cur_num_leaves_ = 1;
   cuda_column_data_ = train_data->cuda_column_data();
+  use_gradient_discretization_ = use_gradient_discretization;
 
   is_categorical_feature_.resize(train_data->num_features(), false);
   is_single_feature_in_column_.resize(train_data->num_features(), false);

@@ -41,15 +41,12 @@ class CUDASplitInfo {
   int* cat_threshold_real = nullptr;
 
   __device__ CUDASplitInfo() {
-    printf("default constructor is called\n");
     num_cat_threshold = 0;
     cat_threshold = nullptr;
     cat_threshold_real = nullptr;
-    printf("default constructor is called, num_cat_threshold = %d\n", num_cat_threshold);
   }
 
   __device__ ~CUDASplitInfo() {
-    printf("default destructor is called\n");
     if (num_cat_threshold > 0) {
       if (cat_threshold != nullptr) {
         cudaFree(cat_threshold);

@@ -73,7 +73,6 @@ __global__ void ReduceBlockMinMaxKernel(
   __syncthreads();
   hess_max_val = ShuffleReduceMax<score_t>(hess_max_val, shared_mem_buffer, blockDim.x);
   if (threadIdx.x == 0) {
-    //printf("grad_min_val = %f, grad_max_val = %f, hess_min_val = %f, hess_max_val = %f\n", grad_min_val, grad_max_val, hess_min_val, hess_max_val);
     const score_t grad_abs_max = max(fabs(grad_min_val), fabs(grad_max_val));
     const score_t hess_abs_max = max(fabs(hess_min_val), fabs(hess_max_val));
     grad_min_block_buffer[0] = 1.0f / (grad_abs_max / (grad_discretize_bins / 2));
@@ -106,15 +105,9 @@ __global__ void DiscretizeGradientsKernel(
     const score_t hessian = input_hessians[index];
     const score_t gradient_random_value = gradient_random_values[index_offset];
     const score_t hessian_random_value = hessian_random_values[index_offset];
-    /*if (index < 500) {
-      printf("gradient = %f, grad_scale = %f, gradient_random_value = %f\n", gradient, grad_scale, gradient_random_value);
-    }*/
     output_gradients_and_hessians_ptr[2 * index + 1] = gradient > 0.0f ?
       static_cast<int16_t>(gradient * grad_scale + gradient_random_value) :
       static_cast<int16_t>(gradient * grad_scale - gradient_random_value);
-    /*if (index < 500) {
-      printf("hessian = %f, hess_scale = %f, hessian_random_value = %f\n", hessian, hess_scale, hessian_random_value);
-    }*/
     output_gradients_and_hessians_ptr[2 * index] = static_cast<int16_t>(hessian * hess_scale + hessian_random_value);
   }
 }
@@ -136,6 +129,27 @@ void CUDAGradientDiscretizer::DiscretizeGradients(
     grad_max_block_buffer_.RawData(),
     hess_min_block_buffer_.RawData(),
     hess_max_block_buffer_.RawData());
+  if (nccl_comm_ != nullptr) {
+    SynchronizeCUDADevice(__FILE__, __LINE__);
+    cudaStream_t cuda_stream;
+    CUDASUCCESS_OR_FATAL(cudaStreamCreate(&cuda_stream));
+    NCCLCHECK(ncclGroupStart());
+    NCCLCHECK(ncclAllReduce(
+      grad_min_block_buffer_.RawData(),
+      grad_min_block_buffer_.RawData(), 1, ncclFloat32, ncclMin, *nccl_comm_, cuda_stream));
+    NCCLCHECK(ncclAllReduce(
+      hess_min_block_buffer_.RawData(),
+      hess_min_block_buffer_.RawData(), 1, ncclFloat32, ncclMin, *nccl_comm_, cuda_stream));
+    NCCLCHECK(ncclAllReduce(
+      grad_max_block_buffer_.RawData(),
+      grad_max_block_buffer_.RawData(), 1, ncclFloat32, ncclMax, *nccl_comm_, cuda_stream));
+    NCCLCHECK(ncclAllReduce(
+      hess_max_block_buffer_.RawData(),
+      hess_max_block_buffer_.RawData(), 1, ncclFloat32, ncclMax, *nccl_comm_, cuda_stream));
+    NCCLCHECK(ncclGroupEnd());
+    CUDASUCCESS_OR_FATAL(cudaStreamSynchronize(cuda_stream));
+    CUDASUCCESS_OR_FATAL(cudaStreamDestroy(cuda_stream));
+  }
   DiscretizeGradientsKernel<<<num_reduce_blocks_, CUDA_GRADIENT_DISCRETIZER_BLOCK_SIZE>>>(
     num_data,
     input_gradients,
@@ -148,12 +162,6 @@ void CUDAGradientDiscretizer::DiscretizeGradients(
     hessian_random_values_.RawData(),
     grad_discretize_bins_,
     discretized_gradients_and_hessians_.RawData());
-  /*std::vector<int32_t> host_discretized_gradients_and_hessians(num_data);
-  CopyFromCUDADeviceToHost<int32_t>(host_discretized_gradients_and_hessians.data(), discretized_gradients_and_hessians_.RawData(), num_data, __FILE__, __LINE__);
-  const int16_t* host_discretized_gradients_and_hessians_ptr = reinterpret_cast<const int16_t*>(host_discretized_gradients_and_hessians.data());
-  for (size_t i = 0; i < 1000; ++i) {
-    Log::Warning("host_discretized_gradients_and_hessians_ptr[%d] = %d", i, host_discretized_gradients_and_hessians_ptr[i]);
-  }*/
   ++iter_;
 }
 
@@ -171,8 +179,6 @@ __global__ void ScaleHistogramKernel(
   if (bin < num_total_bin) {
     const hist_t grad = input_histogram[((bin << 1) + 1) << 1] * grad_scale;
     const hist_t hess = input_histogram[((bin << 1)) << 1] * hess_scale;
-    //histogram_ptr[((bin << 1) + 1) << 1] = input_histogram[((bin << 1) + 1) << 1];
-    //histogram_ptr[((bin << 1)) << 1] = input_histogram[((bin << 1)) << 1];
     histogram[(bin << 1)] = grad;
     histogram[(bin << 1) + 1] = hess;
   }
@@ -182,18 +188,11 @@ void CUDAGradientDiscretizer::ScaleHistogram(
   const int num_total_bin, CUDALeafSplitsStruct* cuda_leaf_splits, cudaStream_t cuda_stream) const {
   const int num_blocks = (num_total_bin + CUDA_GRADIENT_DISCRETIZER_BLOCK_SIZE - 1) / CUDA_GRADIENT_DISCRETIZER_BLOCK_SIZE;
   int32_t* histogram_ptr = nullptr;
-  //AllocateCUDAMemory<int32_t>(&histogram_ptr, num_total_bin * 4, __FILE__, __LINE__);
   ScaleHistogramKernel<<<num_blocks, CUDA_GRADIENT_DISCRETIZER_BLOCK_SIZE, 0, cuda_stream>>>(
     num_total_bin,
     grad_max_block_buffer_.RawData(),
     hess_max_block_buffer_.RawData(),
     cuda_leaf_splits, histogram_ptr);
-
-  /*std::vector<int32_t> host_histogram(num_total_bin * 4);
-  CopyFromCUDADeviceToHost<int32_t>(host_histogram.data(), histogram_ptr, host_histogram.size(), __FILE__, __LINE__);
-  for (int bin = 0; bin < num_total_bin; ++bin) {
-    Log::Warning("bin %d grad %d hess %d", bin, host_histogram[bin << 2], host_histogram[(bin << 2) + 2]);
-  }*/
 }
 
 }  // namespace LightGBM

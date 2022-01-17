@@ -30,6 +30,11 @@ class CUDAGradientDiscretizer {
     iter_ = 0;
     num_trees_ = num_trees;
     random_seed_ = random_seed;
+    nccl_comm_ = nullptr;
+  }
+
+  void SetNCCL(ncclComm_t* nccl_comm) {
+    nccl_comm_ = nccl_comm;
   }
 
   void DiscretizeGradients(
@@ -111,6 +116,7 @@ class CUDAGradientDiscretizer {
   int iter_;
   int num_trees_;
   int random_seed_;
+  ncclComm_t* nccl_comm_;
 };
 
 }  // namespace LightGBM
