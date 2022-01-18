@@ -327,7 +327,9 @@ void CUDABestSplitFinder::FindBestSplitsForLeaf(
   const score_t* grad_scale,
   const score_t* hess_scale,
   const uint8_t smaller_num_bits_in_histogram_bins,
-  const uint8_t larger_num_bits_in_histogram_bins) {
+  const uint8_t larger_num_bits_in_histogram_bins,
+  const uint8_t smaller_num_bits_in_histogram_acc,
+  const uint8_t larger_num_bits_in_histogram_acc) {
   const bool is_smaller_leaf_valid = (num_data_in_smaller_leaf > min_data_in_leaf_ &&
     sum_hessians_in_smaller_leaf > min_sum_hessian_in_leaf_);
   const bool is_larger_leaf_valid = (num_data_in_larger_leaf > min_data_in_leaf_ &&
@@ -335,7 +337,8 @@ void CUDABestSplitFinder::FindBestSplitsForLeaf(
   if (grad_scale != nullptr && hess_scale != nullptr) {
     LaunchFindBestSplitsDiscretizedForLeafKernel(smaller_leaf_splits, larger_leaf_splits,
       smaller_leaf_index, larger_leaf_index, is_smaller_leaf_valid, is_larger_leaf_valid,
-      grad_scale, hess_scale, smaller_num_bits_in_histogram_bins, larger_num_bits_in_histogram_bins);
+      grad_scale, hess_scale, smaller_num_bits_in_histogram_bins, larger_num_bits_in_histogram_bins,
+      smaller_num_bits_in_histogram_acc, larger_num_bits_in_histogram_acc);
   } else {
     LaunchFindBestSplitsForLeafKernel(smaller_leaf_splits, larger_leaf_splits,
       smaller_leaf_index, larger_leaf_index, is_smaller_leaf_valid, is_larger_leaf_valid);

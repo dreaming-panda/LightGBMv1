@@ -116,6 +116,8 @@ void CUDASingleGPUTreeLearner::Init(const Dataset* train_data, bool is_constant_
 
   leaf_num_bits_in_histogram_bin_.resize(config_->num_leaves, 0);
   node_num_bits_in_histogram_bin_.resize(config_->num_leaves, 0);
+  leaf_num_bits_in_histogram_acc_.resize(config_->num_leaves, 0);
+  node_num_bits_in_histogram_acc_.resize(config_->num_leaves, 0);
 }
 
 void CUDASingleGPUTreeLearner::SetNumBitsInHistogramBin(const int left_leaf_index, const int right_leaf_index) {
@@ -126,12 +128,20 @@ void CUDASingleGPUTreeLearner::SetNumBitsInHistogramBin(const int left_leaf_inde
     }
     const data_size_t num_data_in_left_leaf = leaf_num_data_[left_leaf_index];
     const uint64_t max_stat = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins);
-    if (max_stat < 256) {
+    const uint64_t max_stat_per_bin = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins) / 100;
+    if (max_stat_per_bin < 256) {
       leaf_num_bits_in_histogram_bin_[left_leaf_index] = 8;
-    } else if (max_stat < 65536) {
+    } else if (max_stat_per_bin < 65536) {
       leaf_num_bits_in_histogram_bin_[left_leaf_index] = 16;
     } else {
       leaf_num_bits_in_histogram_bin_[left_leaf_index] = 32;
+    }
+    if (max_stat < 256) {
+      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 8;
+    } else if (max_stat < 65536) {
+      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 16;
+    } else {
+      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 32;
     }
   } else {
     if (nccl_comm_ != nullptr || !config_->gpu_use_discretized_grad) {
@@ -144,20 +154,36 @@ void CUDASingleGPUTreeLearner::SetNumBitsInHistogramBin(const int left_leaf_inde
     const data_size_t num_data_in_right_leaf = leaf_num_data_[right_leaf_index];
     const uint64_t max_stat_left = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins);
     const uint64_t max_stat_right = static_cast<uint64_t>(num_data_in_right_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins);
+    const uint64_t max_stat_left_per_bin = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins) / 100;
+    const uint64_t max_stat_right_per_bin = static_cast<uint64_t>(num_data_in_right_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins) / 100;
     node_num_bits_in_histogram_bin_[left_leaf_index] = leaf_num_bits_in_histogram_bin_[left_leaf_index];
-    if (max_stat_left < 256) {
+    if (max_stat_left_per_bin < 256) {
       leaf_num_bits_in_histogram_bin_[left_leaf_index] = 8;
-    } else if (max_stat_left < 65536) {
+    } else if (max_stat_left_per_bin < 65536) {
       leaf_num_bits_in_histogram_bin_[left_leaf_index] = 16;
     } else {
       leaf_num_bits_in_histogram_bin_[left_leaf_index] = 32;
     }
-    if (max_stat_right < 256) {
+    if (max_stat_right_per_bin < 256) {
       leaf_num_bits_in_histogram_bin_[right_leaf_index] = 8;
-    } else if (max_stat_right < 65536) {
+    } else if (max_stat_right_per_bin < 65536) {
       leaf_num_bits_in_histogram_bin_[right_leaf_index] = 16;
     } else {
       leaf_num_bits_in_histogram_bin_[right_leaf_index] = 32;
+    }
+    if (max_stat_left < 256) {
+      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 8;
+    } else if (max_stat_left < 65536) {
+      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 16;
+    } else {
+      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 32;
+    }
+    if (max_stat_right < 256) {
+      leaf_num_bits_in_histogram_acc_[right_leaf_index] = 8;
+    } else if (max_stat_right < 65536) {
+      leaf_num_bits_in_histogram_acc_[right_leaf_index] = 16;
+    } else {
+      leaf_num_bits_in_histogram_acc_[right_leaf_index] = 32;
     }
   }
 }
@@ -215,6 +241,10 @@ void CUDASingleGPUTreeLearner::BeforeTrain() {
   node_num_bits_in_histogram_bin_.clear();
   leaf_num_bits_in_histogram_bin_.resize(config_->num_leaves, 0);
   node_num_bits_in_histogram_bin_.resize(config_->num_leaves, 0);
+  leaf_num_bits_in_histogram_acc_.clear();
+  node_num_bits_in_histogram_acc_.clear();
+  leaf_num_bits_in_histogram_acc_.resize(config_->num_leaves, 0);
+  node_num_bits_in_histogram_acc_.resize(config_->num_leaves, 0);
   SetNumBitsInHistogramBin(0, -1);
 }
 
@@ -274,6 +304,10 @@ Tree* CUDASingleGPUTreeLearner::Train(const score_t* gradients,
     }
 
     global_timer.Start("CUDASingleGPUTreeLearner::FindBestSplitsForLeaf", nccl_thread_index_);
+    const uint8_t smaller_leaf_num_bits_bin = leaf_num_bits_in_histogram_bin_[smaller_leaf_index_];
+    const uint8_t smaller_leaf_num_bits_acc = leaf_num_bits_in_histogram_acc_[smaller_leaf_index_];
+    const uint8_t larger_leaf_num_bits_bin = larger_leaf_index_ < 0 ? 32 : leaf_num_bits_in_histogram_bin_[larger_leaf_index_];
+    const uint8_t larger_leaf_num_bits_acc = larger_leaf_index_ < 0 ? 32 : leaf_num_bits_in_histogram_acc_[larger_leaf_index_];
     if (config_->gpu_use_discretized_grad) {
       cuda_best_split_finder_->FindBestSplitsForLeaf(
         cuda_smaller_leaf_splits_->GetCUDAStruct(),
@@ -284,8 +318,10 @@ Tree* CUDASingleGPUTreeLearner::Train(const score_t* gradients,
         sum_hessians_in_smaller_leaf, sum_hessians_in_larger_leaf,
         cuda_gradient_discretizer_->grad_scale(),
         cuda_gradient_discretizer_->hess_scale(),
-        leaf_num_bits_in_histogram_bin_[smaller_leaf_index_],
-        leaf_num_bits_in_histogram_bin_[larger_leaf_index_]);
+        smaller_leaf_num_bits_bin,
+        larger_leaf_num_bits_bin,
+        smaller_leaf_num_bits_acc,
+        larger_leaf_num_bits_acc);
     } else {
       cuda_best_split_finder_->FindBestSplitsForLeaf(
         cuda_smaller_leaf_splits_->GetCUDAStruct(),
@@ -295,8 +331,10 @@ Tree* CUDASingleGPUTreeLearner::Train(const score_t* gradients,
         global_num_data_in_larger_leaf,
         sum_hessians_in_smaller_leaf, sum_hessians_in_larger_leaf,
         nullptr, nullptr,
-        leaf_num_bits_in_histogram_bin_[smaller_leaf_index_],
-        leaf_num_bits_in_histogram_bin_[larger_leaf_index_]);
+        smaller_leaf_num_bits_bin,
+        larger_leaf_num_bits_bin,
+        smaller_leaf_num_bits_acc,
+        larger_leaf_num_bits_acc);
     }
     global_timer.Stop("CUDASingleGPUTreeLearner::FindBestSplitsForLeaf", nccl_thread_index_);
     global_timer.Start("CUDASingleGPUTreeLearner::FindBestFromAllSplits", nccl_thread_index_);

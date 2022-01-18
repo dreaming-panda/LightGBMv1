@@ -128,6 +128,8 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
 
   std::vector<uint8_t> leaf_num_bits_in_histogram_bin_;
   std::vector<int8_t> node_num_bits_in_histogram_bin_;
+  std::vector<uint8_t> leaf_num_bits_in_histogram_acc_;
+  std::vector<int8_t> node_num_bits_in_histogram_acc_;
 
   // used with NCCL
   std::vector<int> leaf_to_hist_index_map_;

@@ -317,10 +317,10 @@ __device__ void FindBestSplitsForLeafKernelInner(
   }
 }
 
-template <bool USE_RAND, bool USE_L1, bool USE_SMOOTHING, bool REVERSE, typename PACKED_HIST_TYPE, bool USE_16BIT_HIST>
+template <bool USE_RAND, bool USE_L1, bool USE_SMOOTHING, bool REVERSE, typename BIN_HIST_TYPE, typename ACC_HIST_TYPE, bool USE_16BIT_BIN_HIST, bool USE_16BIT_ACC_HIST>
 __device__ void FindBestSplitsDiscretizedForLeafKernelInner(
   // input feature information
-  const PACKED_HIST_TYPE* feature_hist_ptr,
+  const BIN_HIST_TYPE* feature_hist_ptr,
   // input task information
   const SplitFindTask* task,
   CUDARandom* cuda_random,
@@ -347,7 +347,7 @@ __device__ void FindBestSplitsDiscretizedForLeafKernelInner(
 
   cuda_best_split_info->is_valid = false;
 
-  PACKED_HIST_TYPE local_grad_hess_hist = 0;
+  ACC_HIST_TYPE local_grad_hess_hist = 0;
   double local_gain = 0.0f;
   bool threshold_found = false;
   uint32_t threshold_value = 0;
@@ -369,18 +369,28 @@ __device__ void FindBestSplitsDiscretizedForLeafKernelInner(
   if (!REVERSE) {
     if (threadIdx_x < feature_num_bin_minus_offset && !skip_sum) {
       const unsigned int bin_offset = threadIdx_x;
-      local_grad_hess_hist = feature_hist_ptr[bin_offset];
+      if (USE_16BIT_BIN_HIST && !USE_16BIT_ACC_HIST) {
+        const int32_t local_grad_hess_hist_int32 = feature_hist_ptr[bin_offset];
+        local_grad_hess_hist = (static_cast<int64_t>(static_cast<int16_t>(local_grad_hess_hist_int32 >> 16)) << 32) | (static_cast<int64_t>(local_grad_hess_hist_int32 & 0x0000ffff));
+      } else {
+        local_grad_hess_hist = feature_hist_ptr[bin_offset];
+      }
     }
   } else {
     if (threadIdx_x >= static_cast<unsigned int>(task->na_as_missing) &&
       threadIdx_x < feature_num_bin_minus_offset && !skip_sum) {
       const unsigned int read_index = feature_num_bin_minus_offset - 1 - threadIdx_x;
-      local_grad_hess_hist = feature_hist_ptr[read_index];
+      if (USE_16BIT_BIN_HIST && !USE_16BIT_ACC_HIST) {
+        const int32_t local_grad_hess_hist_int32 = feature_hist_ptr[read_index];
+        local_grad_hess_hist = (static_cast<int64_t>(static_cast<int16_t>(local_grad_hess_hist_int32 >> 16)) << 32) | (static_cast<int64_t>(local_grad_hess_hist_int32 & 0x0000ffff));
+      } else {
+        local_grad_hess_hist = feature_hist_ptr[read_index];
+      }
     }
   }
   __syncthreads();
   local_gain = kMinScore;
-  local_grad_hess_hist = ShufflePrefixSum<PACKED_HIST_TYPE>(local_grad_hess_hist, reinterpret_cast<PACKED_HIST_TYPE*>(shared_int_buffer));
+  local_grad_hess_hist = ShufflePrefixSum<ACC_HIST_TYPE>(local_grad_hess_hist, reinterpret_cast<ACC_HIST_TYPE*>(shared_int_buffer));
   double sum_left_gradient = 0.0f;
   double sum_left_hessian = 0.0f;
   double sum_right_gradient = 0.0f;
@@ -391,7 +401,7 @@ __device__ void FindBestSplitsDiscretizedForLeafKernelInner(
   int64_t sum_right_gradient_hessian = 0;
   if (REVERSE) {
     if (threadIdx_x >= static_cast<unsigned int>(task->na_as_missing) && threadIdx_x <= task->num_bin - 2 && !skip_sum) {
-      sum_right_gradient_hessian = USE_16BIT_HIST ?
+      sum_right_gradient_hessian = USE_16BIT_ACC_HIST ?
         (static_cast<int64_t>(static_cast<int16_t>(local_grad_hess_hist >> 16)) << 32) | static_cast<int64_t>(local_grad_hess_hist & 0x0000ffff) :
         local_grad_hess_hist;
       sum_right_gradient = static_cast<double>(static_cast<int32_t>((sum_right_gradient_hessian & 0xffffffff00000000) >> 32)) * grad_scale;
@@ -418,7 +428,7 @@ __device__ void FindBestSplitsDiscretizedForLeafKernelInner(
     }
   } else {
     if (threadIdx_x <= feature_num_bin_minus_offset - 2 && !skip_sum) {
-      sum_left_gradient_hessian = USE_16BIT_HIST ?
+      sum_left_gradient_hessian = USE_16BIT_ACC_HIST ?
         (static_cast<int64_t>(static_cast<int16_t>(local_grad_hess_hist >> 16)) << 32) | static_cast<int64_t>(local_grad_hess_hist & 0x0000ffff) :
         local_grad_hess_hist;
       sum_left_gradient = static_cast<double>(static_cast<int32_t>((sum_left_gradient_hessian & 0xffffffff00000000) >> 32)) * grad_scale;
@@ -887,6 +897,8 @@ __global__ void FindBestSplitsDiscretizedForLeafKernel(
   const CUDALeafSplitsStruct* larger_leaf_splits,
   const uint8_t smaller_leaf_num_bits_in_histogram_bin,
   const uint8_t larger_leaf_num_bits_in_histogram_bin,
+  const uint8_t smaller_leaf_num_bits_in_histogram_acc,
+  const uint8_t larger_leaf_num_bits_in_histogram_acc,
   // input config parameter values
   const data_size_t min_data_in_leaf,
   const double min_sum_hessian_in_leaf,
@@ -915,16 +927,43 @@ __global__ void FindBestSplitsDiscretizedForLeafKernel(
   CUDASplitInfo* out = cuda_best_split_info + output_offset;
   CUDARandom* cuda_random = USE_RAND ?
     (IS_LARGER ? cuda_randoms + task_index * 2 + 1 : cuda_randoms + task_index * 2) : nullptr;
-  const bool use_16bit = IS_LARGER ? (larger_leaf_num_bits_in_histogram_bin <= 16) : (smaller_leaf_num_bits_in_histogram_bin <= 16);
+  const bool use_16bit_bin = IS_LARGER ? (larger_leaf_num_bits_in_histogram_bin <= 16) : (smaller_leaf_num_bits_in_histogram_bin <= 16);
+  const bool use_16bit_acc = IS_LARGER ? (larger_leaf_num_bits_in_histogram_acc <= 16) : (smaller_leaf_num_bits_in_histogram_acc <= 16);
   if (is_feature_used_bytree[inner_feature_index]) {
     if (task->is_categorical) {
       // TODO(shiyu1994)
     } else {
       if (!task->reverse) {
-        if (use_16bit) {
+        if (use_16bit_acc && use_16bit_bin) {
           const int32_t* hist_ptr = 
             reinterpret_cast<const int32_t*>(IS_LARGER ? larger_leaf_splits->hist_in_leaf : smaller_leaf_splits->hist_in_leaf) + task->hist_offset;
-          FindBestSplitsDiscretizedForLeafKernelInner<USE_RAND, USE_L1, USE_SMOOTHING, false, int32_t, true>(
+          FindBestSplitsDiscretizedForLeafKernelInner<USE_RAND, USE_L1, USE_SMOOTHING, false, int32_t, int32_t, true, true>(
+            // input feature information
+            hist_ptr,
+            // input task information
+            task,
+            cuda_random,
+            // input config parameter values
+            lambda_l1,
+            lambda_l2,
+            path_smooth,
+            min_data_in_leaf,
+            min_sum_hessian_in_leaf,
+            min_gain_to_split,
+            // input parent node information
+            parent_gain,
+            sum_gradients_hessians,
+            num_data,
+            parent_output,
+            // gradient scale
+            *grad_scale,
+            *hess_scale,
+            // output parameters
+            out);
+        } else if (use_16bit_bin && !use_16bit_acc) {
+          const int32_t* hist_ptr = 
+            reinterpret_cast<const int32_t*>(IS_LARGER ? larger_leaf_splits->hist_in_leaf : smaller_leaf_splits->hist_in_leaf) + task->hist_offset;
+          FindBestSplitsDiscretizedForLeafKernelInner<USE_RAND, USE_L1, USE_SMOOTHING, false, int32_t, int64_t, true, false>(
             // input feature information
             hist_ptr,
             // input task information
@@ -950,7 +989,7 @@ __global__ void FindBestSplitsDiscretizedForLeafKernel(
         } else {
           const int64_t* hist_ptr = 
             reinterpret_cast<const int64_t*>(IS_LARGER ? larger_leaf_splits->hist_in_leaf : smaller_leaf_splits->hist_in_leaf) + task->hist_offset;
-          FindBestSplitsDiscretizedForLeafKernelInner<USE_RAND, USE_L1, USE_SMOOTHING, false, int64_t, false>(
+          FindBestSplitsDiscretizedForLeafKernelInner<USE_RAND, USE_L1, USE_SMOOTHING, false, int64_t, int64_t, false, false>(
             // input feature information
             hist_ptr,
             // input task information
@@ -975,10 +1014,36 @@ __global__ void FindBestSplitsDiscretizedForLeafKernel(
             out);
         }
       } else {
-        if (use_16bit) {
+        if (use_16bit_acc && use_16bit_bin) {
           const int32_t* hist_ptr = 
             reinterpret_cast<const int32_t*>(IS_LARGER ? larger_leaf_splits->hist_in_leaf : smaller_leaf_splits->hist_in_leaf) + task->hist_offset;
-          FindBestSplitsDiscretizedForLeafKernelInner<USE_RAND, USE_L1, USE_SMOOTHING, true, int32_t, true>(
+          FindBestSplitsDiscretizedForLeafKernelInner<USE_RAND, USE_L1, USE_SMOOTHING, true, int32_t, int32_t, true, true>(
+            // input feature information
+            hist_ptr,
+            // input task information
+            task,
+            cuda_random,
+            // input config parameter values
+            lambda_l1,
+            lambda_l2,
+            path_smooth,
+            min_data_in_leaf,
+            min_sum_hessian_in_leaf,
+            min_gain_to_split,
+            // input parent node information
+            parent_gain,
+            sum_gradients_hessians,
+            num_data,
+            parent_output,
+            // gradient scale
+            *grad_scale,
+            *hess_scale,
+            // output parameters
+            out);
+        } else if (use_16bit_bin && !use_16bit_acc) {
+          const int32_t* hist_ptr = 
+            reinterpret_cast<const int32_t*>(IS_LARGER ? larger_leaf_splits->hist_in_leaf : smaller_leaf_splits->hist_in_leaf) + task->hist_offset;
+          FindBestSplitsDiscretizedForLeafKernelInner<USE_RAND, USE_L1, USE_SMOOTHING, true, int32_t, int64_t, true, false>(
             // input feature information
             hist_ptr,
             // input task information
@@ -1004,7 +1069,7 @@ __global__ void FindBestSplitsDiscretizedForLeafKernel(
         } else {
           const int64_t* hist_ptr = 
             reinterpret_cast<const int64_t*>(IS_LARGER ? larger_leaf_splits->hist_in_leaf : smaller_leaf_splits->hist_in_leaf) + task->hist_offset;
-          FindBestSplitsDiscretizedForLeafKernelInner<USE_RAND, USE_L1, USE_SMOOTHING, true, int64_t, false>(
+          FindBestSplitsDiscretizedForLeafKernelInner<USE_RAND, USE_L1, USE_SMOOTHING, true, int64_t, int64_t, false, false>(
             // input feature information
             hist_ptr,
             // input task information
@@ -1771,7 +1836,9 @@ void CUDABestSplitFinder::LaunchFindBestSplitsForLeafKernelInner2(LaunchFindBest
   const score_t* grad_scale, \
   const score_t* hess_scale, \
   const uint8_t smaller_num_bits_in_histogram_bins, \
-  const uint8_t larger_num_bits_in_histogram_bins
+  const uint8_t larger_num_bits_in_histogram_bins, \
+  const uint8_t smaller_num_bits_in_histogram_acc, \
+  const uint8_t larger_num_bits_in_histogram_acc
 
 #define LaunchFindBestSplitsDiscretizedForLeafKernel_ARGS \
   smaller_leaf_splits, \
@@ -1783,7 +1850,9 @@ void CUDABestSplitFinder::LaunchFindBestSplitsForLeafKernelInner2(LaunchFindBest
   grad_scale, \
   hess_scale, \
   smaller_num_bits_in_histogram_bins, \
-  larger_num_bits_in_histogram_bins
+  larger_num_bits_in_histogram_bins, \
+  smaller_num_bits_in_histogram_acc, \
+  larger_num_bits_in_histogram_acc
 
 #define FindBestSplitsDiscretizedForLeafKernel_ARGS \
     cuda_is_feature_used_bytree_, \
@@ -1794,6 +1863,8 @@ void CUDABestSplitFinder::LaunchFindBestSplitsForLeafKernelInner2(LaunchFindBest
     larger_leaf_splits, \
     smaller_num_bits_in_histogram_bins, \
     larger_num_bits_in_histogram_bins, \
+    smaller_num_bits_in_histogram_acc, \
+    larger_num_bits_in_histogram_acc, \
     min_data_in_leaf_, \
     min_sum_hessian_in_leaf_, \
     min_gain_to_split_, \

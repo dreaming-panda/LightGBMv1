@@ -73,7 +73,9 @@ class CUDABestSplitFinder {
     const score_t* grad_scale,
     const score_t* hess_scale,
     const uint8_t smaller_num_bits_in_histogram_bins,
-    const uint8_t larger_num_bits_in_histogram_bins);
+    const uint8_t larger_num_bits_in_histogram_bins,
+    const uint8_t smaller_num_bits_in_histogram_acc,
+    const uint8_t larger_num_bits_in_histogram_acc);
 
   const CUDASplitInfo* FindBestFromAllSplits(
     const int cur_num_leaves,
@@ -130,7 +132,9 @@ class CUDABestSplitFinder {
   const score_t* grad_scale, \
   const score_t* hess_scale, \
   const uint8_t smaller_num_bits_in_histogram_bins, \
-  const uint8_t larger_num_bits_in_histogram_bins
+  const uint8_t larger_num_bits_in_histogram_bins, \
+  const uint8_t smaller_num_bits_in_histogram_acc, \
+  const uint8_t larger_num_bits_in_histogram_acc
 
   void LaunchFindBestSplitsDiscretizedForLeafKernel(LaunchFindBestSplitsDiscretizedForLeafKernel_PARAMS);
 
