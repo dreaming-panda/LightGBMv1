@@ -52,12 +52,16 @@ class CUDAHistogramConstructor {
     const data_size_t num_data_in_smaller_leaf,
     const data_size_t num_data_in_larger_leaf,
     const double sum_hessians_in_smaller_leaf,
-    const double sum_hessians_in_larger_leaf);
+    const double sum_hessians_in_larger_leaf,
+    const uint8_t num_bits_in_histogram_bins);
 
   void SubtractHistogramForLeaf(
     const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
     const CUDALeafSplitsStruct* cuda_larger_leaf_splits,
-    const bool gpu_use_discretized_grad);
+    const bool gpu_use_discretized_grad,
+    const uint8_t parent_num_bits_in_histogram_bins,
+    const uint8_t smaller_num_bits_in_histogram_bins,
+    const uint8_t larger_num_bits_in_histogram_bins);
 
   void ResetTrainingData(const Dataset* train_data, TrainingShareStates* share_states);
 
@@ -85,7 +89,8 @@ class CUDAHistogramConstructor {
 
   void LaunchConstructHistogramKernel(
     const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
-    const data_size_t num_data_in_smaller_leaf);
+    const data_size_t num_data_in_smaller_leaf,
+    const uint8_t num_bits_in_histogram_bins);
 
   template <typename HIST_TYPE, int SHARED_HIST_SIZE>
   void LaunchConstructHistogramKernelInner(
@@ -95,7 +100,8 @@ class CUDAHistogramConstructor {
   template <int SHARED_HIST_SIZE>
   void LaunchConstructDiscretizedHistogramKernel(
     const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
-    const data_size_t num_data_in_smaller_leaf);
+    const data_size_t num_data_in_smaller_leaf,
+    const uint8_t num_bits_in_histogram_bins);
 
   void LaunchSparseConstructHistogramKernel(
     const dim3 grid_dim,
@@ -105,7 +111,10 @@ class CUDAHistogramConstructor {
   void LaunchSubtractHistogramKernel(
     const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
     const CUDALeafSplitsStruct* cuda_larger_leaf_splits,
-    const bool gpu_use_discretized_grad);
+    const bool gpu_use_discretized_grad,
+    const uint8_t parent_num_bits_in_histogram_bins,
+    const uint8_t smaller_num_bits_in_histogram_bins,
+    const uint8_t larger_num_bits_in_histogram_bins);
 
   // Host memory
 
@@ -170,6 +179,8 @@ class CUDAHistogramConstructor {
   const bool gpu_use_discretized_grad_;
 
   int nccl_thread_index_;
+
+  CUDAVector<hist_t> hist_buffer_for_num_bit_change_;
 };
 
 }  // namespace LightGBM

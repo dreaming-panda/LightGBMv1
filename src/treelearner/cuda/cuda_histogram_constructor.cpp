@@ -128,6 +128,7 @@ void CUDAHistogramConstructor::Init(const Dataset* train_data, TrainingShareStat
     const size_t buffer_size = static_cast<size_t>(grid_dim_y) * static_cast<size_t>(num_total_bin_) * 2;
     AllocateCUDAMemory<float>(&cuda_hist_buffer_, buffer_size, __FILE__, __LINE__);
   }
+  hist_buffer_for_num_bit_change_.Resize(num_total_bin_ * 2);
 }
 
 void CUDAHistogramConstructor::ConstructHistogramForLeaf(
@@ -138,21 +139,26 @@ void CUDAHistogramConstructor::ConstructHistogramForLeaf(
   const data_size_t num_data_in_smaller_leaf,
   const data_size_t /*num_data_in_larger_leaf*/,
   const double sum_hessians_in_smaller_leaf,
-  const double sum_hessians_in_larger_leaf) {
+  const double sum_hessians_in_larger_leaf,
+  const uint8_t num_bits_in_histogram_bins) {
   if ((global_num_data_in_smaller_leaf <= min_data_in_leaf_ || sum_hessians_in_smaller_leaf <= min_sum_hessian_in_leaf_) &&
     (global_num_data_in_larger_leaf <= min_data_in_leaf_ || sum_hessians_in_larger_leaf <= min_sum_hessian_in_leaf_)) {
     return;
   }
-  LaunchConstructHistogramKernel(cuda_smaller_leaf_splits, num_data_in_smaller_leaf);
+  LaunchConstructHistogramKernel(cuda_smaller_leaf_splits, num_data_in_smaller_leaf, num_bits_in_histogram_bins);
   SynchronizeCUDADevice(__FILE__, __LINE__);
 }
 
 void CUDAHistogramConstructor::SubtractHistogramForLeaf(
   const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
   const CUDALeafSplitsStruct* cuda_larger_leaf_splits,
-  const bool gpu_use_discretized_grad) {
+  const bool gpu_use_discretized_grad,
+  const uint8_t parent_num_bits_in_histogram_bins,
+  const uint8_t smaller_num_bits_in_histogram_bins,
+  const uint8_t larger_num_bits_in_histogram_bins) {
   global_timer.Start("CUDAHistogramConstructor::ConstructHistogramForLeaf::LaunchSubtractHistogramKernel", nccl_thread_index_);
-  LaunchSubtractHistogramKernel(cuda_smaller_leaf_splits, cuda_larger_leaf_splits, gpu_use_discretized_grad);
+  LaunchSubtractHistogramKernel(cuda_smaller_leaf_splits, cuda_larger_leaf_splits, gpu_use_discretized_grad,
+    parent_num_bits_in_histogram_bins, smaller_num_bits_in_histogram_bins, larger_num_bits_in_histogram_bins);
   global_timer.Stop("CUDAHistogramConstructor::ConstructHistogramForLeaf::LaunchSubtractHistogramKernel", nccl_thread_index_);
 }
 
