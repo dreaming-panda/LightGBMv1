@@ -24,14 +24,14 @@ CUDALeafSplits::~CUDALeafSplits() {
   DeallocateCUDAMemory<double>(&cuda_sum_of_hessians_buffer_, __FILE__, __LINE__);
 }
 
-void CUDALeafSplits::Init(const bool gpu_use_discretized_grad) {
+void CUDALeafSplits::Init(const bool use_discretized_grad) {
   num_blocks_init_from_gradients_ = (num_data_ + NUM_THRADS_PER_BLOCK_LEAF_SPLITS - 1) / NUM_THRADS_PER_BLOCK_LEAF_SPLITS;
 
   // allocate more memory for sum reduction in CUDA
   // only the first element records the final sum
   AllocateCUDAMemory<double>(&cuda_sum_of_gradients_buffer_, num_blocks_init_from_gradients_, __FILE__, __LINE__);
   AllocateCUDAMemory<double>(&cuda_sum_of_hessians_buffer_, num_blocks_init_from_gradients_, __FILE__, __LINE__);
-  if (gpu_use_discretized_grad) {
+  if (use_discretized_grad) {
     AllocateCUDAMemory<int64_t>(&cuda_sum_of_gradients_hessians_buffer_, num_blocks_init_from_gradients_, __FILE__, __LINE__);
   } else {
     cuda_sum_of_gradients_hessians_buffer_ = nullptr;

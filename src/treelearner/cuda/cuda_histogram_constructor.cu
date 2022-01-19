@@ -389,7 +389,7 @@ void CUDAHistogramConstructor::LaunchConstructHistogramKernel(
   const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
   const data_size_t num_data_in_smaller_leaf,
   const uint8_t num_bits_in_histogram_bins) {
-  if (gpu_use_discretized_grad_) {
+  if (use_discretized_grad_) {
     CHECK(cuda_row_data_->shared_hist_size() == 6144 * 2 || cuda_row_data_->shared_hist_size() == 6144 * 4 || cuda_row_data_->shared_hist_size() == 3072);
     if (cuda_row_data_->shared_hist_size() == 6144 * 2) {
       LaunchConstructDiscretizedHistogramKernel<6144 * 2>(cuda_smaller_leaf_splits, num_data_in_smaller_leaf, num_bits_in_histogram_bins);
@@ -1082,11 +1082,11 @@ __global__ void FixHistogramDiscretizedKernel(
 void CUDAHistogramConstructor::LaunchSubtractHistogramKernel(
   const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
   const CUDALeafSplitsStruct* cuda_larger_leaf_splits,
-  const bool gpu_use_discretized_grad,
+  const bool use_discretized_grad,
   const uint8_t parent_num_bits_in_histogram_bins,
   const uint8_t smaller_num_bits_in_histogram_bins,
   const uint8_t larger_num_bits_in_histogram_bins) {
-  if (!gpu_use_discretized_grad) {
+  if (!use_discretized_grad) {
     const int num_subtract_threads = 2 * num_total_bin_;
     const int num_subtract_blocks = (num_subtract_threads + SUBTRACT_BLOCK_SIZE - 1) / SUBTRACT_BLOCK_SIZE;
     global_timer.Start("CUDAHistogramConstructor::FixHistogramKernel", nccl_thread_index_);

@@ -30,11 +30,13 @@ enum MissingType {
 };
 
 typedef double hist_t;
+typedef int32_t int_hist_t;
 typedef uint64_t hist_cnt_t;
 // check at compile time
 static_assert(sizeof(hist_t) == sizeof(hist_cnt_t), "Histogram entry size is not correct");
 
 const size_t kHistEntrySize = 2 * sizeof(hist_t);
+const size_t kIntHistEntrySize = 2 * sizeof(int_hist_t);
 const int kHistOffset = 2;
 const double kSparseThreshold = 0.7;
 
@@ -333,6 +335,15 @@ class Bin {
     const score_t* ordered_gradients, const score_t* ordered_hessians,
     hist_t* out) const = 0;
 
+  virtual void ConstructHistogramInt(
+    const data_size_t* data_indices, data_size_t start, data_size_t end,
+    const score_t* ordered_gradients, const score_t* ordered_hessians,
+    hist_t* out) const = 0;
+
+  virtual void ConstructHistogramInt(data_size_t start, data_size_t end,
+    const score_t* ordered_gradients, const score_t* ordered_hessians,
+    hist_t* out) const = 0;
+
   /*!
   * \brief Construct histogram of this feature,
   *        Note: We use ordered_gradients and ordered_hessians to improve cache hit chance
@@ -350,6 +361,12 @@ class Bin {
                                   const score_t* ordered_gradients, hist_t* out) const = 0;
 
   virtual void ConstructHistogram(data_size_t start, data_size_t end,
+                                  const score_t* ordered_gradients, hist_t* out) const = 0;
+
+  virtual void ConstructHistogramInt(const data_size_t* data_indices, data_size_t start, data_size_t end,
+                                  const score_t* ordered_gradients, hist_t* out) const = 0;
+
+  virtual void ConstructHistogramInt(data_size_t start, data_size_t end,
                                   const score_t* ordered_gradients, hist_t* out) const = 0;
 
   virtual data_size_t Split(uint32_t min_bin, uint32_t max_bin,
@@ -464,6 +481,23 @@ class MultiValBin {
                                          const score_t* ordered_gradients,
                                          const score_t* ordered_hessians,
                                          hist_t* out) const = 0;
+
+  virtual void ConstructHistogramInt(const data_size_t* data_indices,
+                                     data_size_t start, data_size_t end,
+                                     const score_t* gradients,
+                                     const score_t* hessians,
+                                     hist_t* out) const = 0;
+
+  virtual void ConstructHistogramInt(data_size_t start, data_size_t end,
+                                     const score_t* gradients,
+                                     const score_t* hessians,
+                                     hist_t* out) const = 0;
+
+  virtual void ConstructHistogramOrderedInt(const data_size_t* data_indices,
+                                            data_size_t start, data_size_t end,
+                                            const score_t* ordered_gradients,
+                                            const score_t* ordered_hessians,
+                                            hist_t* out) const = 0;
 
   virtual void FinishLoad() = 0;
 

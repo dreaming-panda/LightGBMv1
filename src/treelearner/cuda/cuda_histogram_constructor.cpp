@@ -21,7 +21,7 @@ CUDAHistogramConstructor::CUDAHistogramConstructor(
   const double min_sum_hessian_in_leaf,
   const int gpu_device_id,
   const bool gpu_use_dp,
-  const bool gpu_use_discretized_grad):
+  const bool use_discretized_grad):
   num_data_(train_data->num_data()),
   num_features_(train_data->num_features()),
   num_leaves_(num_leaves),
@@ -30,7 +30,7 @@ CUDAHistogramConstructor::CUDAHistogramConstructor(
   min_sum_hessian_in_leaf_(min_sum_hessian_in_leaf),
   gpu_device_id_(gpu_device_id),
   gpu_use_dp_(gpu_use_dp),
-  gpu_use_discretized_grad_(gpu_use_discretized_grad) {
+  use_discretized_grad_(use_discretized_grad) {
   InitFeatureMetaInfo(train_data, feature_hist_offsets);
   cuda_row_data_.reset(nullptr);
   cuda_feature_num_bins_ = nullptr;
@@ -113,7 +113,7 @@ void CUDAHistogramConstructor::Init(const Dataset* train_data, TrainingShareStat
   InitCUDAMemoryFromHostMemory<uint32_t>(&cuda_feature_most_freq_bins_,
     feature_most_freq_bins_.data(), feature_most_freq_bins_.size(), __FILE__, __LINE__);
 
-  cuda_row_data_.reset(new CUDARowData(train_data, share_state, gpu_device_id_, gpu_use_dp_, gpu_use_discretized_grad_));
+  cuda_row_data_.reset(new CUDARowData(train_data, share_state, gpu_device_id_, gpu_use_dp_, use_discretized_grad_));
   cuda_row_data_->Init(train_data, share_state);
 
   CUDASUCCESS_OR_FATAL(cudaStreamCreate(&cuda_stream_));
@@ -152,12 +152,12 @@ void CUDAHistogramConstructor::ConstructHistogramForLeaf(
 void CUDAHistogramConstructor::SubtractHistogramForLeaf(
   const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
   const CUDALeafSplitsStruct* cuda_larger_leaf_splits,
-  const bool gpu_use_discretized_grad,
+  const bool use_discretized_grad,
   const uint8_t parent_num_bits_in_histogram_bins,
   const uint8_t smaller_num_bits_in_histogram_bins,
   const uint8_t larger_num_bits_in_histogram_bins) {
   global_timer.Start("CUDAHistogramConstructor::ConstructHistogramForLeaf::LaunchSubtractHistogramKernel", nccl_thread_index_);
-  LaunchSubtractHistogramKernel(cuda_smaller_leaf_splits, cuda_larger_leaf_splits, gpu_use_discretized_grad,
+  LaunchSubtractHistogramKernel(cuda_smaller_leaf_splits, cuda_larger_leaf_splits, use_discretized_grad,
     parent_num_bits_in_histogram_bins, smaller_num_bits_in_histogram_bins, larger_num_bits_in_histogram_bins);
   global_timer.Stop("CUDAHistogramConstructor::ConstructHistogramForLeaf::LaunchSubtractHistogramKernel", nccl_thread_index_);
 }
@@ -200,7 +200,7 @@ void CUDAHistogramConstructor::ResetTrainingData(const Dataset* train_data, Trai
   InitCUDAMemoryFromHostMemory<uint32_t>(&cuda_feature_most_freq_bins_,
     feature_most_freq_bins_.data(), feature_most_freq_bins_.size(), __FILE__, __LINE__);
 
-  cuda_row_data_.reset(new CUDARowData(train_data, share_states, gpu_device_id_, gpu_use_dp_, gpu_use_discretized_grad_));
+  cuda_row_data_.reset(new CUDARowData(train_data, share_states, gpu_device_id_, gpu_use_dp_, use_discretized_grad_));
   cuda_row_data_->Init(train_data, share_states);
 
   InitCUDAMemoryFromHostMemory<int>(&cuda_need_fix_histogram_features_, need_fix_histogram_features_.data(), need_fix_histogram_features_.size(), __FILE__, __LINE__);

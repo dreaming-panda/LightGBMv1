@@ -800,7 +800,7 @@ void CUDATreeLearner::ConstructHistograms(const std::vector<int8_t>& is_feature_
   // then construct sparse features on CPU
   // We set data_indices to null to avoid rebuilding ordered gradients/hessians
   if (num_sparse_features > 0) {
-    train_data_->ConstructHistograms(is_sparse_feature_used,
+    train_data_->ConstructHistograms<false>(is_sparse_feature_used,
     smaller_leaf_splits_->data_indices(), smaller_leaf_splits_->num_data_in_leaf(),
     gradients_, hessians_,
     ordered_gradients_.data(), ordered_hessians_.data(),
@@ -904,7 +904,7 @@ void CUDATreeLearner::ConstructHistograms(const std::vector<int8_t>& is_feature_
     // then construct sparse features on CPU
     // We set data_indices to null to avoid rebuilding ordered gradients/hessians
     if (num_sparse_features > 0) {
-    train_data_->ConstructHistograms(is_sparse_feature_used,
+    train_data_->ConstructHistograms<false>(is_sparse_feature_used,
       larger_leaf_splits_->data_indices(), larger_leaf_splits_->num_data_in_leaf(),
       gradients_, hessians_,
       ordered_gradients_.data(), ordered_hessians_.data(),

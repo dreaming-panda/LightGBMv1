@@ -39,7 +39,7 @@ class CUDALeafSplits {
 
   ~CUDALeafSplits();
 
-  void Init(const bool gpu_use_discretized_grad);
+  void Init(const bool use_discretized_grad);
 
   void SetNCCL(ncclComm_t* nccl_comm) {
     use_nccl_ = true;

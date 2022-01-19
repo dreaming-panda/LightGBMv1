@@ -170,6 +170,82 @@ class DenseBin : public Bin {
         nullptr, start, end, ordered_gradients, nullptr, out);
   }
 
+  template <bool USE_INDICES, bool USE_PREFETCH, bool USE_HESSIAN>
+  void ConstructHistogramIntInner(const data_size_t* data_indices,
+                               data_size_t start, data_size_t end,
+                               const score_t* ordered_gradients,
+                               hist_t* out) const {
+    data_size_t i = start;
+    int64_t* out_ptr = reinterpret_cast<int64_t*>(out);
+    const int16_t* gradients_ptr = reinterpret_cast<const int16_t*>(ordered_gradients);
+    const VAL_T* data_ptr_base = data_.data();
+    if (USE_PREFETCH) {
+      const data_size_t pf_offset = 64 / sizeof(VAL_T);
+      const data_size_t pf_end = end - pf_offset;
+      for (; i < pf_end; ++i) {
+        const auto idx = USE_INDICES ? data_indices[i] : i;
+        const auto pf_idx =
+            USE_INDICES ? data_indices[i + pf_offset] : i + pf_offset;
+        if (IS_4BIT) {
+          PREFETCH_T0(data_ptr_base + (pf_idx >> 1));
+        } else {
+          PREFETCH_T0(data_ptr_base + pf_idx);
+        }
+        const auto ti = static_cast<uint32_t>(data(idx));
+        const int16_t gradient_16 = gradients_ptr[i];
+        if (USE_HESSIAN) {
+          const int64_t gradient_64 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 32) | (gradient_16 & 0xff);
+          out_ptr[ti] += gradient_64;
+        } else {
+          const int64_t gradient_64 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 32) | (1);
+          out_ptr[ti] += gradient_64;
+        }
+      }
+    }
+    for (; i < end; ++i) {
+      const auto idx = USE_INDICES ? data_indices[i] : i;
+      const auto ti = static_cast<uint32_t>(data(idx));
+      const int16_t gradient_16 = gradients_ptr[i];
+      if (USE_HESSIAN) {
+        const int64_t gradient_64 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 32) | (gradient_16 & 0xff);
+        out_ptr[ti] += gradient_64;
+      } else {
+        const int64_t gradient_64 = (static_cast<int64_t>(static_cast<int8_t>(gradient_16 >> 8)) << 32) | (1);
+        out_ptr[ti] += gradient_64;
+      }
+    }
+  }
+
+  void ConstructHistogramInt(const data_size_t* data_indices, data_size_t start,
+                          data_size_t end, const score_t* ordered_gradients,
+                          const score_t* /*ordered_hessians*/,
+                          hist_t* out) const override {
+    ConstructHistogramIntInner<true, true, true>(
+        data_indices, start, end, ordered_gradients, out);
+  }
+
+  void ConstructHistogramInt(data_size_t start, data_size_t end,
+                          const score_t* ordered_gradients,
+                          const score_t* /*ordered_hessians*/,
+                          hist_t* out) const override {
+    ConstructHistogramIntInner<false, false, true>(
+        nullptr, start, end, ordered_gradients, out);
+  }
+
+  void ConstructHistogramInt(const data_size_t* data_indices, data_size_t start,
+                          data_size_t end, const score_t* ordered_gradients,
+                          hist_t* out) const override {
+    ConstructHistogramIntInner<true, true, false>(data_indices, start, end,
+                                               ordered_gradients, out);
+  }
+
+  void ConstructHistogramInt(data_size_t start, data_size_t end,
+                          const score_t* ordered_gradients,
+                          hist_t* out) const override {
+    ConstructHistogramIntInner<false, false, false>(
+        nullptr, start, end, ordered_gradients, out);
+  }
+
 
   template <bool MISS_IS_ZERO, bool MISS_IS_NA, bool MFB_IS_ZERO,
             bool MFB_IS_NA, bool USE_MIN_BIN>

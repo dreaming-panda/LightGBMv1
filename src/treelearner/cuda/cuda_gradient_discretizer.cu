@@ -165,36 +165,6 @@ void CUDAGradientDiscretizer::DiscretizeGradients(
   ++iter_;
 }
 
-__global__ void ScaleHistogramKernel(
-  const int num_total_bin,
-  const score_t* grad_scale_ptr,
-  const score_t* hess_scale_ptr,
-  CUDALeafSplitsStruct* cuda_leaf_splits,
-  int32_t* histogram_ptr) {
-  const score_t grad_scale = *grad_scale_ptr;
-  const score_t hess_scale = *hess_scale_ptr;
-  const int32_t* input_histogram = reinterpret_cast<const int32_t*>(cuda_leaf_splits->hist_in_leaf);
-  hist_t* histogram = cuda_leaf_splits->hist_in_leaf;
-  const int bin = static_cast<int>(threadIdx.x + blockIdx.x * blockDim.x);
-  if (bin < num_total_bin) {
-    const hist_t grad = input_histogram[((bin << 1) + 1) << 1] * grad_scale;
-    const hist_t hess = input_histogram[((bin << 1)) << 1] * hess_scale;
-    histogram[(bin << 1)] = grad;
-    histogram[(bin << 1) + 1] = hess;
-  }
-}
-
-void CUDAGradientDiscretizer::ScaleHistogram(
-  const int num_total_bin, CUDALeafSplitsStruct* cuda_leaf_splits, cudaStream_t cuda_stream) const {
-  const int num_blocks = (num_total_bin + CUDA_GRADIENT_DISCRETIZER_BLOCK_SIZE - 1) / CUDA_GRADIENT_DISCRETIZER_BLOCK_SIZE;
-  int32_t* histogram_ptr = nullptr;
-  ScaleHistogramKernel<<<num_blocks, CUDA_GRADIENT_DISCRETIZER_BLOCK_SIZE, 0, cuda_stream>>>(
-    num_total_bin,
-    grad_max_block_buffer_.RawData(),
-    hess_max_block_buffer_.RawData(),
-    cuda_leaf_splits, histogram_ptr);
-}
-
 }  // namespace LightGBM
 
 #endif  // USE_CUDA

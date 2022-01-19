@@ -26,6 +26,7 @@
 #include "leaf_splits.hpp"
 #include "monotone_constraints.hpp"
 #include "split_info.hpp"
+#include "gradient_discretizer.hpp"
 
 #ifdef USE_GPU
 // Use 4KBytes aligned allocator for ordered gradients and ordered Hessians when GPU is enabled.
@@ -172,6 +173,8 @@ class SerialTreeLearner: public TreeLearner {
   */
   inline virtual data_size_t GetGlobalDataCountInLeaf(int leaf_idx) const;
 
+  void RenewIntGradTreeOutput(Tree* tree) const;
+
   /*! \brief number of data */
   data_size_t num_data_;
   /*! \brief number of features */
@@ -225,6 +228,8 @@ class SerialTreeLearner: public TreeLearner {
   const Json* forced_split_json_;
   std::unique_ptr<TrainingShareStates> share_state_;
   std::unique_ptr<CostEfficientGradientBoosting> cegb_;
+  std::unique_ptr<GradientDiscretizer> gradient_discretizer_;
+  std::vector<int8_t> ordered_int_gradients_and_hessians_;
 };
 
 inline data_size_t SerialTreeLearner::GetGlobalDataCountInLeaf(int leaf_idx) const {

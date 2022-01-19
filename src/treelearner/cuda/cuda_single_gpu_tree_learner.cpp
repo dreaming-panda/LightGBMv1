@@ -52,16 +52,16 @@ void CUDASingleGPUTreeLearner::Init(const Dataset* train_data, bool is_constant_
   if (nccl_comm_ != nullptr) {
     cuda_smaller_leaf_splits_->SetNCCL(nccl_comm_);
   }
-  cuda_smaller_leaf_splits_->Init(config_->gpu_use_discretized_grad);
+  cuda_smaller_leaf_splits_->Init(config_->use_discretized_grad);
   cuda_larger_leaf_splits_.reset(new CUDALeafSplits(num_data_));
   if (nccl_comm_ != nullptr) {
     cuda_larger_leaf_splits_->SetNCCL(nccl_comm_);
   }
-  cuda_larger_leaf_splits_->Init(config_->gpu_use_discretized_grad);
+  cuda_larger_leaf_splits_->Init(config_->use_discretized_grad);
 
   cuda_histogram_constructor_.reset(new CUDAHistogramConstructor(train_data_, config_->num_leaves, num_threads_,
     share_state_->feature_hist_offsets(),
-    config_->min_data_in_leaf, config_->min_sum_hessian_in_leaf, gpu_device_id_, config_->gpu_use_dp, config_->gpu_use_discretized_grad));
+    config_->min_data_in_leaf, config_->min_sum_hessian_in_leaf, gpu_device_id_, config_->gpu_use_dp, config_->use_discretized_grad));
   if (nccl_comm_ != nullptr) {
     cuda_histogram_constructor_->SetNCCL(nccl_thread_index_);
   }
@@ -71,7 +71,7 @@ void CUDASingleGPUTreeLearner::Init(const Dataset* train_data, bool is_constant_
   num_total_bin_ = feature_hist_offsets.empty() ? 0 : static_cast<int>(feature_hist_offsets.back());
   cuda_data_partition_.reset(new CUDADataPartition(
     train_data_, num_total_bin_, config_->num_leaves, num_threads_,
-    config_->gpu_use_discretized_grad,
+    config_->use_discretized_grad,
     cuda_histogram_constructor_->cuda_hist_pointer()));
   if (nccl_comm_ != nullptr) {
     cuda_data_partition_->SetNCCL(nccl_thread_index_, nccl_comm_);
@@ -97,11 +97,11 @@ void CUDASingleGPUTreeLearner::Init(const Dataset* train_data, bool is_constant_
 
   num_cat_threshold_ = 0;
 
-  if (config_->gpu_use_discretized_grad) {
+  if (config_->use_discretized_grad) {
     cuda_leaf_gradient_stat_buffer_.Resize(config_->num_leaves);
     cuda_leaf_hessian_stat_buffer_.Resize(config_->num_leaves);
     cuda_gradient_discretizer_.reset(new CUDAGradientDiscretizer(
-      config_->gpu_use_discretized_grad, config_->gpu_grad_discretize_bins, config_->num_iterations, config_->seed));
+      config_->grad_discretize_bins, config_->num_iterations, config_->seed, false));
     cuda_gradient_discretizer_->SetNCCL(nccl_comm_);
     cuda_gradient_discretizer_->Init(num_data_);
   } else {
@@ -122,15 +122,15 @@ void CUDASingleGPUTreeLearner::Init(const Dataset* train_data, bool is_constant_
 
 void CUDASingleGPUTreeLearner::SetNumBitsInHistogramBin(const int left_leaf_index, const int right_leaf_index) {
   if (right_leaf_index == -1) {
-    if (!config_->gpu_use_discretized_grad) {
+    if (!config_->use_discretized_grad) {
       leaf_num_bits_in_histogram_bin_[left_leaf_index] = 32;
       leaf_num_bits_in_histogram_acc_[left_leaf_index] = 32;
       return;
     }
     const data_size_t num_data_in_left_leaf = (nccl_comm_ == nullptr) ? leaf_num_data_[left_leaf_index] : global_num_data_in_leaf_[left_leaf_index];
-    const uint64_t max_stat = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins);
-    const uint64_t max_stat_per_bin = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins)
-      / static_cast<uint64_t>(config_->gpu_per_bin_div);
+    const uint64_t max_stat = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins);
+    const uint64_t max_stat_per_bin = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins)
+      / static_cast<uint64_t>(config_->per_bin_div);
     if (max_stat_per_bin < 256) {
       leaf_num_bits_in_histogram_bin_[left_leaf_index] = 8;
     } else if (max_stat_per_bin < 65536) {
@@ -146,7 +146,7 @@ void CUDASingleGPUTreeLearner::SetNumBitsInHistogramBin(const int left_leaf_inde
       leaf_num_bits_in_histogram_acc_[left_leaf_index] = 32;
     }
   } else {
-    if (!config_->gpu_use_discretized_grad) {
+    if (!config_->use_discretized_grad) {
       node_num_bits_in_histogram_bin_[left_leaf_index] = 32;
       leaf_num_bits_in_histogram_bin_[left_leaf_index] = 32;
       leaf_num_bits_in_histogram_bin_[right_leaf_index] = 32;
@@ -157,12 +157,12 @@ void CUDASingleGPUTreeLearner::SetNumBitsInHistogramBin(const int left_leaf_inde
     }
     const data_size_t num_data_in_left_leaf = (nccl_comm_ == nullptr) ? leaf_num_data_[left_leaf_index] : global_num_data_in_leaf_[left_leaf_index];
     const data_size_t num_data_in_right_leaf = (nccl_comm_ == nullptr) ? leaf_num_data_[right_leaf_index] : global_num_data_in_leaf_[right_leaf_index];
-    const uint64_t max_stat_left = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins);
-    const uint64_t max_stat_right = static_cast<uint64_t>(num_data_in_right_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins);
-    const uint64_t max_stat_left_per_bin = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins) /
-      static_cast<uint64_t>(config_->gpu_per_bin_div);
-    const uint64_t max_stat_right_per_bin = static_cast<uint64_t>(num_data_in_right_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins) /
-      static_cast<uint64_t>(config_->gpu_per_bin_div);
+    const uint64_t max_stat_left = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins);
+    const uint64_t max_stat_right = static_cast<uint64_t>(num_data_in_right_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins);
+    const uint64_t max_stat_left_per_bin = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins) /
+      static_cast<uint64_t>(config_->per_bin_div);
+    const uint64_t max_stat_right_per_bin = static_cast<uint64_t>(num_data_in_right_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins) /
+      static_cast<uint64_t>(config_->per_bin_div);
     node_num_bits_in_histogram_bin_[left_leaf_index] = leaf_num_bits_in_histogram_bin_[left_leaf_index];
     node_num_bits_in_histogram_acc_[left_leaf_index] = leaf_num_bits_in_histogram_acc_[left_leaf_index];
     if (max_stat_left_per_bin < 256) {
@@ -201,7 +201,7 @@ void CUDASingleGPUTreeLearner::BeforeTrain() {
   const data_size_t* leaf_splits_init_indices =
     cuda_data_partition_->use_bagging() ? cuda_data_partition_->cuda_data_indices() : nullptr;
   cuda_data_partition_->BeforeTrain();
-  if (config_->gpu_use_discretized_grad) {
+  if (config_->use_discretized_grad) {
     cuda_gradient_discretizer_->DiscretizeGradients(num_data_, gradients_, hessians_);
     cuda_histogram_constructor_->BeforeTrain(
       reinterpret_cast<const score_t*>(cuda_gradient_discretizer_->discretized_gradients_and_hessians()), nullptr);
@@ -305,7 +305,7 @@ Tree* CUDASingleGPUTreeLearner::Train(const score_t* gradients,
       cuda_histogram_constructor_->SubtractHistogramForLeaf(
         cuda_smaller_leaf_splits_->GetCUDAStruct(),
         cuda_larger_leaf_splits_->GetCUDAStruct(),
-        config_->gpu_use_discretized_grad,
+        config_->use_discretized_grad,
         node_num_bits_in_histogram_bin_[parent_leaf_index],
         leaf_num_bits_in_histogram_bin_[smaller_leaf_index_],
         leaf_num_bits_in_histogram_bin_[larger_leaf_index_]);
@@ -316,7 +316,7 @@ Tree* CUDASingleGPUTreeLearner::Train(const score_t* gradients,
     const uint8_t smaller_leaf_num_bits_acc = leaf_num_bits_in_histogram_acc_[smaller_leaf_index_];
     const uint8_t larger_leaf_num_bits_bin = larger_leaf_index_ < 0 ? 32 : leaf_num_bits_in_histogram_bin_[larger_leaf_index_];
     const uint8_t larger_leaf_num_bits_acc = larger_leaf_index_ < 0 ? 32 : leaf_num_bits_in_histogram_acc_[larger_leaf_index_];
-    if (config_->gpu_use_discretized_grad) {
+    if (config_->use_discretized_grad) {
       cuda_best_split_finder_->FindBestSplitsForLeaf(
         cuda_smaller_leaf_splits_->GetCUDAStruct(),
         cuda_larger_leaf_splits_->GetCUDAStruct(),
@@ -463,7 +463,7 @@ Tree* CUDASingleGPUTreeLearner::Train(const score_t* gradients,
     global_timer.Stop("CUDASingleGPUTreeLearner::Split", nccl_thread_index_);
   }
   SynchronizeCUDADevice(__FILE__, __LINE__);
-  if (config_->gpu_use_discretized_grad && config_->gpu_use_discretized_grad_renew) {
+  if (config_->use_discretized_grad && config_->discretized_grad_renew) {
     global_timer.Start("CUDASingleGPUTreeLearner::RenewDiscretizedTreeLeaves", nccl_thread_index_);
     RenewDiscretizedTreeLeaves(tree.get());
     global_timer.Stop("CUDASingleGPUTreeLearner::RenewDiscretizedTreeLeaves", nccl_thread_index_);
@@ -760,7 +760,7 @@ void CUDASingleGPUTreeLearner::RenewDiscretizedTreeLeaves(CUDATree* cuda_tree) {
 }
 
 void CUDASingleGPUTreeLearner::NCCLReduceHistogram() {
-  if (config_->gpu_use_discretized_grad) {
+  if (config_->use_discretized_grad) {
     hist_t* smaller_leaf_hist_pointer = cuda_histogram_constructor_->cuda_hist_pointer() +
       leaf_to_hist_index_map_[smaller_leaf_index_] * num_total_bin_;
     const uint8_t bit_size = leaf_num_bits_in_histogram_bin_[smaller_leaf_index_];

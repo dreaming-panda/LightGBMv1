@@ -1017,22 +1017,26 @@ struct Config {
   // desc = **Note**: can be used only in OpenCL implementation, in CUDA implementation only double precision is currently supported
   bool gpu_use_dp = false;
 
-  // desc = whether to use gradient discretization on CUDA
-  bool gpu_use_discretized_grad = false;
-
-  // desc = number of bins to discretize gradients and hessians
-  int gpu_grad_discretize_bins = 4;
-
-  // desc = whether to renew the leaf values with original gradients
-  bool gpu_use_discretized_grad_renew = false;
-
-  // desc = the presumed factor used to divide data on leaf into bins
-  int gpu_per_bin_div = 100;
-
   // check = >0
   // desc = number of GPUs
   // desc = **Note**: can be used only in CUDA implementation
   int num_gpu = 1;
+
+  #pragma endregion
+
+  #pragma region Gradient Discretization Parameters
+
+  // desc = whether to use gradient discretization on CUDA
+  bool use_discretized_grad = false;
+
+  // desc = number of bins to discretize gradients and hessians
+  int grad_discretize_bins = 4;
+
+  // desc = whether to renew the leaf values with original gradients
+  bool discretized_grad_renew = false;
+
+  // desc = the presumed factor used to divide data on leaf into bins
+  int per_bin_div = 100;
 
   #pragma endregion
 

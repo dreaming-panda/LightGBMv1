@@ -26,7 +26,7 @@ class CUDARowData {
  public:
   CUDARowData(const Dataset* train_data,
               const TrainingShareStates* train_share_state,
-              const int gpu_device_id, const bool gpu_use_dp, const bool gpu_use_discretized_grad);
+              const int gpu_device_id, const bool gpu_use_dp, const bool use_discretized_grad);
 
   ~CUDARowData();
 
@@ -105,7 +105,7 @@ class CUDARowData {
   /*! \brief whether to use double-precision numbers in shared memory histograms */
   bool use_dp_;
   /*! \brief whether to use discretized gradients */
-  bool gpu_use_discretized_grad_;
+  bool use_discretized_grad_;
   /*! \brief histogram bin number in shared memory */
   int shared_hist_size_;
   /*! \brief number of threads to use */

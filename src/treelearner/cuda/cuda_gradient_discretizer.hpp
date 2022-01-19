@@ -17,19 +17,16 @@
 #include <random>
 
 #include "cuda_leaf_splits.hpp"
+#include "../gradient_discretizer.hpp"
 
 namespace LightGBM {
 
 #define CUDA_GRADIENT_DISCRETIZER_BLOCK_SIZE (1024)
 
-class CUDAGradientDiscretizer {
+class CUDAGradientDiscretizer: public GradientDiscretizer {
  public:
-  CUDAGradientDiscretizer(bool gpu_use_discretized_grad, int grad_discretize_bins, int num_trees, int random_seed) {
-    gpu_use_discretized_grad_ = gpu_use_discretized_grad;
-    grad_discretize_bins_ = grad_discretize_bins;
-    iter_ = 0;
-    num_trees_ = num_trees;
-    random_seed_ = random_seed;
+  CUDAGradientDiscretizer(int grad_discretize_bins, int num_trees, int random_seed, bool can_lock):
+    GradientDiscretizer(grad_discretize_bins, num_trees, random_seed, can_lock) {
     nccl_comm_ = nullptr;
   }
 
@@ -40,21 +37,15 @@ class CUDAGradientDiscretizer {
   void DiscretizeGradients(
     const data_size_t num_data,
     const score_t* input_gradients,
-    const score_t* input_hessians);
+    const score_t* input_hessians) override;
 
-  void ScaleHistogram(
-    const int num_total_bin,
-    CUDALeafSplitsStruct* cuda_leaf_splits, cudaStream_t cuda_stream) const;
+  const int32_t* discretized_gradients_and_hessians() const override { return discretized_gradients_and_hessians_.RawData(); }
 
-  const int32_t* discretized_gradients_and_hessians() const { return discretized_gradients_and_hessians_.RawData(); }
+  const score_t* grad_scale() const override { return grad_max_block_buffer_.RawData(); }
 
-  bool gpu_use_discretized_grad() const { return gpu_use_discretized_grad_; }
+  const score_t* hess_scale() const override { return hess_max_block_buffer_.RawData(); }
 
-  const score_t* grad_scale() const { return grad_max_block_buffer_.RawData(); }
-
-  const score_t* hess_scale() const { return hess_max_block_buffer_.RawData(); }
-
-  void Init(const data_size_t num_data) {
+  void Init(const data_size_t num_data) override {
     discretized_gradients_and_hessians_.Resize(num_data);
     num_reduce_blocks_ = (num_data + CUDA_GRADIENT_DISCRETIZER_BLOCK_SIZE - 1) / CUDA_GRADIENT_DISCRETIZER_BLOCK_SIZE;
     grad_min_block_buffer_.Resize(num_reduce_blocks_);
@@ -112,7 +103,6 @@ class CUDAGradientDiscretizer {
   CUDAVector<score_t> hessian_random_values_;
   int num_reduce_blocks_;
   int grad_discretize_bins_;
-  bool gpu_use_discretized_grad_;
   int iter_;
   int num_trees_;
   int random_seed_;

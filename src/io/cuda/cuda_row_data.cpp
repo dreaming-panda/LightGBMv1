@@ -11,11 +11,11 @@ namespace LightGBM {
 
 CUDARowData::CUDARowData(const Dataset* train_data,
                          const TrainingShareStates* train_share_state,
-                         const int gpu_device_id, const bool gpu_use_dp, const bool gpu_use_discretized_grad):
-gpu_device_id_(gpu_device_id), use_dp_(gpu_use_dp), gpu_use_discretized_grad_(gpu_use_discretized_grad) {
+                         const int gpu_device_id, const bool gpu_use_dp, const bool use_discretized_grad):
+gpu_device_id_(gpu_device_id), use_dp_(gpu_use_dp), use_discretized_grad_(use_discretized_grad) {
   num_threads_ = OMP_NUM_THREADS();
   num_data_ = train_data->num_data();
-  if (gpu_use_discretized_grad_) {
+  if (use_discretized_grad_) {
     shared_hist_size_ = 6144 * 4;
   } else {
     shared_hist_size_ = gpu_use_dp ? 6144 : 6144 * 2;

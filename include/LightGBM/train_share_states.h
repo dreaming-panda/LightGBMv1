@@ -34,15 +34,17 @@ class MultiValBinWrapper {
     const data_size_t* bagging_use_indices,
     data_size_t bagging_indices_cnt);
 
+  template <bool USE_DIST_GRAD>
   void HistMove(const std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>& hist_buf);
 
+  template <bool USE_DIST_GRAD>
   void HistMerge(std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf);
 
   void ResizeHistBuf(std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf,
     MultiValBin* sub_multi_val_bin,
     hist_t* origin_hist_data);
 
-  template <bool USE_INDICES, bool ORDERED>
+  template <bool USE_INDICES, bool ORDERED, bool USE_DIST_GRAD>
   void ConstructHistograms(const data_size_t* data_indices,
       data_size_t num_data,
       const score_t* gradients,
@@ -65,7 +67,7 @@ class MultiValBinWrapper {
         OMP_LOOP_EX_BEGIN();
         data_size_t start = block_id * data_block_size_;
         data_size_t end = std::min<data_size_t>(start + data_block_size_, num_data);
-        ConstructHistogramsForBlock<USE_INDICES, ORDERED>(
+        ConstructHistogramsForBlock<USE_INDICES, ORDERED, USE_DIST_GRAD>(
           cur_multi_val_bin, start, end, data_indices, gradients, hessians,
           block_id, hist_buf);
         OMP_LOOP_EX_END();
@@ -74,40 +76,68 @@ class MultiValBinWrapper {
       global_timer.Stop("Dataset::sparse_bin_histogram");
 
       global_timer.Start("Dataset::sparse_bin_histogram_merge");
-      HistMerge(hist_buf);
+      HistMerge<USE_DIST_GRAD>(hist_buf);
       global_timer.Stop("Dataset::sparse_bin_histogram_merge");
       global_timer.Start("Dataset::sparse_bin_histogram_move");
-      HistMove(*hist_buf);
+      HistMove<USE_DIST_GRAD>(*hist_buf);
       global_timer.Stop("Dataset::sparse_bin_histogram_move");
     }
   }
 
-  template <bool USE_INDICES, bool ORDERED>
+  template <bool USE_INDICES, bool ORDERED, bool USE_DIST_GRAD>
   void ConstructHistogramsForBlock(const MultiValBin* sub_multi_val_bin,
     data_size_t start, data_size_t end, const data_size_t* data_indices,
     const score_t* gradients, const score_t* hessians, int block_id,
     std::vector<hist_t, Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf) {
-    hist_t* data_ptr = origin_hist_data_;
-    if (block_id == 0) {
-      if (is_use_subcol_) {
-        data_ptr = hist_buf->data() + hist_buf->size() - 2 * static_cast<size_t>(num_bin_aligned_);
-      }
-    } else {
-      data_ptr = hist_buf->data() +
-        static_cast<size_t>(num_bin_aligned_) * (block_id - 1) * 2;
-    }
-    std::memset(reinterpret_cast<void*>(data_ptr), 0, num_bin_ * kHistBufferEntrySize);
-    if (USE_INDICES) {
-      if (ORDERED) {
-        sub_multi_val_bin->ConstructHistogramOrdered(data_indices, start, end,
-                                                gradients, hessians, data_ptr);
+    if (USE_DIST_GRAD) {
+      int32_t* data_ptr = reinterpret_cast<int32_t*>(origin_hist_data_);
+      int32_t* hist_buf_ptr = reinterpret_cast<int32_t*>(hist_buf->data());
+      if (block_id == 0) {
+        if (is_use_subcol_) {
+          data_ptr = hist_buf_ptr + hist_buf->size() - 2 * static_cast<size_t>(num_bin_aligned_);
+        }
       } else {
-        sub_multi_val_bin->ConstructHistogram(data_indices, start, end, gradients,
-                                          hessians, data_ptr);
+        data_ptr = hist_buf_ptr +
+          static_cast<size_t>(num_bin_aligned_) * (block_id - 1) * 2;
+      }
+      std::memset(reinterpret_cast<void*>(data_ptr), 0, num_bin_ * kIntHistBufferEntrySize);
+      if (USE_INDICES) {
+        if (ORDERED) {
+          sub_multi_val_bin->ConstructHistogramOrderedInt(data_indices, start, end,
+                                                          gradients, hessians,
+                                                          reinterpret_cast<hist_t*>(data_ptr));
+        } else {
+          sub_multi_val_bin->ConstructHistogramInt(data_indices, start, end, gradients,
+                                                   hessians,
+                                                   reinterpret_cast<hist_t*>(data_ptr));
+        }
+      } else {
+        sub_multi_val_bin->ConstructHistogramInt(start, end, gradients, hessians,
+                                                 reinterpret_cast<hist_t*>(data_ptr));
       }
     } else {
-      sub_multi_val_bin->ConstructHistogram(start, end, gradients, hessians,
-                                        data_ptr);
+      hist_t* data_ptr = origin_hist_data_;
+      if (block_id == 0) {
+        if (is_use_subcol_) {
+          data_ptr = hist_buf->data() + hist_buf->size() - 2 * static_cast<size_t>(num_bin_aligned_);
+        }
+      } else {
+        data_ptr = hist_buf->data() +
+          static_cast<size_t>(num_bin_aligned_) * (block_id - 1) * 2;
+      }
+      std::memset(reinterpret_cast<void*>(data_ptr), 0, num_bin_ * kHistBufferEntrySize);
+      if (USE_INDICES) {
+        if (ORDERED) {
+          sub_multi_val_bin->ConstructHistogramOrdered(data_indices, start, end,
+                                                  gradients, hessians, data_ptr);
+        } else {
+          sub_multi_val_bin->ConstructHistogram(data_indices, start, end, gradients,
+                                            hessians, data_ptr);
+        }
+      } else {
+        sub_multi_val_bin->ConstructHistogram(start, end, gradients, hessians,
+                                          data_ptr);
+      }
     }
   }
 
@@ -166,6 +196,7 @@ class MultiValBinWrapper {
   hist_t* origin_hist_data_;
 
   const size_t kHistBufferEntrySize = 2 * sizeof(hist_t);
+  const size_t kIntHistBufferEntrySize = 2 * sizeof(int32_t);
 };
 
 struct TrainingShareStates {
@@ -208,14 +239,14 @@ struct TrainingShareStates {
     }
   }
 
-  template <bool USE_INDICES, bool ORDERED>
+  template <bool USE_INDICES, bool ORDERED, bool USE_DIST_GRAD>
   void ConstructHistograms(const data_size_t* data_indices,
                           data_size_t num_data,
                           const score_t* gradients,
                           const score_t* hessians,
                           hist_t* hist_data) {
     if (multi_val_bin_wrapper_ != nullptr) {
-      multi_val_bin_wrapper_->ConstructHistograms<USE_INDICES, ORDERED>(
+      multi_val_bin_wrapper_->ConstructHistograms<USE_INDICES, ORDERED, USE_DIST_GRAD>(
         data_indices, num_data, gradients, hessians, &hist_buf_, hist_data);
     }
   }

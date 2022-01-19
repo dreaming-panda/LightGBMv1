@@ -603,6 +603,7 @@ MultiValBin* Dataset::GetMultiBinFromAllFeatures(const std::vector<uint32_t>& of
   return ret.release();
 }
 
+template <bool USE_DIST_GRAD>
 TrainingShareStates* Dataset::GetShareStates(
     score_t* gradients, score_t* hessians,
     const std::vector<int8_t>& is_feature_used, bool is_constant_hessian,
@@ -680,12 +681,12 @@ TrainingShareStates* Dataset::GetShareStates(
     InitTrain(is_feature_used, row_wise_state.get());
     std::chrono::duration<double, std::milli> col_wise_time, row_wise_time;
     start_time = std::chrono::steady_clock::now();
-    ConstructHistograms(is_feature_used, nullptr, num_data_, gradients,
+    ConstructHistograms<USE_DIST_GRAD>(is_feature_used, nullptr, num_data_, gradients,
                         hessians, gradients, hessians, col_wise_state.get(),
                         hist_data.data());
     col_wise_time = std::chrono::steady_clock::now() - start_time;
     start_time = std::chrono::steady_clock::now();
-    ConstructHistograms(is_feature_used, nullptr, num_data_, gradients,
+    ConstructHistograms<USE_DIST_GRAD>(is_feature_used, nullptr, num_data_, gradients,
                         hessians, gradients, hessians, row_wise_state.get(),
                         hist_data.data());
     row_wise_time = std::chrono::steady_clock::now() - start_time;
@@ -715,6 +716,16 @@ TrainingShareStates* Dataset::GetShareStates(
     }
   }
 }
+
+template TrainingShareStates* Dataset::GetShareStates<false>(
+    score_t* gradients, score_t* hessians,
+    const std::vector<int8_t>& is_feature_used, bool is_constant_hessian,
+    bool force_col_wise, bool force_row_wise) const;
+
+template TrainingShareStates* Dataset::GetShareStates<true>(
+    score_t* gradients, score_t* hessians,
+    const std::vector<int8_t>& is_feature_used, bool is_constant_hessian,
+    bool force_col_wise, bool force_row_wise) const;
 
 void Dataset::CopyFeatureMapperFrom(const Dataset* dataset) {
   feature_groups_.clear();
@@ -1226,7 +1237,7 @@ void Dataset::InitTrain(const std::vector<int8_t>& is_feature_used,
         is_feature_used);
 }
 
-template <bool USE_INDICES, bool ORDERED>
+template <bool USE_INDICES, bool ORDERED, bool USE_DIST_GRAD>
 void Dataset::ConstructHistogramsMultiVal(const data_size_t* data_indices,
                                           data_size_t num_data,
                                           const score_t* gradients,
@@ -1235,18 +1246,18 @@ void Dataset::ConstructHistogramsMultiVal(const data_size_t* data_indices,
                                           hist_t* hist_data) const {
   Common::FunctionTimer fun_time("Dataset::ConstructHistogramsMultiVal",
                                  global_timer);
-  share_state->ConstructHistograms<USE_INDICES, ORDERED>(
+  share_state->ConstructHistograms<USE_INDICES, ORDERED, USE_DIST_GRAD>(
       data_indices, num_data, gradients, hessians, hist_data);
 }
 
-template <bool USE_INDICES, bool USE_HESSIAN>
+template <bool USE_INDICES, bool USE_HESSIAN, bool USE_DIST_GRAD>
 void Dataset::ConstructHistogramsInner(
   const std::vector<int8_t>& is_feature_used, const data_size_t* data_indices,
   data_size_t num_data, const score_t* gradients, const score_t* hessians,
   score_t* ordered_gradients, score_t* ordered_hessians,
   TrainingShareStates* share_state, hist_t* hist_data) const {
   if (!share_state->is_col_wise) {
-    return ConstructHistogramsMultiVal<USE_INDICES, false>(
+    return ConstructHistogramsMultiVal<USE_INDICES, false, USE_DIST_GRAD>(
         data_indices, num_data, gradients, hessians, share_state, hist_data);
   }
   std::vector<int> used_dense_group;
@@ -1276,21 +1287,44 @@ void Dataset::ConstructHistogramsInner(
   auto ptr_ordered_grad = gradients;
   auto ptr_ordered_hess = hessians;
   if (num_used_dense_group > 0) {
-    if (USE_INDICES) {
-      if (USE_HESSIAN) {
-#pragma omp parallel for schedule(static, 512) if (num_data >= 1024)
-        for (data_size_t i = 0; i < num_data; ++i) {
-          ordered_gradients[i] = gradients[data_indices[i]];
-          ordered_hessians[i] = hessians[data_indices[i]];
+    if (USE_DIST_GRAD) {
+      int64_t* ordered_gradients_and_hessians = reinterpret_cast<int64_t*>(ordered_gradients);
+      const int64_t* gradients_and_hessians = reinterpret_cast<const int64_t*>(gradients);
+      if (USE_INDICES) {
+        if (USE_HESSIAN) {
+  #pragma omp parallel for schedule(static, 512) if (num_data >= 1024)
+          for (data_size_t i = 0; i < num_data; ++i) {
+            ordered_gradients_and_hessians[i] = gradients_and_hessians[data_indices[i]];
+          }
+          ptr_ordered_grad = reinterpret_cast<const score_t*>(ordered_gradients);
+          ptr_ordered_hess = nullptr;
+        } else {
+          Log::Fatal("Constant hessian objective is not supported with gradient discretization on CPU yet.");
+  #pragma omp parallel for schedule(static, 512) if (num_data >= 1024)
+          for (data_size_t i = 0; i < num_data; ++i) {
+            ordered_gradients_and_hessians[i] = gradients_and_hessians[data_indices[i]];
+          }
+          ptr_ordered_grad = reinterpret_cast<const score_t*>(ordered_gradients);
+          ptr_ordered_hess = nullptr;
         }
-        ptr_ordered_grad = ordered_gradients;
-        ptr_ordered_hess = ordered_hessians;
-      } else {
-#pragma omp parallel for schedule(static, 512) if (num_data >= 1024)
-        for (data_size_t i = 0; i < num_data; ++i) {
-          ordered_gradients[i] = gradients[data_indices[i]];
+      }
+    } else {
+      if (USE_INDICES) {
+        if (USE_HESSIAN) {
+  #pragma omp parallel for schedule(static, 512) if (num_data >= 1024)
+          for (data_size_t i = 0; i < num_data; ++i) {
+            ordered_gradients[i] = gradients[data_indices[i]];
+            ordered_hessians[i] = hessians[data_indices[i]];
+          }
+          ptr_ordered_grad = ordered_gradients;
+          ptr_ordered_hess = ordered_hessians;
+        } else {
+  #pragma omp parallel for schedule(static, 512) if (num_data >= 1024)
+          for (data_size_t i = 0; i < num_data; ++i) {
+            ordered_gradients[i] = gradients[data_indices[i]];
+          }
+          ptr_ordered_grad = ordered_gradients;
         }
-        ptr_ordered_grad = ordered_gradients;
       }
     }
     OMP_INIT_EX();
@@ -1298,30 +1332,60 @@ void Dataset::ConstructHistogramsInner(
     for (int gi = 0; gi < num_used_dense_group; ++gi) {
       OMP_LOOP_EX_BEGIN();
       int group = used_dense_group[gi];
-      auto data_ptr = hist_data + group_bin_boundaries_[group] * 2;
       const int num_bin = feature_groups_[group]->num_total_bin_;
-      std::memset(reinterpret_cast<void*>(data_ptr), 0,
-                  num_bin * kHistEntrySize);
-      if (USE_HESSIAN) {
-        if (USE_INDICES) {
-          feature_groups_[group]->bin_data_->ConstructHistogram(
-              data_indices, 0, num_data, ptr_ordered_grad, ptr_ordered_hess,
-              data_ptr);
+      if (USE_DIST_GRAD) {
+        auto data_ptr = hist_data + group_bin_boundaries_[group];
+        std::memset(reinterpret_cast<void*>(data_ptr), 0,
+                    num_bin * kIntHistEntrySize);
+        if (USE_HESSIAN) {
+          if (USE_INDICES) {
+            feature_groups_[group]->bin_data_->ConstructHistogramInt(
+                data_indices, 0, num_data, ptr_ordered_grad, ptr_ordered_hess,
+                data_ptr);
+          } else {
+            feature_groups_[group]->bin_data_->ConstructHistogramInt(
+                0, num_data, ptr_ordered_grad, ptr_ordered_hess, data_ptr);
+          }
         } else {
-          feature_groups_[group]->bin_data_->ConstructHistogram(
-              0, num_data, ptr_ordered_grad, ptr_ordered_hess, data_ptr);
+          if (USE_INDICES) {
+            feature_groups_[group]->bin_data_->ConstructHistogramInt(
+                data_indices, 0, num_data, ptr_ordered_grad, data_ptr);
+          } else {
+            feature_groups_[group]->bin_data_->ConstructHistogramInt(
+                0, num_data, ptr_ordered_grad, data_ptr);
+          }
+          int32_t* data_ptr_ptr = reinterpret_cast<int32_t*>(data_ptr);
+          auto cnt_dst = reinterpret_cast<int32_t*>(data_ptr) + 1;
+          const int32_t hess = (reinterpret_cast<const int32_t*>(hessians))[0];
+          for (int i = 0; i < num_bin * 2; i += 2) {
+            data_ptr_ptr[i + 1] = static_cast<double>(cnt_dst[i]) * hess;
+          }
         }
       } else {
-        if (USE_INDICES) {
-          feature_groups_[group]->bin_data_->ConstructHistogram(
-              data_indices, 0, num_data, ptr_ordered_grad, data_ptr);
+        auto data_ptr = hist_data + group_bin_boundaries_[group] * 2;
+        std::memset(reinterpret_cast<void*>(data_ptr), 0,
+                    num_bin * kHistEntrySize);
+        if (USE_HESSIAN) {
+          if (USE_INDICES) {
+            feature_groups_[group]->bin_data_->ConstructHistogram(
+                data_indices, 0, num_data, ptr_ordered_grad, ptr_ordered_hess,
+                data_ptr);
+          } else {
+            feature_groups_[group]->bin_data_->ConstructHistogram(
+                0, num_data, ptr_ordered_grad, ptr_ordered_hess, data_ptr);
+          }
         } else {
-          feature_groups_[group]->bin_data_->ConstructHistogram(
-              0, num_data, ptr_ordered_grad, data_ptr);
-        }
-        auto cnt_dst = reinterpret_cast<hist_cnt_t*>(data_ptr + 1);
-        for (int i = 0; i < num_bin * 2; i += 2) {
-          data_ptr[i + 1] = static_cast<double>(cnt_dst[i]) * hessians[0];
+          if (USE_INDICES) {
+            feature_groups_[group]->bin_data_->ConstructHistogram(
+                data_indices, 0, num_data, ptr_ordered_grad, data_ptr);
+          } else {
+            feature_groups_[group]->bin_data_->ConstructHistogram(
+                0, num_data, ptr_ordered_grad, data_ptr);
+          }
+          auto cnt_dst = reinterpret_cast<hist_cnt_t*>(data_ptr + 1);
+          for (int i = 0; i < num_bin * 2; i += 2) {
+            data_ptr[i + 1] = static_cast<double>(cnt_dst[i]) * hessians[0];
+          }
         }
       }
       OMP_LOOP_EX_END();
@@ -1331,12 +1395,12 @@ void Dataset::ConstructHistogramsInner(
   global_timer.Stop("Dataset::dense_bin_histogram");
   if (multi_val_groud_id >= 0) {
     if (num_used_dense_group > 0) {
-      ConstructHistogramsMultiVal<USE_INDICES, true>(
+      ConstructHistogramsMultiVal<USE_INDICES, true, USE_DIST_GRAD>(
           data_indices, num_data, ptr_ordered_grad, ptr_ordered_hess,
           share_state,
           hist_data + group_bin_boundaries_[multi_val_groud_id] * 2);
     } else {
-      ConstructHistogramsMultiVal<USE_INDICES, false>(
+      ConstructHistogramsMultiVal<USE_INDICES, false, USE_DIST_GRAD>(
           data_indices, num_data, gradients, hessians, share_state,
           hist_data + group_bin_boundaries_[multi_val_groud_id] * 2);
     }
@@ -1344,25 +1408,49 @@ void Dataset::ConstructHistogramsInner(
 }
 
 // explicitly initialize template methods, for cross module call
-template void Dataset::ConstructHistogramsInner<true, true>(
+template void Dataset::ConstructHistogramsInner<true, true, false>(
     const std::vector<int8_t>& is_feature_used, const data_size_t* data_indices,
     data_size_t num_data, const score_t* gradients, const score_t* hessians,
     score_t* ordered_gradients, score_t* ordered_hessians,
     TrainingShareStates* share_state, hist_t* hist_data) const;
 
-template void Dataset::ConstructHistogramsInner<true, false>(
+template void Dataset::ConstructHistogramsInner<true, false, false>(
     const std::vector<int8_t>& is_feature_used, const data_size_t* data_indices,
     data_size_t num_data, const score_t* gradients, const score_t* hessians,
     score_t* ordered_gradients, score_t* ordered_hessians,
     TrainingShareStates* share_state, hist_t* hist_data) const;
 
-template void Dataset::ConstructHistogramsInner<false, true>(
+template void Dataset::ConstructHistogramsInner<false, true, false>(
     const std::vector<int8_t>& is_feature_used, const data_size_t* data_indices,
     data_size_t num_data, const score_t* gradients, const score_t* hessians,
     score_t* ordered_gradients, score_t* ordered_hessians,
     TrainingShareStates* share_state, hist_t* hist_data) const;
 
-template void Dataset::ConstructHistogramsInner<false, false>(
+template void Dataset::ConstructHistogramsInner<false, false, false>(
+    const std::vector<int8_t>& is_feature_used, const data_size_t* data_indices,
+    data_size_t num_data, const score_t* gradients, const score_t* hessians,
+    score_t* ordered_gradients, score_t* ordered_hessians,
+    TrainingShareStates* share_state, hist_t* hist_data) const;
+
+template void Dataset::ConstructHistogramsInner<true, true, true>(
+    const std::vector<int8_t>& is_feature_used, const data_size_t* data_indices,
+    data_size_t num_data, const score_t* gradients, const score_t* hessians,
+    score_t* ordered_gradients, score_t* ordered_hessians,
+    TrainingShareStates* share_state, hist_t* hist_data) const;
+
+template void Dataset::ConstructHistogramsInner<true, false, true>(
+    const std::vector<int8_t>& is_feature_used, const data_size_t* data_indices,
+    data_size_t num_data, const score_t* gradients, const score_t* hessians,
+    score_t* ordered_gradients, score_t* ordered_hessians,
+    TrainingShareStates* share_state, hist_t* hist_data) const;
+
+template void Dataset::ConstructHistogramsInner<false, true, true>(
+    const std::vector<int8_t>& is_feature_used, const data_size_t* data_indices,
+    data_size_t num_data, const score_t* gradients, const score_t* hessians,
+    score_t* ordered_gradients, score_t* ordered_hessians,
+    TrainingShareStates* share_state, hist_t* hist_data) const;
+
+template void Dataset::ConstructHistogramsInner<false, false, true>(
     const std::vector<int8_t>& is_feature_used, const data_size_t* data_indices,
     data_size_t num_data, const score_t* gradients, const score_t* hessians,
     score_t* ordered_gradients, score_t* ordered_hessians,
@@ -1385,6 +1473,24 @@ void Dataset::FixHistogram(int feature_idx, double sum_gradient,
         GET_HESS(data, most_freq_bin) -= GET_HESS(data, i);
       }
     }
+  }
+}
+
+void Dataset::FixHistogramInt(int feature_idx, int64_t int_sum_gradient_and_hessian, hist_t* data) const {
+  const int group = feature2group_[feature_idx];
+  const int sub_feature = feature2subfeature_[feature_idx];
+  const BinMapper* bin_mapper =
+      feature_groups_[group]->bin_mappers_[sub_feature].get();
+  const int most_freq_bin = bin_mapper->GetMostFreqBin();
+  int64_t* data_ptr = reinterpret_cast<int64_t*>(data);
+  if (most_freq_bin > 0) {
+    const int num_bin = bin_mapper->num_bin();
+    for (int i = 0; i < num_bin; ++i) {
+      if (i != most_freq_bin) {
+        int_sum_gradient_and_hessian -= data_ptr[i];
+      }
+    }
+    data_ptr[most_freq_bin] = int_sum_gradient_and_hessian;
   }
 }
 

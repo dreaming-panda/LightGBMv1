@@ -36,7 +36,7 @@ class CUDAHistogramConstructor {
     const double min_sum_hessian_in_leaf,
     const int gpu_device_id,
     const bool gpu_use_dp,
-    const bool gpu_use_discretized_grad);
+    const bool use_discretized_grad);
 
   ~CUDAHistogramConstructor();
 
@@ -58,7 +58,7 @@ class CUDAHistogramConstructor {
   void SubtractHistogramForLeaf(
     const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
     const CUDALeafSplitsStruct* cuda_larger_leaf_splits,
-    const bool gpu_use_discretized_grad,
+    const bool use_discretized_grad,
     const uint8_t parent_num_bits_in_histogram_bins,
     const uint8_t smaller_num_bits_in_histogram_bins,
     const uint8_t larger_num_bits_in_histogram_bins);
@@ -111,7 +111,7 @@ class CUDAHistogramConstructor {
   void LaunchSubtractHistogramKernel(
     const CUDALeafSplitsStruct* cuda_smaller_leaf_splits,
     const CUDALeafSplitsStruct* cuda_larger_leaf_splits,
-    const bool gpu_use_discretized_grad,
+    const bool use_discretized_grad,
     const uint8_t parent_num_bits_in_histogram_bins,
     const uint8_t smaller_num_bits_in_histogram_bins,
     const uint8_t larger_num_bits_in_histogram_bins);
@@ -176,7 +176,7 @@ class CUDAHistogramConstructor {
 
   const int gpu_device_id_;
   const bool gpu_use_dp_;
-  const bool gpu_use_discretized_grad_;
+  const bool use_discretized_grad_;
 
   int nccl_thread_index_;
 
