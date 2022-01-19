@@ -1026,6 +1026,9 @@ struct Config {
   // desc = whether to renew the leaf values with original gradients
   bool gpu_use_discretized_grad_renew = false;
 
+  // desc = the presumed factor used to divide data on leaf into bins
+  int gpu_per_bin_div = 100;
+
   // check = >0
   // desc = number of GPUs
   // desc = **Note**: can be used only in CUDA implementation

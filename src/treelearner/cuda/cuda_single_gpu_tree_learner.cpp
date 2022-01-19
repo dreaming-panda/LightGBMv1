@@ -122,13 +122,15 @@ void CUDASingleGPUTreeLearner::Init(const Dataset* train_data, bool is_constant_
 
 void CUDASingleGPUTreeLearner::SetNumBitsInHistogramBin(const int left_leaf_index, const int right_leaf_index) {
   if (right_leaf_index == -1) {
-    if (nccl_comm_ != nullptr || !config_->gpu_use_discretized_grad) {
+    if (!config_->gpu_use_discretized_grad) {
       leaf_num_bits_in_histogram_bin_[left_leaf_index] = 32;
+      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 32;
       return;
     }
-    const data_size_t num_data_in_left_leaf = leaf_num_data_[left_leaf_index];
+    const data_size_t num_data_in_left_leaf = (nccl_comm_ == nullptr) ? leaf_num_data_[left_leaf_index] : global_num_data_in_leaf_[left_leaf_index];
     const uint64_t max_stat = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins);
-    const uint64_t max_stat_per_bin = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins) / 100;
+    const uint64_t max_stat_per_bin = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins)
+      / static_cast<uint64_t>(config_->gpu_per_bin_div);
     if (max_stat_per_bin < 256) {
       leaf_num_bits_in_histogram_bin_[left_leaf_index] = 8;
     } else if (max_stat_per_bin < 65536) {
@@ -144,19 +146,25 @@ void CUDASingleGPUTreeLearner::SetNumBitsInHistogramBin(const int left_leaf_inde
       leaf_num_bits_in_histogram_acc_[left_leaf_index] = 32;
     }
   } else {
-    if (nccl_comm_ != nullptr || !config_->gpu_use_discretized_grad) {
+    if (!config_->gpu_use_discretized_grad) {
       node_num_bits_in_histogram_bin_[left_leaf_index] = 32;
       leaf_num_bits_in_histogram_bin_[left_leaf_index] = 32;
       leaf_num_bits_in_histogram_bin_[right_leaf_index] = 32;
+      node_num_bits_in_histogram_acc_[left_leaf_index] = 32;
+      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 32;
+      leaf_num_bits_in_histogram_acc_[right_leaf_index] = 32;
       return;
     }
-    const data_size_t num_data_in_left_leaf = leaf_num_data_[left_leaf_index];
-    const data_size_t num_data_in_right_leaf = leaf_num_data_[right_leaf_index];
+    const data_size_t num_data_in_left_leaf = (nccl_comm_ == nullptr) ? leaf_num_data_[left_leaf_index] : global_num_data_in_leaf_[left_leaf_index];
+    const data_size_t num_data_in_right_leaf = (nccl_comm_ == nullptr) ? leaf_num_data_[right_leaf_index] : global_num_data_in_leaf_[right_leaf_index];
     const uint64_t max_stat_left = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins);
     const uint64_t max_stat_right = static_cast<uint64_t>(num_data_in_right_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins);
-    const uint64_t max_stat_left_per_bin = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins) / 100;
-    const uint64_t max_stat_right_per_bin = static_cast<uint64_t>(num_data_in_right_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins) / 100;
+    const uint64_t max_stat_left_per_bin = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins) /
+      static_cast<uint64_t>(config_->gpu_per_bin_div);
+    const uint64_t max_stat_right_per_bin = static_cast<uint64_t>(num_data_in_right_leaf) * static_cast<uint64_t>(config_->gpu_grad_discretize_bins) /
+      static_cast<uint64_t>(config_->gpu_per_bin_div);
     node_num_bits_in_histogram_bin_[left_leaf_index] = leaf_num_bits_in_histogram_bin_[left_leaf_index];
+    node_num_bits_in_histogram_acc_[left_leaf_index] = leaf_num_bits_in_histogram_acc_[left_leaf_index];
     if (max_stat_left_per_bin < 256) {
       leaf_num_bits_in_histogram_bin_[left_leaf_index] = 8;
     } else if (max_stat_left_per_bin < 65536) {
@@ -755,15 +763,28 @@ void CUDASingleGPUTreeLearner::NCCLReduceHistogram() {
   if (config_->gpu_use_discretized_grad) {
     hist_t* smaller_leaf_hist_pointer = cuda_histogram_constructor_->cuda_hist_pointer() +
       leaf_to_hist_index_map_[smaller_leaf_index_] * num_total_bin_;
-    NCCLCHECK(ncclAllReduce(
-      reinterpret_cast<const int64_t*>(smaller_leaf_hist_pointer),
-      reinterpret_cast<int64_t*>(smaller_leaf_hist_pointer),
-      static_cast<size_t>(num_total_bin_),
-      ncclInt64,
-      ncclSum,
-      *nccl_comm_,
-      nccl_stream_
-    ));
+    const uint8_t bit_size = leaf_num_bits_in_histogram_bin_[smaller_leaf_index_];
+    if (bit_size == 32) {
+      NCCLCHECK(ncclAllReduce(
+        reinterpret_cast<const int64_t*>(smaller_leaf_hist_pointer),
+        reinterpret_cast<int64_t*>(smaller_leaf_hist_pointer),
+        static_cast<size_t>(num_total_bin_),
+        ncclInt64,
+        ncclSum,
+        *nccl_comm_,
+        nccl_stream_
+      ));
+    } else if (bit_size <= 16) {
+      NCCLCHECK(ncclAllReduce(
+        reinterpret_cast<const int32_t*>(smaller_leaf_hist_pointer),
+        reinterpret_cast<int32_t*>(smaller_leaf_hist_pointer),
+        static_cast<size_t>(num_total_bin_),
+        ncclInt32,
+        ncclSum,
+        *nccl_comm_,
+        nccl_stream_
+      ));
+    }
   } else {
     hist_t* smaller_leaf_hist_pointer = cuda_histogram_constructor_->cuda_hist_pointer() +
         leaf_to_hist_index_map_[smaller_leaf_index_] * num_total_bin_ * 2;
