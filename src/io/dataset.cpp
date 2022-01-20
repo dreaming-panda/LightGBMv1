@@ -1288,8 +1288,8 @@ void Dataset::ConstructHistogramsInner(
   auto ptr_ordered_hess = hessians;
   if (num_used_dense_group > 0) {
     if (USE_DIST_GRAD) {
-      int64_t* ordered_gradients_and_hessians = reinterpret_cast<int64_t*>(ordered_gradients);
-      const int64_t* gradients_and_hessians = reinterpret_cast<const int64_t*>(gradients);
+      int16_t* ordered_gradients_and_hessians = reinterpret_cast<int16_t*>(ordered_gradients);
+      const int16_t* gradients_and_hessians = reinterpret_cast<const int16_t*>(gradients);
       if (USE_INDICES) {
         if (USE_HESSIAN) {
   #pragma omp parallel for schedule(static, 512) if (num_data >= 1024)
@@ -1347,19 +1347,7 @@ void Dataset::ConstructHistogramsInner(
                 0, num_data, ptr_ordered_grad, ptr_ordered_hess, data_ptr);
           }
         } else {
-          if (USE_INDICES) {
-            feature_groups_[group]->bin_data_->ConstructHistogramInt(
-                data_indices, 0, num_data, ptr_ordered_grad, data_ptr);
-          } else {
-            feature_groups_[group]->bin_data_->ConstructHistogramInt(
-                0, num_data, ptr_ordered_grad, data_ptr);
-          }
-          int32_t* data_ptr_ptr = reinterpret_cast<int32_t*>(data_ptr);
-          auto cnt_dst = reinterpret_cast<int32_t*>(data_ptr) + 1;
-          const int32_t hess = (reinterpret_cast<const int32_t*>(hessians))[0];
-          for (int i = 0; i < num_bin * 2; i += 2) {
-            data_ptr_ptr[i + 1] = static_cast<double>(cnt_dst[i]) * hess;
-          }
+          Log::Fatal("Constant hessian is not supported with CPU gradient discretization yet.");
         }
       } else {
         auto data_ptr = hist_data + group_bin_boundaries_[group] * 2;

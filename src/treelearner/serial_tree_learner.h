@@ -175,6 +175,8 @@ class SerialTreeLearner: public TreeLearner {
 
   void RenewIntGradTreeOutput(Tree* tree) const;
 
+  virtual void SetNumBitsInHistogramBin(const int left_leaf_index, const int right_leaf_index);
+
   /*! \brief number of data */
   data_size_t num_data_;
   /*! \brief number of features */
@@ -230,6 +232,11 @@ class SerialTreeLearner: public TreeLearner {
   std::unique_ptr<CostEfficientGradientBoosting> cegb_;
   std::unique_ptr<GradientDiscretizer> gradient_discretizer_;
   std::vector<int8_t> ordered_int_gradients_and_hessians_;
+
+  std::vector<uint8_t> leaf_num_bits_in_histogram_bin_;
+  std::vector<int8_t> node_num_bits_in_histogram_bin_;
+  std::vector<uint8_t> leaf_num_bits_in_histogram_acc_;
+  std::vector<int8_t> node_num_bits_in_histogram_acc_;
 };
 
 inline data_size_t SerialTreeLearner::GetGlobalDataCountInLeaf(int leaf_idx) const {

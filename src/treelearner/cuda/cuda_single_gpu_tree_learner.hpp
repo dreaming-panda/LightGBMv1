@@ -77,7 +77,7 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
 
   void NCCLReduceHistogram();
 
-  void SetNumBitsInHistogramBin(const int left_leaf_index, const int right_leaf_index);
+  void SetNumBitsInHistogramBin(const int left_leaf_index, const int right_leaf_index) override;
 
   // GPU device ID
   int gpu_device_id_;
@@ -125,11 +125,6 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
   int* cuda_categorical_bin_offsets_;
   ncclComm_t* nccl_comm_;
   int gpu_rank_;
-
-  std::vector<uint8_t> leaf_num_bits_in_histogram_bin_;
-  std::vector<int8_t> node_num_bits_in_histogram_bin_;
-  std::vector<uint8_t> leaf_num_bits_in_histogram_acc_;
-  std::vector<int8_t> node_num_bits_in_histogram_acc_;
 
   // used with NCCL
   std::vector<int> leaf_to_hist_index_map_;

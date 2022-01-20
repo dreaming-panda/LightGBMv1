@@ -120,82 +120,6 @@ void CUDASingleGPUTreeLearner::Init(const Dataset* train_data, bool is_constant_
   node_num_bits_in_histogram_acc_.resize(config_->num_leaves, 0);
 }
 
-void CUDASingleGPUTreeLearner::SetNumBitsInHistogramBin(const int left_leaf_index, const int right_leaf_index) {
-  if (right_leaf_index == -1) {
-    if (!config_->use_discretized_grad) {
-      leaf_num_bits_in_histogram_bin_[left_leaf_index] = 32;
-      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 32;
-      return;
-    }
-    const data_size_t num_data_in_left_leaf = (nccl_comm_ == nullptr) ? leaf_num_data_[left_leaf_index] : global_num_data_in_leaf_[left_leaf_index];
-    const uint64_t max_stat = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins);
-    const uint64_t max_stat_per_bin = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins)
-      / static_cast<uint64_t>(config_->per_bin_div);
-    if (max_stat_per_bin < 256) {
-      leaf_num_bits_in_histogram_bin_[left_leaf_index] = 8;
-    } else if (max_stat_per_bin < 65536) {
-      leaf_num_bits_in_histogram_bin_[left_leaf_index] = 16;
-    } else {
-      leaf_num_bits_in_histogram_bin_[left_leaf_index] = 32;
-    }
-    if (max_stat < 256) {
-      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 8;
-    } else if (max_stat < 65536) {
-      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 16;
-    } else {
-      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 32;
-    }
-  } else {
-    if (!config_->use_discretized_grad) {
-      node_num_bits_in_histogram_bin_[left_leaf_index] = 32;
-      leaf_num_bits_in_histogram_bin_[left_leaf_index] = 32;
-      leaf_num_bits_in_histogram_bin_[right_leaf_index] = 32;
-      node_num_bits_in_histogram_acc_[left_leaf_index] = 32;
-      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 32;
-      leaf_num_bits_in_histogram_acc_[right_leaf_index] = 32;
-      return;
-    }
-    const data_size_t num_data_in_left_leaf = (nccl_comm_ == nullptr) ? leaf_num_data_[left_leaf_index] : global_num_data_in_leaf_[left_leaf_index];
-    const data_size_t num_data_in_right_leaf = (nccl_comm_ == nullptr) ? leaf_num_data_[right_leaf_index] : global_num_data_in_leaf_[right_leaf_index];
-    const uint64_t max_stat_left = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins);
-    const uint64_t max_stat_right = static_cast<uint64_t>(num_data_in_right_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins);
-    const uint64_t max_stat_left_per_bin = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins) /
-      static_cast<uint64_t>(config_->per_bin_div);
-    const uint64_t max_stat_right_per_bin = static_cast<uint64_t>(num_data_in_right_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins) /
-      static_cast<uint64_t>(config_->per_bin_div);
-    node_num_bits_in_histogram_bin_[left_leaf_index] = leaf_num_bits_in_histogram_bin_[left_leaf_index];
-    node_num_bits_in_histogram_acc_[left_leaf_index] = leaf_num_bits_in_histogram_acc_[left_leaf_index];
-    if (max_stat_left_per_bin < 256) {
-      leaf_num_bits_in_histogram_bin_[left_leaf_index] = 8;
-    } else if (max_stat_left_per_bin < 65536) {
-      leaf_num_bits_in_histogram_bin_[left_leaf_index] = 16;
-    } else {
-      leaf_num_bits_in_histogram_bin_[left_leaf_index] = 32;
-    }
-    if (max_stat_right_per_bin < 256) {
-      leaf_num_bits_in_histogram_bin_[right_leaf_index] = 8;
-    } else if (max_stat_right_per_bin < 65536) {
-      leaf_num_bits_in_histogram_bin_[right_leaf_index] = 16;
-    } else {
-      leaf_num_bits_in_histogram_bin_[right_leaf_index] = 32;
-    }
-    if (max_stat_left < 256) {
-      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 8;
-    } else if (max_stat_left < 65536) {
-      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 16;
-    } else {
-      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 32;
-    }
-    if (max_stat_right < 256) {
-      leaf_num_bits_in_histogram_acc_[right_leaf_index] = 8;
-    } else if (max_stat_right < 65536) {
-      leaf_num_bits_in_histogram_acc_[right_leaf_index] = 16;
-    } else {
-      leaf_num_bits_in_histogram_acc_[right_leaf_index] = 32;
-    }
-  }
-}
-
 void CUDASingleGPUTreeLearner::BeforeTrain() {
   const data_size_t root_num_data = cuda_data_partition_->root_num_data();
   const data_size_t* leaf_splits_init_indices =
@@ -798,6 +722,82 @@ void CUDASingleGPUTreeLearner::NCCLReduceHistogram() {
         nccl_stream_));
   }
   CUDASUCCESS_OR_FATAL(cudaStreamSynchronize(nccl_stream_));
+}
+
+void CUDASingleGPUTreeLearner::SetNumBitsInHistogramBin(const int left_leaf_index, const int right_leaf_index) {
+  if (right_leaf_index == -1) {
+    if (!config_->use_discretized_grad) {
+      leaf_num_bits_in_histogram_bin_[left_leaf_index] = 32;
+      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 32;
+      return;
+    }
+    const data_size_t num_data_in_left_leaf = (nccl_comm_ == nullptr) ? leaf_num_data_[left_leaf_index] : global_num_data_in_leaf_[left_leaf_index];
+    const uint64_t max_stat = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins);
+    const uint64_t max_stat_per_bin = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins)
+      / static_cast<uint64_t>(config_->per_bin_div);
+    if (max_stat_per_bin < 256) {
+      leaf_num_bits_in_histogram_bin_[left_leaf_index] = 8;
+    } else if (max_stat_per_bin < 65536) {
+      leaf_num_bits_in_histogram_bin_[left_leaf_index] = 16;
+    } else {
+      leaf_num_bits_in_histogram_bin_[left_leaf_index] = 32;
+    }
+    if (max_stat < 256) {
+      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 8;
+    } else if (max_stat < 65536) {
+      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 16;
+    } else {
+      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 32;
+    }
+  } else {
+    if (!config_->use_discretized_grad) {
+      node_num_bits_in_histogram_bin_[left_leaf_index] = 32;
+      leaf_num_bits_in_histogram_bin_[left_leaf_index] = 32;
+      leaf_num_bits_in_histogram_bin_[right_leaf_index] = 32;
+      node_num_bits_in_histogram_acc_[left_leaf_index] = 32;
+      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 32;
+      leaf_num_bits_in_histogram_acc_[right_leaf_index] = 32;
+      return;
+    }
+    const data_size_t num_data_in_left_leaf = (nccl_comm_ == nullptr) ? leaf_num_data_[left_leaf_index] : global_num_data_in_leaf_[left_leaf_index];
+    const data_size_t num_data_in_right_leaf = (nccl_comm_ == nullptr) ? leaf_num_data_[right_leaf_index] : global_num_data_in_leaf_[right_leaf_index];
+    const uint64_t max_stat_left = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins);
+    const uint64_t max_stat_right = static_cast<uint64_t>(num_data_in_right_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins);
+    const uint64_t max_stat_left_per_bin = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins) /
+      static_cast<uint64_t>(config_->per_bin_div);
+    const uint64_t max_stat_right_per_bin = static_cast<uint64_t>(num_data_in_right_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins) /
+      static_cast<uint64_t>(config_->per_bin_div);
+    node_num_bits_in_histogram_bin_[left_leaf_index] = leaf_num_bits_in_histogram_bin_[left_leaf_index];
+    node_num_bits_in_histogram_acc_[left_leaf_index] = leaf_num_bits_in_histogram_acc_[left_leaf_index];
+    if (max_stat_left_per_bin < 256) {
+      leaf_num_bits_in_histogram_bin_[left_leaf_index] = 8;
+    } else if (max_stat_left_per_bin < 65536) {
+      leaf_num_bits_in_histogram_bin_[left_leaf_index] = 16;
+    } else {
+      leaf_num_bits_in_histogram_bin_[left_leaf_index] = 32;
+    }
+    if (max_stat_right_per_bin < 256) {
+      leaf_num_bits_in_histogram_bin_[right_leaf_index] = 8;
+    } else if (max_stat_right_per_bin < 65536) {
+      leaf_num_bits_in_histogram_bin_[right_leaf_index] = 16;
+    } else {
+      leaf_num_bits_in_histogram_bin_[right_leaf_index] = 32;
+    }
+    if (max_stat_left < 256) {
+      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 8;
+    } else if (max_stat_left < 65536) {
+      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 16;
+    } else {
+      leaf_num_bits_in_histogram_acc_[left_leaf_index] = 32;
+    }
+    if (max_stat_right < 256) {
+      leaf_num_bits_in_histogram_acc_[right_leaf_index] = 8;
+    } else if (max_stat_right < 65536) {
+      leaf_num_bits_in_histogram_acc_[right_leaf_index] = 16;
+    } else {
+      leaf_num_bits_in_histogram_acc_[right_leaf_index] = 32;
+    }
+  }
 }
 
 }  // namespace LightGBM
