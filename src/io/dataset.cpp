@@ -1296,22 +1296,12 @@ void Dataset::ConstructHistogramsInner(
       int16_t* ordered_gradients_and_hessians = reinterpret_cast<int16_t*>(ordered_gradients);
       const int16_t* gradients_and_hessians = reinterpret_cast<const int16_t*>(gradients);
       if (USE_INDICES) {
-        if (USE_HESSIAN) {
   #pragma omp parallel for schedule(static, 512) if (num_data >= 1024)
-          for (data_size_t i = 0; i < num_data; ++i) {
-            ordered_gradients_and_hessians[i] = gradients_and_hessians[data_indices[i]];
-          }
-          ptr_ordered_grad = reinterpret_cast<const score_t*>(ordered_gradients);
-          ptr_ordered_hess = nullptr;
-        } else {
-          Log::Fatal("Constant hessian objective is not supported with gradient discretization on CPU yet.");
-  #pragma omp parallel for schedule(static, 512) if (num_data >= 1024)
-          for (data_size_t i = 0; i < num_data; ++i) {
-            ordered_gradients_and_hessians[i] = gradients_and_hessians[data_indices[i]];
-          }
-          ptr_ordered_grad = reinterpret_cast<const score_t*>(ordered_gradients);
-          ptr_ordered_hess = nullptr;
+        for (data_size_t i = 0; i < num_data; ++i) {
+          ordered_gradients_and_hessians[i] = gradients_and_hessians[data_indices[i]];
         }
+        ptr_ordered_grad = reinterpret_cast<const score_t*>(ordered_gradients);
+        ptr_ordered_hess = nullptr;
       }
     } else {
       if (USE_INDICES) {
