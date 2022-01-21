@@ -45,49 +45,35 @@ const double kSparseThreshold = 0.7;
 #define GET_HESS(hist, i) hist[((i) << 1) + 1]
 
 inline static void HistogramSumReducer(const char* src, char* dst, int type_size, comm_size_t len) {
-  comm_size_t used_size = 0;
-  const hist_t* p1;
-  hist_t* p2;
-  while (used_size < len) {
-    // convert
-    p1 = reinterpret_cast<const hist_t*>(src);
-    p2 = reinterpret_cast<hist_t*>(dst);
-    *p2 += *p1;
-    src += type_size;
-    dst += type_size;
-    used_size += type_size;
+  const hist_t* src_ptr = reinterpret_cast<const hist_t*>(src);
+  hist_t* dst_ptr = reinterpret_cast<hist_t*>(dst);
+  const size_t steps = (len + type_size - 1) / type_size;
+  const int num_threads = OMP_NUM_THREADS();
+  #pragma omp parallel for schedule(static) num_threads(num_threads)
+  for (size_t i = 0; i < steps; ++i) {
+    dst_ptr[i] += src_ptr[i];
   }
 }
 
 inline static void Int32HistogramSumReducer(const char* src, char* dst, int type_size, comm_size_t len) {
-  comm_size_t used_size = 0;
-  const int64_t* p1;
-  int64_t* p2;
-  type_size *= 2;
-  while (used_size < len) {
-    // convert
-    p1 = reinterpret_cast<const int64_t*>(src);
-    p2 = reinterpret_cast<int64_t*>(dst);
-    *p2 += *p1;
-    src += type_size;
-    dst += type_size;
-    used_size += type_size;
+  const int64_t* src_ptr = reinterpret_cast<const int64_t*>(src);
+  int64_t* dst_ptr = reinterpret_cast<int64_t*>(dst);
+  const size_t steps = (len + (type_size * 2) - 1) / (type_size * 2);
+  const int num_threads = OMP_NUM_THREADS();
+  #pragma omp parallel for schedule(static) num_threads(num_threads)
+  for (size_t i = 0; i < steps; ++i) {
+    dst_ptr[i] += src_ptr[i];
   }
 }
 
 inline static void Int16HistogramSumReducer(const char* src, char* dst, int type_size, comm_size_t len) {
-  comm_size_t used_size = 0;
-  const int32_t* p1;
-  int32_t* p2;
-  type_size *= 2;
-  while (used_size < len) {
-    // convert
-    p1 = reinterpret_cast<const int32_t*>(src);
-    p2 = reinterpret_cast<int32_t*>(dst);
-    *p2 += *p1;
-    src += type_size;
-    dst += type_size;
-    used_size += type_size;
+  const int32_t* src_ptr = reinterpret_cast<const int32_t*>(src);
+  int32_t* dst_ptr = reinterpret_cast<int32_t*>(dst);
+  const size_t steps = (len + (type_size * 2) - 1) / (type_size * 2);
+  const int num_threads = OMP_NUM_THREADS();
+  #pragma omp parallel for schedule(static) num_threads(num_threads)
+  for (size_t i = 0; i < steps; ++i) {
+    dst_ptr[i] += src_ptr[i];
   }
 }
 
