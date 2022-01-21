@@ -30,7 +30,9 @@ void DataParallelTreeLearner<TREELEARNER_T>::Init(const Dataset* train_data, boo
   auto max_cat_threshold = this->config_->max_cat_threshold;
   // need to be able to hold smaller and larger best splits in SyncUpGlobalBestSplit
   size_t split_info_size = static_cast<size_t>(SplitInfo::Size(max_cat_threshold) * 2);
-  size_t histogram_size = static_cast<size_t>(this->share_state_->num_hist_total_bin() * kHistEntrySize);
+  size_t histogram_size = this->config_->use_discretized_grad ?
+    static_cast<size_t>(this->share_state_->num_hist_total_bin() * kInt32HistEntrySize) :
+    static_cast<size_t>(this->share_state_->num_hist_total_bin() * kHistEntrySize);
 
   // allocate buffer for communication
   size_t buffer_size = std::max(histogram_size, split_info_size);
@@ -43,8 +45,19 @@ void DataParallelTreeLearner<TREELEARNER_T>::Init(const Dataset* train_data, boo
   block_start_.resize(num_machines_);
   block_len_.resize(num_machines_);
 
+  if (this->config_->use_discretized_grad) {
+    block_start_int16_.resize(num_machines_);
+    block_len_int16_.resize(num_machines_);
+  }
+
   buffer_write_start_pos_.resize(this->num_features_);
   buffer_read_start_pos_.resize(this->num_features_);
+
+  if (this->config_->use_discretized_grad) {
+    buffer_write_start_pos_int16_.resize(this->num_features_);
+    buffer_read_start_pos_int16_.resize(this->num_features_);
+  }
+
   global_data_count_in_leaf_.resize(this->config_->num_leaves);
 }
 
@@ -52,6 +65,59 @@ template <typename TREELEARNER_T>
 void DataParallelTreeLearner<TREELEARNER_T>::ResetConfig(const Config* config) {
   TREELEARNER_T::ResetConfig(config);
   global_data_count_in_leaf_.resize(this->config_->num_leaves);
+}
+
+template <typename TREELEARNER_T>
+void DataParallelTreeLearner<TREELEARNER_T>::PrepareBufferPos(
+  const std::vector<std::vector<int>>& feature_distribution,
+  std::vector<comm_size_t>* block_start,
+  std::vector<comm_size_t>* block_len,
+  std::vector<comm_size_t>* buffer_write_start_pos,
+  std::vector<comm_size_t>* buffer_read_start_pos,
+  comm_size_t* reduce_scatter_size,
+  size_t hist_entry_size) {
+  // get block start and block len for reduce scatter
+  *reduce_scatter_size = 0;
+  for (int i = 0; i < num_machines_; ++i) {
+    (*block_len)[i] = 0;
+    for (auto fid : feature_distribution[i]) {
+      auto num_bin = this->train_data_->FeatureNumBin(fid);
+      if (this->train_data_->FeatureBinMapper(fid)->GetMostFreqBin() == 0) {
+        num_bin -= 1;
+      }
+      (*block_len)[i] += num_bin * hist_entry_size;
+    }
+    *reduce_scatter_size += (*block_len)[i];
+  }
+
+  (*block_start)[0] = 0;
+  for (int i = 1; i < num_machines_; ++i) {
+    (*block_start)[i] = (*block_start)[i - 1] + (*block_len)[i - 1];
+  }
+
+  // get buffer_write_start_pos
+  int bin_size = 0;
+  for (int i = 0; i < num_machines_; ++i) {
+    for (auto fid : feature_distribution[i]) {
+      (*buffer_write_start_pos)[fid] = bin_size;
+      auto num_bin = this->train_data_->FeatureNumBin(fid);
+      if (this->train_data_->FeatureBinMapper(fid)->GetMostFreqBin() == 0) {
+        num_bin -= 1;
+      }
+      bin_size += num_bin * hist_entry_size;
+    }
+  }
+
+  // get buffer_read_start_pos
+  bin_size = 0;
+  for (auto fid : feature_distribution[rank_]) {
+    (*buffer_read_start_pos)[fid] = bin_size;
+    auto num_bin = this->train_data_->FeatureNumBin(fid);
+    if (this->train_data_->FeatureBinMapper(fid)->GetMostFreqBin() == 0) {
+      num_bin -= 1;
+    }
+    bin_size += num_bin * hist_entry_size;
+  }
 }
 
 template <typename TREELEARNER_T>
@@ -80,76 +146,77 @@ void DataParallelTreeLearner<TREELEARNER_T>::BeforeTrain() {
   }
 
   // get block start and block len for reduce scatter
-  const size_t hist_entry_size = this->config_->use_discretized_grad ? kInt32HistEntrySize : kHistEntrySize;
-  reduce_scatter_size_ = 0;
-  for (int i = 0; i < num_machines_; ++i) {
-    block_len_[i] = 0;
-    for (auto fid : feature_distribution[i]) {
-      auto num_bin = this->train_data_->FeatureNumBin(fid);
-      if (this->train_data_->FeatureBinMapper(fid)->GetMostFreqBin() == 0) {
-        num_bin -= 1;
+  if (this->config_->use_discretized_grad) {
+    PrepareBufferPos(feature_distribution, &block_start_, &block_len_, &buffer_write_start_pos_,
+      &buffer_read_start_pos_, &reduce_scatter_size_, kInt32HistEntrySize);
+    PrepareBufferPos(feature_distribution, &block_start_int16_, &block_len_int16_, &buffer_write_start_pos_int16_,
+      &buffer_read_start_pos_int16_, &reduce_scatter_size_int16_, kInt16HistEntrySize);
+  } else {
+    PrepareBufferPos(feature_distribution, &block_start_, &block_len_, &buffer_write_start_pos_,
+      &buffer_read_start_pos_, &reduce_scatter_size_, kHistEntrySize);
+  }
+
+  if (this->config_->use_discretized_grad) {
+    // sync global data sumup info
+    std::tuple<data_size_t, double, double, int64_t> data(this->smaller_leaf_splits_->num_data_in_leaf(),
+                                                          this->smaller_leaf_splits_->sum_gradients(), this->smaller_leaf_splits_->sum_hessians(),
+                                                          this->smaller_leaf_splits_->int_sum_gradients_and_hessians());
+    int size = sizeof(data);
+    std::memcpy(input_buffer_.data(), &data, size);
+    // global sumup reduce
+    Network::Allreduce(input_buffer_.data(), size, sizeof(std::tuple<data_size_t, double, double, int64_t>), output_buffer_.data(), [](const char *src, char *dst, int type_size, comm_size_t len) {
+      comm_size_t used_size = 0;
+      const std::tuple<data_size_t, double, double, int64_t> *p1;
+      std::tuple<data_size_t, double, double, int64_t> *p2;
+      while (used_size < len) {
+        p1 = reinterpret_cast<const std::tuple<data_size_t, double, double, int64_t> *>(src);
+        p2 = reinterpret_cast<std::tuple<data_size_t, double, double, int64_t> *>(dst);
+        std::get<0>(*p2) = std::get<0>(*p2) + std::get<0>(*p1);
+        std::get<1>(*p2) = std::get<1>(*p2) + std::get<1>(*p1);
+        std::get<2>(*p2) = std::get<2>(*p2) + std::get<2>(*p1);
+        std::get<3>(*p2) = std::get<3>(*p2) + std::get<3>(*p1);
+        src += type_size;
+        dst += type_size;
+        used_size += type_size;
       }
-      block_len_[i] += num_bin * hist_entry_size;
-    }
-    reduce_scatter_size_ += block_len_[i];
-  }
-
-  block_start_[0] = 0;
-  for (int i = 1; i < num_machines_; ++i) {
-    block_start_[i] = block_start_[i - 1] + block_len_[i - 1];
-  }
-
-  // get buffer_write_start_pos_
-  int bin_size = 0;
-  for (int i = 0; i < num_machines_; ++i) {
-    for (auto fid : feature_distribution[i]) {
-      buffer_write_start_pos_[fid] = bin_size;
-      auto num_bin = this->train_data_->FeatureNumBin(fid);
-      if (this->train_data_->FeatureBinMapper(fid)->GetMostFreqBin() == 0) {
-        num_bin -= 1;
+    });
+    // copy back
+    std::memcpy(reinterpret_cast<void*>(&data), output_buffer_.data(), size);
+    // set global sumup info
+    this->smaller_leaf_splits_->Init(std::get<1>(data), std::get<2>(data), std::get<3>(data));
+    // init global data count in leaf
+    global_data_count_in_leaf_[0] = std::get<0>(data);
+    // reset hist num bits according to global num data
+    this->SetNumBitsInHistogramBin(0, -1);
+  } else {
+    // sync global data sumup info
+    std::tuple<data_size_t, double, double> data(this->smaller_leaf_splits_->num_data_in_leaf(),
+                                                this->smaller_leaf_splits_->sum_gradients(), this->smaller_leaf_splits_->sum_hessians());
+    int size = sizeof(data);
+    std::memcpy(input_buffer_.data(), &data, size);
+    // global sumup reduce
+    Network::Allreduce(input_buffer_.data(), size, sizeof(std::tuple<data_size_t, double, double>), output_buffer_.data(), [](const char *src, char *dst, int type_size, comm_size_t len) {
+      comm_size_t used_size = 0;
+      const std::tuple<data_size_t, double, double> *p1;
+      std::tuple<data_size_t, double, double> *p2;
+      while (used_size < len) {
+        p1 = reinterpret_cast<const std::tuple<data_size_t, double, double> *>(src);
+        p2 = reinterpret_cast<std::tuple<data_size_t, double, double> *>(dst);
+        std::get<0>(*p2) = std::get<0>(*p2) + std::get<0>(*p1);
+        std::get<1>(*p2) = std::get<1>(*p2) + std::get<1>(*p1);
+        std::get<2>(*p2) = std::get<2>(*p2) + std::get<2>(*p1);
+        src += type_size;
+        dst += type_size;
+        used_size += type_size;
       }
-      bin_size += num_bin * hist_entry_size;
-    }
+    });
+    // copy back
+    std::memcpy(reinterpret_cast<void*>(&data), output_buffer_.data(), size);
+    // set global sumup info
+    this->smaller_leaf_splits_->Init(std::get<1>(data), std::get<2>(data));
+    // init global data count in leaf
+    global_data_count_in_leaf_[0] = std::get<0>(data);
   }
-
-  // get buffer_read_start_pos_
-  bin_size = 0;
-  for (auto fid : feature_distribution[rank_]) {
-    buffer_read_start_pos_[fid] = bin_size;
-    auto num_bin = this->train_data_->FeatureNumBin(fid);
-    if (this->train_data_->FeatureBinMapper(fid)->GetMostFreqBin() == 0) {
-      num_bin -= 1;
-    }
-    bin_size += num_bin * hist_entry_size;
-  }
-
-  // sync global data sumup info
-  std::tuple<data_size_t, double, double> data(this->smaller_leaf_splits_->num_data_in_leaf(),
-                                               this->smaller_leaf_splits_->sum_gradients(), this->smaller_leaf_splits_->sum_hessians());
-  int size = sizeof(data);
-  std::memcpy(input_buffer_.data(), &data, size);
-  // global sumup reduce
-  Network::Allreduce(input_buffer_.data(), size, sizeof(std::tuple<data_size_t, double, double>), output_buffer_.data(), [](const char *src, char *dst, int type_size, comm_size_t len) {
-    comm_size_t used_size = 0;
-    const std::tuple<data_size_t, double, double> *p1;
-    std::tuple<data_size_t, double, double> *p2;
-    while (used_size < len) {
-      p1 = reinterpret_cast<const std::tuple<data_size_t, double, double> *>(src);
-      p2 = reinterpret_cast<std::tuple<data_size_t, double, double> *>(dst);
-      std::get<0>(*p2) = std::get<0>(*p2) + std::get<0>(*p1);
-      std::get<1>(*p2) = std::get<1>(*p2) + std::get<1>(*p1);
-      std::get<2>(*p2) = std::get<2>(*p2) + std::get<2>(*p1);
-      src += type_size;
-      dst += type_size;
-      used_size += type_size;
-    }
-  });
-  // copy back
-  std::memcpy(reinterpret_cast<void*>(&data), output_buffer_.data(), size);
-  // set global sumup info
-  this->smaller_leaf_splits_->Init(std::get<1>(data), std::get<2>(data));
-  // init global data count in leaf
-  global_data_count_in_leaf_[0] = std::get<0>(data);
 }
 
 template <typename TREELEARNER_T>
@@ -159,6 +226,7 @@ void DataParallelTreeLearner<TREELEARNER_T>::FindBestSplits(const Tree* tree) {
   const int smaller_leaf_index = this->smaller_leaf_splits_->leaf_index();
   const data_size_t local_data_on_smaller_leaf = this->data_partition_->leaf_count(smaller_leaf_index);
   if (local_data_on_smaller_leaf <= 0) {
+  Log::Warning("DataParallelTreeLearner<TREELEARNER_T>::FindBestSplits step 0.5");
     // clear histogram buffer before synchronizing
     // otherwise histogram contents from the previous iteration will be sent
     #pragma omp parallel for schedule(static)
@@ -168,8 +236,15 @@ void DataParallelTreeLearner<TREELEARNER_T>::FindBestSplits(const Tree* tree) {
       const BinMapper* feature_bin_mapper = this->train_data_->FeatureBinMapper(feature_index);
       const int offset = static_cast<int>(feature_bin_mapper->GetMostFreqBin() == 0);
       const int num_bin = feature_bin_mapper->num_bin();
-      hist_t* hist_ptr = this->smaller_leaf_histogram_array_[feature_index].RawData();
-      std::memset(reinterpret_cast<void*>(hist_ptr), 0, (num_bin - offset) * kHistEntrySize);
+      if (this->config_->use_discretized_grad) {
+        int32_t* hist_ptr = this->smaller_leaf_histogram_array_[feature_index].RawDataInt32();
+        std::memset(reinterpret_cast<void*>(hist_ptr), 0, (num_bin - offset) * kInt32HistEntrySize);
+        int16_t* hist_ptr_int16 = this->smaller_leaf_histogram_array_[feature_index].RawDataInt16();
+        std::memset(reinterpret_cast<void*>(hist_ptr_int16), 0, (num_bin - offset) * kInt16HistEntrySize);
+      } else {
+        hist_t* hist_ptr = this->smaller_leaf_histogram_array_[feature_index].RawData();
+        std::memset(reinterpret_cast<void*>(hist_ptr), 0, (num_bin - offset) * kHistEntrySize);
+      }
     }
   }
   // construct local histograms
@@ -180,9 +255,9 @@ void DataParallelTreeLearner<TREELEARNER_T>::FindBestSplits(const Tree* tree) {
     if (this->col_sampler_.is_feature_used_bytree()[feature_index] == false)
       continue;
     // copy to buffer
-    if (!this->config_->use_discretized_grad) {
+    if (this->config_->use_discretized_grad) {
       if (smaller_leaf_num_bits <= 16) {
-        std::memcpy(input_buffer_.data() + buffer_write_start_pos_[feature_index] / 2,
+        std::memcpy(input_buffer_.data() + buffer_write_start_pos_int16_[feature_index],
                     this->smaller_leaf_histogram_array_[feature_index].RawDataInt16(),
                     this->smaller_leaf_histogram_array_[feature_index].SizeOfInt16Histgram());
       } else {
@@ -199,14 +274,14 @@ void DataParallelTreeLearner<TREELEARNER_T>::FindBestSplits(const Tree* tree) {
   // Reduce scatter for histogram
   if (!this->config_->use_discretized_grad) {
     Network::ReduceScatter(input_buffer_.data(), reduce_scatter_size_, sizeof(hist_t), block_start_.data(),
-                         block_len_.data(), output_buffer_.data(), static_cast<comm_size_t>(output_buffer_.size()), &HistogramSumReducer);
+                           block_len_.data(), output_buffer_.data(), static_cast<comm_size_t>(output_buffer_.size()), &HistogramSumReducer);
   } else {
     if (smaller_leaf_num_bits <= 16) {
-      Network::ReduceScatter(input_buffer_.data(), reduce_scatter_size_ / 2, sizeof(int16_t), block_start_.data(),
-                        block_len_.data(), output_buffer_.data(), static_cast<comm_size_t>(output_buffer_.size()), &Int16HistogramSumReducer);
+      Network::ReduceScatter(input_buffer_.data(), reduce_scatter_size_int16_, sizeof(int16_t), block_start_int16_.data(),
+                             block_len_int16_.data(), output_buffer_.data(), static_cast<comm_size_t>(output_buffer_.size()), &Int16HistogramSumReducer);
     } else {
       Network::ReduceScatter(input_buffer_.data(), reduce_scatter_size_, sizeof(int_hist_t), block_start_.data(),
-                          block_len_.data(), output_buffer_.data(), static_cast<comm_size_t>(output_buffer_.size()), &Int32HistogramSumReducer);
+                             block_len_.data(), output_buffer_.data(), static_cast<comm_size_t>(output_buffer_.size()), &Int32HistogramSumReducer);
     }
   }
   global_timer.Stop("DataParallelTreeLearner::ReduceHistogram");
@@ -225,6 +300,25 @@ void DataParallelTreeLearner<TREELEARNER_T>::FindBestSplitsFromHistograms(const 
   double smaller_leaf_parent_output = this->GetParentOutput(tree, this->smaller_leaf_splits_.get());
   double larger_leaf_parent_output = this->GetParentOutput(tree, this->larger_leaf_splits_.get());
   const uint8_t smaller_leaf_num_bits = this->leaf_num_bits_in_histogram_bin_[this->smaller_leaf_splits_->leaf_index()];
+
+  if (this->larger_leaf_splits_ != nullptr && this->larger_leaf_splits_->leaf_index() >= 0) {
+    const int parent_index = std::min(this->smaller_leaf_splits_->leaf_index(), this->larger_leaf_splits_->leaf_index());
+    const uint8_t parent_num_bits = this->node_num_bits_in_histogram_bin_[parent_index];
+    const uint8_t larger_leaf_num_bits = this->leaf_num_bits_in_histogram_bin_[this->larger_leaf_splits_->leaf_index()];
+    if (parent_num_bits > 16 && larger_leaf_num_bits <= 16) {
+      CHECK_LE(smaller_leaf_num_bits, 16);
+      OMP_INIT_EX();
+      #pragma omp parallel for schedule(static)
+      for (int feature_index = 0; feature_index < this->num_features_; ++feature_index) {
+        OMP_LOOP_EX_BEGIN();
+        if (!is_feature_aggregated_[feature_index]) continue;
+        this->larger_leaf_histogram_array_[feature_index].CopyToBuffer(this->change_hist_bits_buffer_[feature_index].data());
+        OMP_LOOP_EX_END();
+      }
+      OMP_THROW_EX();
+    }
+  }
+
   OMP_INIT_EX();
   #pragma omp parallel for schedule(static)
   for (int feature_index = 0; feature_index < this->num_features_; ++feature_index) {
@@ -236,18 +330,34 @@ void DataParallelTreeLearner<TREELEARNER_T>::FindBestSplitsFromHistograms(const 
     if (this->config_->use_discretized_grad) {
       if (smaller_leaf_num_bits <= 16) {
         this->smaller_leaf_histogram_array_[feature_index].FromMemoryInt16(
-          output_buffer_.data() + buffer_read_start_pos_[feature_index]);
+          output_buffer_.data() + buffer_read_start_pos_int16_[feature_index]);
       } else {
         this->smaller_leaf_histogram_array_[feature_index].FromMemoryInt32(
           output_buffer_.data() + buffer_read_start_pos_[feature_index]);
       }
+    } else {
+      this->smaller_leaf_histogram_array_[feature_index].FromMemory(
+        output_buffer_.data() + buffer_read_start_pos_[feature_index]);
     }
-    this->smaller_leaf_histogram_array_[feature_index].FromMemory(
-      output_buffer_.data() + buffer_read_start_pos_[feature_index]);
 
-    this->train_data_->FixHistogram(feature_index,
-                                    this->smaller_leaf_splits_->sum_gradients(), this->smaller_leaf_splits_->sum_hessians(),
-                                    this->smaller_leaf_histogram_array_[feature_index].RawData());
+    if (this->config_->use_discretized_grad) {
+      const int64_t int_sum_gradient_and_hessian = this->smaller_leaf_splits_->int_sum_gradients_and_hessians();
+      if (smaller_leaf_num_bits <= 16) {
+        this->train_data_->template FixHistogramInt<int32_t, 16>(
+          feature_index,
+          int_sum_gradient_and_hessian,
+          reinterpret_cast<hist_t*>(this->smaller_leaf_histogram_array_[feature_index].RawDataInt16()));
+      } else {
+        this->train_data_->template FixHistogramInt<int64_t, 32>(
+          feature_index,
+          int_sum_gradient_and_hessian,
+          reinterpret_cast<hist_t*>(this->smaller_leaf_histogram_array_[feature_index].RawDataInt32()));
+      }
+    } else {
+      this->train_data_->FixHistogram(feature_index,
+                                      this->smaller_leaf_splits_->sum_gradients(), this->smaller_leaf_splits_->sum_hessians(),
+                                      this->smaller_leaf_histogram_array_[feature_index].RawData());
+    }
 
     this->ComputeBestSplitForFeature(
         this->smaller_leaf_histogram_array_, feature_index, real_feature_index,
@@ -261,8 +371,30 @@ void DataParallelTreeLearner<TREELEARNER_T>::FindBestSplitsFromHistograms(const 
     if (this->larger_leaf_splits_ == nullptr || this->larger_leaf_splits_->leaf_index() < 0) continue;
 
     // construct histgroms for large leaf, we init larger leaf as the parent, so we can just subtract the smaller leaf's histograms
-    this->larger_leaf_histogram_array_[feature_index].Subtract(
-      this->smaller_leaf_histogram_array_[feature_index]);
+    if (this->config_->use_discretized_grad) {
+      const int parent_index = std::min(this->smaller_leaf_splits_->leaf_index(), this->larger_leaf_splits_->leaf_index());
+      const uint8_t parent_num_bits = this->node_num_bits_in_histogram_bin_[parent_index];
+      const uint8_t larger_leaf_num_bits = this->leaf_num_bits_in_histogram_bin_[this->larger_leaf_splits_->leaf_index()];
+      if (parent_num_bits <= 16) {
+        CHECK_LE(smaller_leaf_num_bits, 16);
+        CHECK_LE(larger_leaf_num_bits, 16);
+        this->larger_leaf_histogram_array_[feature_index].template Subtract<true, int32_t, int32_t, int32_t, 16, 16, 16>(
+              this->smaller_leaf_histogram_array_[feature_index]);
+      } else if (larger_leaf_num_bits <= 16) {
+        CHECK_LE(smaller_leaf_num_bits, 16);
+        this->larger_leaf_histogram_array_[feature_index].template Subtract<true, int64_t, int32_t, int32_t, 32, 16, 16>(
+            this->smaller_leaf_histogram_array_[feature_index], this->change_hist_bits_buffer_[feature_index].data());
+      } else if (smaller_leaf_num_bits <= 16) {
+        this->larger_leaf_histogram_array_[feature_index].template Subtract<true, int64_t, int32_t, int64_t, 32, 16, 32>(
+              this->smaller_leaf_histogram_array_[feature_index]);
+      } else {
+        this->larger_leaf_histogram_array_[feature_index].template Subtract<true, int64_t, int64_t, int64_t, 32, 32, 32>(
+              this->smaller_leaf_histogram_array_[feature_index]);
+      }
+    } else {
+      this->larger_leaf_histogram_array_[feature_index].Subtract(
+        this->smaller_leaf_histogram_array_[feature_index]);
+    }
 
     this->ComputeBestSplitForFeature(
         this->larger_leaf_histogram_array_, feature_index, real_feature_index,
@@ -309,6 +441,10 @@ void DataParallelTreeLearner<TREELEARNER_T>::Split(Tree* tree, int best_Leaf, in
   // need update global number of data in leaf
   global_data_count_in_leaf_[*left_leaf] = best_split_info.left_count;
   global_data_count_in_leaf_[*right_leaf] = best_split_info.right_count;
+  // reset hist num bits according to global num data
+  if (this->config_->use_discretized_grad) {
+    this->SetNumBitsInHistogramBin(*left_leaf, *right_leaf);
+  }
 }
 
 // instantiate template classes, otherwise linker cannot find the code

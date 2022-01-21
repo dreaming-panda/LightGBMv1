@@ -931,7 +931,7 @@ class FeatureHistogram {
   }
 
   void FromMemoryInt16(char* memory_data) {
-    std::memcpy(data_, memory_data,
+    std::memcpy(data_int16_, memory_data,
                 (meta_->num_bin - meta_->offset) * kInt16HistEntrySize);
   }
 

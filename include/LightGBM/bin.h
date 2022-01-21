@@ -61,12 +61,13 @@ inline static void HistogramSumReducer(const char* src, char* dst, int type_size
 
 inline static void Int32HistogramSumReducer(const char* src, char* dst, int type_size, comm_size_t len) {
   comm_size_t used_size = 0;
-  const int_hist_t* p1;
-  int_hist_t* p2;
+  const int64_t* p1;
+  int64_t* p2;
+  type_size *= 2;
   while (used_size < len) {
     // convert
-    p1 = reinterpret_cast<const int_hist_t*>(src);
-    p2 = reinterpret_cast<int_hist_t*>(dst);
+    p1 = reinterpret_cast<const int64_t*>(src);
+    p2 = reinterpret_cast<int64_t*>(dst);
     *p2 += *p1;
     src += type_size;
     dst += type_size;
@@ -76,12 +77,13 @@ inline static void Int32HistogramSumReducer(const char* src, char* dst, int type
 
 inline static void Int16HistogramSumReducer(const char* src, char* dst, int type_size, comm_size_t len) {
   comm_size_t used_size = 0;
-  const int16_t* p1;
-  int16_t* p2;
+  const int32_t* p1;
+  int32_t* p2;
+  type_size *= 2;
   while (used_size < len) {
     // convert
-    p1 = reinterpret_cast<const int16_t*>(src);
-    p2 = reinterpret_cast<int16_t*>(dst);
+    p1 = reinterpret_cast<const int32_t*>(src);
+    p2 = reinterpret_cast<int32_t*>(dst);
     *p2 += *p1;
     src += type_size;
     dst += type_size;

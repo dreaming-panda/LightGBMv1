@@ -52,12 +52,6 @@ void SerialTreeLearner::Init(const Dataset* train_data, bool is_constant_hessian
   smaller_leaf_splits_.reset(new LeafSplits(train_data_->num_data(), config_));
   larger_leaf_splits_.reset(new LeafSplits(train_data_->num_data(), config_));
 
-  leaf_num_bits_in_histogram_bin_.resize(config_->num_leaves, 0);
-  leaf_num_bits_in_histogram_acc_.resize(config_->num_leaves, 0);
-  node_num_bits_in_histogram_bin_.resize(config_->num_leaves, 0);
-  node_num_bits_in_histogram_acc_.resize(config_->num_leaves, 0);
-  SetNumBitsInHistogramBin(0, -1);
-
   // initialize data partition
   data_partition_.reset(new DataPartition(num_data_, config_->num_leaves));
   col_sampler_.SetTrainingData(train_data_);
@@ -77,6 +71,10 @@ void SerialTreeLearner::Init(const Dataset* train_data, bool is_constant_hessian
   }
 
   if (config_->use_discretized_grad) {
+    leaf_num_bits_in_histogram_bin_.resize(config_->num_leaves, 0);
+    leaf_num_bits_in_histogram_acc_.resize(config_->num_leaves, 0);
+    node_num_bits_in_histogram_bin_.resize(config_->num_leaves, 0);
+    node_num_bits_in_histogram_acc_.resize(config_->num_leaves, 0);
     gradient_discretizer_.reset(new GradientDiscretizer(config_->grad_discretize_bins, config_->num_iterations, config_->seed, false, is_constant_hessian));
     gradient_discretizer_->Init(num_data_);
     ordered_int_gradients_and_hessians_.resize(2 * num_data_);
@@ -98,17 +96,11 @@ void SerialTreeLearner::GetShareStates(const Dataset* dataset,
                                        bool is_first_time) {
   if (is_first_time) {
     if (config_->use_discretized_grad) {
-      if (leaf_num_bits_in_histogram_bin_[0] <= 16) {
-        share_state_.reset(dataset->GetShareStates<true, 16>(
-            ordered_gradients_.data(), ordered_hessians_.data(),
-            col_sampler_.is_feature_used_bytree(), is_constant_hessian,
-            config_->force_col_wise, config_->force_row_wise));
-      } else {
-        share_state_.reset(dataset->GetShareStates<true, 32>(
-            ordered_gradients_.data(), ordered_hessians_.data(),
-            col_sampler_.is_feature_used_bytree(), is_constant_hessian,
-            config_->force_col_wise, config_->force_row_wise));
-      }
+      // choose col-wise or row-wise with 32 bit histograms
+      share_state_.reset(dataset->GetShareStates<true, 32>(
+          ordered_gradients_.data(), ordered_hessians_.data(),
+          col_sampler_.is_feature_used_bytree(), is_constant_hessian,
+          config_->force_col_wise, config_->force_row_wise));
     } else {
       share_state_.reset(dataset->GetShareStates<false, 0>(
         ordered_gradients_.data(), ordered_hessians_.data(),
@@ -119,17 +111,11 @@ void SerialTreeLearner::GetShareStates(const Dataset* dataset,
     CHECK_NOTNULL(share_state_);
     // cannot change is_hist_col_wise during training
     if (config_->use_discretized_grad) {
-      if (leaf_num_bits_in_histogram_bin_[0] <= 16) {
-        share_state_.reset(dataset->GetShareStates<true, 16>(
-            ordered_gradients_.data(), ordered_hessians_.data(), col_sampler_.is_feature_used_bytree(),
-            is_constant_hessian, share_state_->is_col_wise,
-            !share_state_->is_col_wise));
-      } else {
-        share_state_.reset(dataset->GetShareStates<true, 32>(
-            ordered_gradients_.data(), ordered_hessians_.data(), col_sampler_.is_feature_used_bytree(),
-            is_constant_hessian, share_state_->is_col_wise,
-            !share_state_->is_col_wise));
-      }
+      // choose col-wise or row-wise with 32 bit histograms
+      share_state_.reset(dataset->GetShareStates<true, 32>(
+          ordered_gradients_.data(), ordered_hessians_.data(), col_sampler_.is_feature_used_bytree(),
+          is_constant_hessian, share_state_->is_col_wise,
+          !share_state_->is_col_wise));
     } else {
       share_state_.reset(dataset->GetShareStates<false, 0>(
           ordered_gradients_.data(), ordered_hessians_.data(), col_sampler_.is_feature_used_bytree(),
@@ -534,8 +520,9 @@ void SerialTreeLearner::FindBestSplitsFromHistograms(
     }
   }
 
-  OMP_INIT_EX();
 // find splits
+const uint8_t hist_bits = leaf_num_bits_in_histogram_bin_[smaller_leaf_splits_->leaf_index()];
+  OMP_INIT_EX();
 #pragma omp parallel for schedule(static) num_threads(share_state_->num_threads)
   for (int feature_index = 0; feature_index < num_features_; ++feature_index) {
     OMP_LOOP_EX_BEGIN();
@@ -545,7 +532,6 @@ void SerialTreeLearner::FindBestSplitsFromHistograms(
     const int tid = omp_get_thread_num();
     if (config_->use_discretized_grad) {
       const int64_t int_sum_gradient_and_hessian = smaller_leaf_splits_->int_sum_gradients_and_hessians();
-      const uint8_t hist_bits = leaf_num_bits_in_histogram_bin_[smaller_leaf_splits_->leaf_index()];
       if (hist_bits <= 16) {
         train_data_->FixHistogramInt<int32_t, 16>(
             feature_index, int_sum_gradient_and_hessian,
@@ -1082,7 +1068,7 @@ void SerialTreeLearner::SetNumBitsInHistogramBin(const int left_leaf_index, cons
       leaf_num_bits_in_histogram_acc_[left_leaf_index] = 32;
       return;
     }
-    const data_size_t num_data_in_left_leaf = smaller_leaf_splits_->num_data_in_leaf();
+    const data_size_t num_data_in_left_leaf = GetGlobalDataCountInLeaf(left_leaf_index);
     const uint64_t max_stat = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins);
     const uint64_t max_stat_per_bin = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins)
       / static_cast<uint64_t>(config_->per_bin_div);
@@ -1112,12 +1098,12 @@ void SerialTreeLearner::SetNumBitsInHistogramBin(const int left_leaf_index, cons
     }
     const data_size_t num_data_in_left_leaf =
       smaller_leaf_splits_->leaf_index() == left_leaf_index ?
-        smaller_leaf_splits_->num_data_in_leaf() :
-        larger_leaf_splits_->num_data_in_leaf();
+        GetGlobalDataCountInLeaf(smaller_leaf_splits_->leaf_index()) :
+        GetGlobalDataCountInLeaf(larger_leaf_splits_->leaf_index());
     const data_size_t num_data_in_right_leaf =
       smaller_leaf_splits_->leaf_index() == left_leaf_index ?
-        larger_leaf_splits_->num_data_in_leaf() :
-        smaller_leaf_splits_->num_data_in_leaf();
+        GetGlobalDataCountInLeaf(larger_leaf_splits_->leaf_index()) :
+        GetGlobalDataCountInLeaf(smaller_leaf_splits_->leaf_index());
     const uint64_t max_stat_left = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins);
     const uint64_t max_stat_right = static_cast<uint64_t>(num_data_in_right_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins);
     const uint64_t max_stat_left_per_bin = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins) /
