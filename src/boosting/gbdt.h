@@ -454,7 +454,11 @@ class GBDT : public GBDTBase {
   * \brief eval results for one metric
 
   */
-  virtual std::vector<double> EvalOneMetric(const Metric* metric, const double* score, const data_size_t num_data) const;
+  virtual std::vector<double> EvalOneMetric(const Metric* metric, const double* score
+  #ifdef USE_CUDA
+  , const data_size_t num_data
+  #endif  // USE_CUDA
+  ) const;
 
   /*!
   * \brief Print metric result of current iteration

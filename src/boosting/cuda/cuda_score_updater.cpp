@@ -5,6 +5,8 @@
 
 #include "cuda_score_updater.hpp"
 
+#ifdef USE_CUDA
+
 namespace LightGBM {
 
 CUDAScoreUpdater::CUDAScoreUpdater(const Dataset* data, int num_tree_per_iteration):
@@ -67,3 +69,5 @@ inline void CUDAScoreUpdater::MultiplyScore(double val, int cur_tree_id) {
 }
 
 }  // namespace LightGBM
+
+#endif  // USE_CUDA

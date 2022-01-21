@@ -10,15 +10,18 @@
 #include "regression_objective.hpp"
 #include "xentropy_objective.hpp"
 
+#ifdef USE_CUDA
 #include "cuda/cuda_binary_objective.hpp"
 #include "cuda/cuda_multiclass_objective.hpp"
 #include "cuda/cuda_regression_objective.hpp"
 #include "cuda/cuda_rank_objective.hpp"
 #include "cuda/cuda_xentropy_objective.hpp"
+#endif  // USE_CUDA
 
 namespace LightGBM {
 
 ObjectiveFunction* ObjectiveFunction::CreateObjectiveFunction(const std::string& type, const Config& config) {
+  #ifdef USE_CUDA
   if (config.device_type == std::string("cuda")) {
     if (type == std::string("regression")) {
       return new CUDARegressionL2loss(config);
@@ -58,6 +61,7 @@ ObjectiveFunction* ObjectiveFunction::CreateObjectiveFunction(const std::string&
       return nullptr;
     }
   } else {
+  #endif  // USE_CUDA
     if (type == std::string("regression")) {
       return new RegressionL2loss(config);
     } else if (type == std::string("regression_l1")) {
@@ -93,7 +97,9 @@ ObjectiveFunction* ObjectiveFunction::CreateObjectiveFunction(const std::string&
     } else if (type == std::string("custom")) {
       return nullptr;
     }
+  #ifdef USE_CUDA
   }
+  #endif  // USE_CUDA
   Log::Fatal("Unknown objective type name: %s", type.c_str());
   return nullptr;
 }

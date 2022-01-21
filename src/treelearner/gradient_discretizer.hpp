@@ -15,12 +15,13 @@ namespace LightGBM {
 
 class GradientDiscretizer {
  public:
-  GradientDiscretizer(int grad_discretize_bins, int num_trees, int random_seed, bool can_lock) {
+  GradientDiscretizer(int grad_discretize_bins, int num_trees, int random_seed, bool can_lock, bool is_constant_hessian) {
     grad_discretize_bins_ = grad_discretize_bins;
     iter_ = 0;
     num_trees_ = num_trees;
     random_seed_ = random_seed;
     can_lock_ = can_lock;
+    is_constant_hessian_ = is_constant_hessian;
   }
 
   virtual void DiscretizeGradients(
@@ -64,6 +65,7 @@ class GradientDiscretizer {
 
   bool boundary_locked_;
   bool can_lock_;
+  bool is_constant_hessian_;
 };
 
 }

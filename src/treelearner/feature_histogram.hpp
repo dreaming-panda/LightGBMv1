@@ -35,6 +35,8 @@ class FeatureMetainfo {
   BinType bin_type;
   /*! \brief random number generator for extremely randomized trees */
   mutable Random rand;
+  int real_feature_index;
+  int inner_feature_index;
 };
 /*!
  * \brief FeatureHistogram is used to construct and store a histogram for a
@@ -56,9 +58,22 @@ class FeatureHistogram {
    * \param feature the feature data for this histogram
    * \param min_num_data_one_leaf minimal number of data in one leaf
    */
+  void Init(hist_t* data, int16_t* data_int16, const FeatureMetainfo* meta) {
+    meta_ = meta;
+    data_ = data;
+    data_int16_ = data_int16;
+    ResetFunc();
+  }
+
+  /*!
+   * \brief Init the feature histogram
+   * \param feature the feature data for this histogram
+   * \param min_num_data_one_leaf minimal number of data in one leaf
+   */
   void Init(hist_t* data, const FeatureMetainfo* meta) {
     meta_ = meta;
     data_ = data;
+    data_int16_ = nullptr;
     ResetFunc();
   }
 
@@ -72,22 +87,70 @@ class FeatureHistogram {
 
   hist_t* RawData() { return data_; }
 
+  int32_t* RawDataInt32() { return reinterpret_cast<int32_t*>(data_); }
+
+  int16_t* RawDataInt16() { return data_int16_; }
+
   /*!
    * \brief Subtract current histograms with other
    * \param other The histogram that want to subtract
    */
-  template <bool USE_DIST_GRAD = false>
-  void Subtract(const FeatureHistogram& other) {
+  template <bool USE_DIST_GRAD = false,
+    typename THIS_HIST_T = hist_t, typename OTHER_HIST_T = hist_t, typename RESULT_HIST_T = hist_t,
+    int THIS_HIST_BITS = 0, int OTHER_HIST_BITS = 0, int RESULT_HIST_BITS = 0>
+  void Subtract(const FeatureHistogram& other, const int32_t* buffer = nullptr) {
     if (USE_DIST_GRAD) {
-      int32_t* int_data = reinterpret_cast<int32_t*>(data_);
-      const int32_t* other_int_data = reinterpret_cast<int32_t*>(other.data_);
-      for (int i = 0; i < (meta_->num_bin - meta_->offset) * 2; ++i) {
-        int_data[i] -= other_int_data[i];
+      const THIS_HIST_T* this_int_data = THIS_HIST_BITS == 16 ?
+        reinterpret_cast<const THIS_HIST_T*>(data_int16_) :
+        (RESULT_HIST_BITS == 16 ?
+          reinterpret_cast<const THIS_HIST_T*>(buffer) :
+          reinterpret_cast<const THIS_HIST_T*>(data_));
+      const OTHER_HIST_T* other_int_data = OTHER_HIST_BITS == 16 ?
+        reinterpret_cast<OTHER_HIST_T*>(other.data_int16_) :
+        reinterpret_cast<OTHER_HIST_T*>(other.data_);
+      RESULT_HIST_T* result_int_data = RESULT_HIST_BITS == 16 ?
+        reinterpret_cast<RESULT_HIST_T*>(data_int16_) :
+        reinterpret_cast<RESULT_HIST_T*>(data_);
+      if (THIS_HIST_BITS == 32 && OTHER_HIST_BITS == 16 && RESULT_HIST_BITS == 32) {
+        for (int i = 0; i < meta_->num_bin - meta_->offset; ++i) {
+          const int32_t other_grad_hess = static_cast<int32_t>(other_int_data[i]);
+          const int64_t this_grad_hess = this_int_data[i];
+          const int64_t other_grad_hess_int64 =
+            (static_cast<int64_t>(static_cast<int16_t>(other_grad_hess >> 16)) << 32) |
+            (static_cast<int64_t>(other_grad_hess & 0x0000ffff));
+          const int64_t result_grad_hess = this_grad_hess - other_grad_hess_int64;
+          result_int_data[i] = result_grad_hess;
+        }
+      } else if (THIS_HIST_BITS == 32 && OTHER_HIST_BITS == 16 && RESULT_HIST_BITS == 16) {
+        for (int i = 0; i < meta_->num_bin - meta_->offset; ++i) {
+          const int32_t other_grad_hess = static_cast<int32_t>(other_int_data[i]);
+          const int64_t this_grad_hess = this_int_data[i];
+          const int64_t other_grad_hess_int64 =
+            (static_cast<int64_t>(static_cast<int16_t>(other_grad_hess >> 16)) << 32) |
+            (static_cast<int64_t>(other_grad_hess & 0x0000ffff));
+          const int64_t result_grad_hess = this_grad_hess - other_grad_hess_int64;
+          const int32_t result_grad_hess_int32 =
+            (static_cast<int32_t>(result_grad_hess >> 32) << 16) |
+            static_cast<int32_t>(result_grad_hess & 0x00000000ffffffff);
+          result_int_data[i] = result_grad_hess_int32;
+        }
+      } else {
+        for (int i = 0; i < meta_->num_bin - meta_->offset; ++i) {
+          result_int_data[i] = this_int_data[i] - other_int_data[i];
+        }
       }
     } else {
       for (int i = 0; i < (meta_->num_bin - meta_->offset) * 2; ++i) {
         data_[i] -= other.data_[i];
       }
+    }
+  }
+
+  void CopyToBuffer(int32_t* buffer) {
+    const int64_t* data_ptr = reinterpret_cast<const int64_t*>(data_);
+    int64_t* buffer_ptr = reinterpret_cast<int64_t*>(buffer);
+    for (int i = 0; i < meta_->num_bin - meta_->offset; ++i) {
+      buffer_ptr[i] = data_ptr[i];
     }
   }
 
@@ -105,13 +168,14 @@ class FeatureHistogram {
 
   void FindBestThresholdInt(int64_t sum_gradient_and_hessian,
                             double grad_scale, double hess_scale,
+                            const uint8_t num_bits,
                             data_size_t num_data,
                             const FeatureConstraint* constraints,
                             double parent_output,
                             SplitInfo* output) {
     output->default_left = true;
     output->gain = kMinScore;
-    int_find_best_threshold_fun_(sum_gradient_and_hessian, grad_scale, hess_scale, num_data,
+    int_find_best_threshold_fun_(sum_gradient_and_hessian, grad_scale, hess_scale, num_bits, num_data,
                              constraints, parent_output, output);
     output->gain *= meta_->penalty;
   }
@@ -140,7 +204,7 @@ class FeatureHistogram {
     is_splittable_ = false;
     output->monotone_type = meta_->monotone_type;
     const int32_t int_sum_gradient = static_cast<int32_t>(sum_gradient_and_hessian >> 32);
-    const int32_t int_sum_hessian = static_cast<int32_t>(sum_gradient_and_hessian & 0x00000000ffffffff);
+    const uint32_t int_sum_hessian = static_cast<uint32_t>(sum_gradient_and_hessian & 0x00000000ffffffff);
     const double sum_gradient = static_cast<double>(int_sum_gradient) * grad_scale;
     const double sum_hessian = static_cast<double>(int_sum_hessian) * hess_scale;
     double gain_shift = GetLeafGain<USE_L1, USE_MAX_OUTPUT, USE_SMOOTHING>(
@@ -201,7 +265,7 @@ class FeatureHistogram {
   if (meta_->config->use_discretized_grad) {
   #define TEMPLATE_PREFIX_INT USE_RAND, USE_MC, USE_L1, USE_MAX_OUTPUT, USE_SMOOTHING
   #define LAMBDA_ARGUMENTS_INT                                         \
-    int64_t sum_gradient_and_hessian, double grad_scale, double hess_scale, data_size_t num_data, \
+    int64_t sum_gradient_and_hessian, double grad_scale, double hess_scale, const uint8_t hist_bits, data_size_t num_data, \
         const FeatureConstraint* constraints, double parent_output, SplitInfo *output
   #define BEFORE_ARGUMENTS_INT sum_gradient_and_hessian, grad_scale, hess_scale, parent_output, num_data, output, &rand_threshold
   #define FUNC_ARGUMENTS_INT                                                      \
@@ -215,10 +279,17 @@ class FeatureHistogram {
             double min_gain_shift =
                 BeforeNumercalInt<USE_RAND, USE_L1, USE_MAX_OUTPUT, USE_SMOOTHING>(
                     BEFORE_ARGUMENTS_INT);
-            FindBestThresholdSequentiallyInt<TEMPLATE_PREFIX_INT, true, true, false>(
-                FUNC_ARGUMENTS_INT);
-            FindBestThresholdSequentiallyInt<TEMPLATE_PREFIX_INT, false, true, false>(
-                FUNC_ARGUMENTS_INT);
+            if (hist_bits <= 16) {
+              FindBestThresholdSequentiallyInt<TEMPLATE_PREFIX_INT, true, true, false, int32_t, 16>(
+                  FUNC_ARGUMENTS_INT);
+              FindBestThresholdSequentiallyInt<TEMPLATE_PREFIX_INT, false, true, false, int32_t, 16>(
+                  FUNC_ARGUMENTS_INT);
+            } else {
+              FindBestThresholdSequentiallyInt<TEMPLATE_PREFIX_INT, true, true, false, int64_t, 32>(
+                  FUNC_ARGUMENTS_INT);
+              FindBestThresholdSequentiallyInt<TEMPLATE_PREFIX_INT, false, true, false, int64_t, 32>(
+                  FUNC_ARGUMENTS_INT);
+            }
           };
         } else {
           int_find_best_threshold_fun_ = [=](LAMBDA_ARGUMENTS_INT) {
@@ -226,10 +297,17 @@ class FeatureHistogram {
             double min_gain_shift =
                 BeforeNumercalInt<USE_RAND, USE_L1, USE_MAX_OUTPUT, USE_SMOOTHING>(
                     BEFORE_ARGUMENTS_INT);
-            FindBestThresholdSequentiallyInt<TEMPLATE_PREFIX_INT, true, false, true>(
-                FUNC_ARGUMENTS_INT);
-            FindBestThresholdSequentiallyInt<TEMPLATE_PREFIX_INT, false, false, true>(
-                FUNC_ARGUMENTS_INT);
+            if (hist_bits <= 16) {
+              FindBestThresholdSequentiallyInt<TEMPLATE_PREFIX_INT, true, false, true, int32_t, 16>(
+                  FUNC_ARGUMENTS_INT);
+              FindBestThresholdSequentiallyInt<TEMPLATE_PREFIX_INT, false, false, true, int32_t, 16>(
+                  FUNC_ARGUMENTS_INT);
+            } else {
+              FindBestThresholdSequentiallyInt<TEMPLATE_PREFIX_INT, true, false, true, int64_t, 32>(
+                  FUNC_ARGUMENTS_INT);
+              FindBestThresholdSequentiallyInt<TEMPLATE_PREFIX_INT, false, false, true, int64_t, 32>(
+                  FUNC_ARGUMENTS_INT);
+            }
           };
         }
       } else {
@@ -239,8 +317,13 @@ class FeatureHistogram {
             double min_gain_shift =
                 BeforeNumercalInt<USE_RAND, USE_L1, USE_MAX_OUTPUT, USE_SMOOTHING>(
                     BEFORE_ARGUMENTS_INT);
-            FindBestThresholdSequentiallyInt<TEMPLATE_PREFIX_INT, true, false, false>(
-                FUNC_ARGUMENTS_INT);
+            if (hist_bits <= 16) {
+              FindBestThresholdSequentiallyInt<TEMPLATE_PREFIX_INT, true, false, false, int32_t, 16>(
+                  FUNC_ARGUMENTS_INT);
+            } else {
+              FindBestThresholdSequentiallyInt<TEMPLATE_PREFIX_INT, true, false, false, int64_t, 32>(
+                  FUNC_ARGUMENTS_INT);
+            }
           };
         } else {
           int_find_best_threshold_fun_ = [=](LAMBDA_ARGUMENTS_INT) {
@@ -248,8 +331,13 @@ class FeatureHistogram {
             double min_gain_shift =
                 BeforeNumercalInt<USE_RAND, USE_L1, USE_MAX_OUTPUT, USE_SMOOTHING>(
                     BEFORE_ARGUMENTS_INT);
-            FindBestThresholdSequentiallyInt<TEMPLATE_PREFIX_INT, true, false, false>(
-                FUNC_ARGUMENTS_INT);
+            if (hist_bits <= 16) {
+              FindBestThresholdSequentiallyInt<TEMPLATE_PREFIX_INT, true, false, false, int32_t, 16>(
+                  FUNC_ARGUMENTS_INT);
+            } else {
+              FindBestThresholdSequentiallyInt<TEMPLATE_PREFIX_INT, true, false, false, int64_t, 32>(
+                  FUNC_ARGUMENTS_INT);
+            }
             output->default_left = false;
           };
         }
@@ -821,8 +909,12 @@ class FeatureHistogram {
     return (meta_->num_bin - meta_->offset) * kHistEntrySize;
   }
 
-  int SizeOfIntHistgram() const {
-    return (meta_->num_bin - meta_->offset) * kIntHistEntrySize;
+  int SizeOfInt32Histgram() const {
+    return (meta_->num_bin - meta_->offset) * kInt32HistEntrySize;
+  }
+
+  int SizeOfInt16Histgram() const {
+    return (meta_->num_bin - meta_->offset) * kInt16HistEntrySize;
   }
 
   /*!
@@ -831,6 +923,16 @@ class FeatureHistogram {
   void FromMemory(char* memory_data) {
     std::memcpy(data_, memory_data,
                 (meta_->num_bin - meta_->offset) * kHistEntrySize);
+  }
+
+  void FromMemoryInt32(char* memory_data) {
+    std::memcpy(data_, memory_data,
+                (meta_->num_bin - meta_->offset) * kInt32HistEntrySize);
+  }
+
+  void FromMemoryInt16(char* memory_data) {
+    std::memcpy(data_, memory_data,
+                (meta_->num_bin - meta_->offset) * kInt16HistEntrySize);
   }
 
   /*!
@@ -1192,7 +1294,7 @@ class FeatureHistogram {
   }
 
   template <bool USE_RAND, bool USE_MC, bool USE_L1, bool USE_MAX_OUTPUT, bool USE_SMOOTHING,
-            bool REVERSE, bool SKIP_DEFAULT_BIN, bool NA_AS_MISSING>
+            bool REVERSE, bool SKIP_DEFAULT_BIN, bool NA_AS_MISSING, typename PACKED_HIST_T, int HIST_BITS>
   void FindBestThresholdSequentiallyInt(int64_t int_sum_gradient_and_hessian,
                                         const double grad_scale, const double hess_scale,
                                         data_size_t num_data,
@@ -1200,13 +1302,15 @@ class FeatureHistogram {
                                         double min_gain_shift, SplitInfo* output,
                                         int rand_threshold, double parent_output) {
     const int8_t offset = meta_->offset;
-    int64_t best_sum_left_gradient_and_hessian = 0;
+    PACKED_HIST_T best_sum_left_gradient_and_hessian = 0;
+    PACKED_HIST_T local_int_sum_gradient_and_hessian =
+      HIST_BITS == 16 ?
+      ((static_cast<int32_t>(int_sum_gradient_and_hessian >> 32) << 16) | static_cast<int32_t>(int_sum_gradient_and_hessian & 0x0000ffff)) :
+      int_sum_gradient_and_hessian;
     double best_gain = kMinScore;
     uint32_t best_threshold = static_cast<uint32_t>(meta_->num_bin);
     const double cnt_factor = static_cast<double>(num_data) /
-      static_cast<double>(static_cast<int32_t>(int_sum_gradient_and_hessian & 0x00000000ffffffff));
-
-    //Log::Warning("cnt_factor = %f, num_data = %d, int_sum_hessian = %d", cnt_factor, num_data, static_cast<int32_t>(int_sum_gradient_and_hessian & 0x00000000ffffffff));
+      static_cast<double>(static_cast<uint32_t>(int_sum_gradient_and_hessian & 0x00000000ffffffff));
 
     BasicConstraint best_right_constraints;
     BasicConstraint best_left_constraints;
@@ -1217,9 +1321,14 @@ class FeatureHistogram {
       constraints->InitCumulativeConstraints(REVERSE);
     }
 
-    const int64_t* data_ptr = reinterpret_cast<const int64_t*>(data_);
+    const PACKED_HIST_T* data_ptr = nullptr;
+    if (HIST_BITS == 16) {
+      data_ptr = reinterpret_cast<const PACKED_HIST_T*>(data_int16_);
+    } else {
+      data_ptr = reinterpret_cast<const PACKED_HIST_T*>(data_);
+    }
     if (REVERSE) {
-      int64_t sum_right_gradient_and_hessian = 0;
+      PACKED_HIST_T sum_right_gradient_and_hessian = 0;
 
       int t = meta_->num_bin - 1 - offset - NA_AS_MISSING;
       const int t_end = 1 - offset;
@@ -1232,9 +1341,11 @@ class FeatureHistogram {
             continue;
           }
         }
-        const int64_t grad_and_hess = data_ptr[t];
+        const PACKED_HIST_T grad_and_hess = data_ptr[t];
         sum_right_gradient_and_hessian += grad_and_hess;
-        const int32_t int_sum_right_hessian = static_cast<int32_t>(sum_right_gradient_and_hessian & 0x00000000ffffffff);
+        const uint32_t int_sum_right_hessian = HIST_BITS == 16 ?
+          static_cast<uint32_t>(sum_right_gradient_and_hessian & 0x0000ffff) :
+          static_cast<uint32_t>(sum_right_gradient_and_hessian & 0x00000000ffffffff);
         data_size_t right_count = Common::RoundInt(int_sum_right_hessian * cnt_factor);
         double sum_right_hessian = int_sum_right_hessian * hess_scale;
         // if data not enough, or sum hessian too small
@@ -1248,16 +1359,22 @@ class FeatureHistogram {
           break;
         }
 
-        const int64_t sum_left_gradient_and_hessian = int_sum_gradient_and_hessian - sum_right_gradient_and_hessian;
-        const int32_t int_sum_left_hessian = static_cast<int32_t>(sum_left_gradient_and_hessian & 0x00000000ffffffff);
+        const PACKED_HIST_T sum_left_gradient_and_hessian = local_int_sum_gradient_and_hessian - sum_right_gradient_and_hessian;
+        const uint32_t int_sum_left_hessian = HIST_BITS == 16 ?
+          static_cast<uint32_t>(sum_left_gradient_and_hessian & 0x0000ffff) :
+          static_cast<uint32_t>(sum_left_gradient_and_hessian & 0x00000000ffffffff);
         double sum_left_hessian = int_sum_left_hessian * hess_scale;
         // if sum hessian too small
         if (sum_left_hessian < meta_->config->min_sum_hessian_in_leaf) {
           break;
         }
 
-        double sum_right_gradient = static_cast<double>(static_cast<int32_t>(sum_right_gradient_and_hessian >> 32)) * grad_scale;
-        double sum_left_gradient = static_cast<double>(static_cast<int32_t>(sum_left_gradient_and_hessian >> 32)) * grad_scale;
+        double sum_right_gradient = HIST_BITS == 16 ?
+          static_cast<double>(static_cast<int16_t>(sum_right_gradient_and_hessian >> 16)) * grad_scale :
+          static_cast<double>(static_cast<int32_t>(sum_right_gradient_and_hessian >> 32)) * grad_scale;
+        double sum_left_gradient = HIST_BITS == 16 ?
+          static_cast<double>(static_cast<int16_t>(sum_left_gradient_and_hessian >> 16)) * grad_scale :
+          static_cast<double>(static_cast<int32_t>(sum_left_gradient_and_hessian >> 32)) * grad_scale;
         if (USE_RAND) {
           if (t - 1 + offset != rand_threshold) {
             continue;
@@ -1299,16 +1416,16 @@ class FeatureHistogram {
         }
       }
     } else {
-      int64_t sum_left_gradient_and_hessian = 0;
+      PACKED_HIST_T sum_left_gradient_and_hessian = 0;
 
       int t = 0;
       const int t_end = meta_->num_bin - 2 - offset;
 
       if (NA_AS_MISSING) {
         if (offset == 1) {
-          sum_left_gradient_and_hessian = int_sum_gradient_and_hessian;
+          sum_left_gradient_and_hessian = local_int_sum_gradient_and_hessian;
           for (int i = 0; i < meta_->num_bin - offset; ++i) {
-            const int64_t grad_and_hess = data_ptr[i];
+            const PACKED_HIST_T grad_and_hess = data_ptr[i];
             sum_left_gradient_and_hessian -= grad_and_hess;
           }
           t = -1;
@@ -1325,7 +1442,9 @@ class FeatureHistogram {
           sum_left_gradient_and_hessian += data_ptr[t];
         }
         // if data not enough, or sum hessian too small
-        const int32_t int_sum_left_hessian = static_cast<int32_t>(sum_left_gradient_and_hessian & 0x00000000ffffffff);
+        const uint32_t int_sum_left_hessian = HIST_BITS == 16 ?
+          static_cast<uint32_t>(sum_left_gradient_and_hessian & 0x0000ffff) :
+          static_cast<uint32_t>(sum_left_gradient_and_hessian & 0x00000000ffffffff);
         const data_size_t left_count = Common::RoundInt(static_cast<double>(int_sum_left_hessian) * cnt_factor);
         const double sum_left_hessian = static_cast<double>(int_sum_left_hessian) * hess_scale;
         if (left_count < meta_->config->min_data_in_leaf ||
@@ -1338,16 +1457,22 @@ class FeatureHistogram {
           break;
         }
 
-        const int64_t sum_right_gradient_and_hessian = int_sum_gradient_and_hessian - sum_left_gradient_and_hessian;
-        const int32_t int_sum_right_hessian = static_cast<int32_t>(sum_right_gradient_and_hessian & 0x00000000ffffffff);
+        const PACKED_HIST_T sum_right_gradient_and_hessian = local_int_sum_gradient_and_hessian - sum_left_gradient_and_hessian;
+        const uint32_t int_sum_right_hessian = HIST_BITS == 16 ?
+          static_cast<uint32_t>(sum_right_gradient_and_hessian & 0x0000ffff) :
+          static_cast<uint32_t>(sum_right_gradient_and_hessian & 0x00000000ffffffff);
         const double sum_right_hessian = static_cast<double>(int_sum_right_hessian) * hess_scale;
         // if sum Hessian too small
         if (sum_right_hessian < meta_->config->min_sum_hessian_in_leaf) {
           break;
         }
 
-        double sum_right_gradient = static_cast<double>(static_cast<int32_t>(sum_right_gradient_and_hessian >> 32)) * grad_scale;
-        double sum_left_gradient = static_cast<double>(static_cast<int32_t>(sum_left_gradient_and_hessian >> 32)) * grad_scale;
+        double sum_right_gradient = HIST_BITS == 16 ?
+          static_cast<double>(static_cast<int16_t>(sum_right_gradient_and_hessian >> 16)) * grad_scale :
+          static_cast<double>(static_cast<int32_t>(sum_right_gradient_and_hessian >> 32)) * grad_scale;
+        double sum_left_gradient = HIST_BITS == 16 ?
+          static_cast<double>(static_cast<int16_t>(sum_left_gradient_and_hessian >> 16)) * grad_scale :
+          static_cast<double>(static_cast<int32_t>(sum_left_gradient_and_hessian >> 32)) * grad_scale;
         if (USE_RAND) {
           if (t + offset != rand_threshold) {
             continue;
@@ -1385,17 +1510,25 @@ class FeatureHistogram {
     }
 
     if (is_splittable_ && best_gain > output->gain + min_gain_shift) {
-      const int32_t int_best_sum_left_gradient = static_cast<int32_t>(best_sum_left_gradient_and_hessian >> 32);
-      const int32_t int_best_sum_left_hessian = static_cast<int32_t>(best_sum_left_gradient_and_hessian & 0x00000000ffffffff);
+      const int32_t int_best_sum_left_gradient = HIST_BITS == 16 ?
+        static_cast<int32_t>(static_cast<int16_t>(best_sum_left_gradient_and_hessian >> 16)) :
+        static_cast<int32_t>(best_sum_left_gradient_and_hessian >> 32);
+      const uint32_t int_best_sum_left_hessian = HIST_BITS == 16 ?
+        static_cast<uint32_t>(best_sum_left_gradient_and_hessian & 0x0000ffff) :
+        static_cast<uint32_t>(best_sum_left_gradient_and_hessian & 0x00000000ffffffff);
       const double best_sum_left_gradient = static_cast<double>(int_best_sum_left_gradient) * grad_scale;
       const double best_sum_left_hessian = static_cast<double>(int_best_sum_left_hessian) * hess_scale;
-      const int64_t best_sum_right_gradient_and_hessian = int_sum_gradient_and_hessian - best_sum_left_gradient_and_hessian;
+      const int64_t best_sum_left_gradient_and_hessian_int64 = HIST_BITS == 16 ?
+          ((static_cast<int64_t>(static_cast<int16_t>(best_sum_left_gradient_and_hessian >> 16)) << 32) |
+          static_cast<int64_t>(best_sum_left_gradient_and_hessian & 0x0000ffff)) :
+          best_sum_left_gradient_and_hessian;
+      const int64_t best_sum_right_gradient_and_hessian = int_sum_gradient_and_hessian - best_sum_left_gradient_and_hessian_int64;
       const int32_t int_best_sum_right_gradient = static_cast<int32_t>(best_sum_right_gradient_and_hessian >> 32);
-      const int32_t int_best_sum_right_hessian = static_cast<int32_t>(best_sum_right_gradient_and_hessian & 0x00000000ffffffff);
+      const uint32_t int_best_sum_right_hessian = static_cast<uint32_t>(best_sum_right_gradient_and_hessian & 0x00000000ffffffff);
       const double best_sum_right_gradient = static_cast<double>(int_best_sum_right_gradient) * grad_scale;
       const double best_sum_right_hessian = static_cast<double>(int_best_sum_right_hessian) * hess_scale;
-      const data_size_t best_left_count = Common::RoundInt(best_sum_left_hessian * cnt_factor);
-      const data_size_t best_right_count = Common::RoundInt(best_sum_right_hessian * cnt_factor);
+      const data_size_t best_left_count = Common::RoundInt(static_cast<double>(int_best_sum_left_hessian) * cnt_factor);
+      const data_size_t best_right_count = Common::RoundInt(static_cast<double>(int_best_sum_right_hessian) * cnt_factor);
       // update split information
       output->threshold = best_threshold;
       output->left_output =
@@ -1407,7 +1540,7 @@ class FeatureHistogram {
       output->left_count = best_left_count;
       output->left_sum_gradient = best_sum_left_gradient;
       output->left_sum_hessian = best_sum_left_hessian;
-      output->left_sum_gradient_and_hessian = best_sum_left_gradient_and_hessian;
+      output->left_sum_gradient_and_hessian = best_sum_left_gradient_and_hessian_int64;
       output->right_output =
           CalculateSplittedLeafOutput<USE_MC, USE_L1, USE_MAX_OUTPUT, USE_SMOOTHING>(
               best_sum_right_gradient,
@@ -1427,13 +1560,14 @@ class FeatureHistogram {
   const FeatureMetainfo* meta_;
   /*! \brief sum of gradient of each bin */
   hist_t* data_;
+  int16_t* data_int16_;
   bool is_splittable_ = true;
 
   std::function<void(double, double, data_size_t, const FeatureConstraint*,
                      double, SplitInfo*)>
       find_best_threshold_fun_;
 
-  std::function<void(int64_t, double, double, data_size_t, const FeatureConstraint*,
+  std::function<void(int64_t, double, double, const uint8_t, data_size_t, const FeatureConstraint*,
                      double, SplitInfo*)>
       int_find_best_threshold_fun_;
 };
@@ -1494,6 +1628,8 @@ class HistogramPool {
     ref_feature_meta.resize(num_feature);
 #pragma omp parallel for schedule(static, 512) if (num_feature >= 1024)
     for (int i = 0; i < num_feature; ++i) {
+      ref_feature_meta[i].real_feature_index = train_data->RealFeatureIndex(i);
+      ref_feature_meta[i].inner_feature_index = i;
       if (USE_DATA) {
         ref_feature_meta[i].num_bin = train_data->FeatureNumBin(i);
         ref_feature_meta[i].default_bin =
@@ -1551,12 +1687,14 @@ class HistogramPool {
     for (int i = old_cache_size; i < cache_size; ++i) {
       OMP_LOOP_EX_BEGIN();
       pool_[i].reset(new FeatureHistogram[train_data->num_features()]);
-      data_[i].resize(num_total_bin * 2);
       if (config->use_discretized_grad) {
+        data_[i].resize(num_total_bin);
         for (int j = 0; j < train_data->num_features(); ++j) {
-          pool_[i][j].Init(data_[i].data() + offsets[j], &feature_metas_[j]);
+          int16_t* data_ptr = reinterpret_cast<int16_t*>(data_[i].data());
+          pool_[i][j].Init(data_[i].data() + offsets[j], data_ptr + 2 * offsets[j], &feature_metas_[j]);
         }
       } else {
+        data_[i].resize(num_total_bin * 2);
         for (int j = 0; j < train_data->num_features(); ++j) {
           pool_[i][j].Init(data_[i].data() + offsets[j] * 2, &feature_metas_[j]);
         }

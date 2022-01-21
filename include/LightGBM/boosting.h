@@ -314,7 +314,11 @@ class LIGHTGBM_EXPORT Boosting {
   * \param num_gpu number of GPUs to use
   * \return The boosting object
   */
-  static Boosting* CreateBoosting(const std::string& type, const char* filename, const std::string& device_type, const int num_gpu);
+  static Boosting* CreateBoosting(const std::string& type, const char* filename
+  #ifdef USE_CUDA
+  , const std::string& device_type, const int num_gpu
+  #endif  // USE_CUDA
+  );
 
   virtual bool IsLinear() const { return false; }
 

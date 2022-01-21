@@ -4,6 +4,8 @@
  */
 #include "cuda_multiclass_objective.hpp"
 
+#ifdef USE_CUDA
+
 namespace LightGBM {
 
 CUDAMulticlassSoftmax::CUDAMulticlassSoftmax(const Config& config): MulticlassSoftmax(config) {}
@@ -64,3 +66,5 @@ void CUDAMulticlassOVA::ConvertOutputCUDA(const data_size_t num_data, const doub
 }
 
 }  // namespace LightGBM
+
+#endif  // USE_CUDA

@@ -106,7 +106,11 @@ class SingleRowPredictor {
 class Booster {
  public:
   explicit Booster(const char* filename) {
-    boosting_.reset(Boosting::CreateBoosting("gbdt", filename, "cpu", 0));
+    boosting_.reset(Boosting::CreateBoosting("gbdt", filename
+    #ifdef USE_CUDA
+    , "cpu", 0
+    #endif  // USE_CUDA
+    ));
   }
 
   Booster(const Dataset* train_data,
@@ -122,7 +126,11 @@ class Booster {
                    "please use continued train with input score");
     }
 
-    boosting_.reset(Boosting::CreateBoosting(config_.boosting, nullptr, config_.device_type, config_.num_gpu));
+    boosting_.reset(Boosting::CreateBoosting(config_.boosting, nullptr
+    #ifdef USE_CUDA
+    , config_.device_type, config_.num_gpu
+    #endif  // USE_CUDA
+    ));
 
     train_data_ = train_data;
     CreateObjectiveAndMetrics();

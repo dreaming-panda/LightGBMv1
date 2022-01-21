@@ -237,6 +237,8 @@ class SerialTreeLearner: public TreeLearner {
   std::vector<int8_t> node_num_bits_in_histogram_bin_;
   std::vector<uint8_t> leaf_num_bits_in_histogram_acc_;
   std::vector<int8_t> node_num_bits_in_histogram_acc_;
+
+  std::vector<std::vector<int32_t>> change_hist_bits_buffer_;
 };
 
 inline data_size_t SerialTreeLearner::GetGlobalDataCountInLeaf(int leaf_idx) const {

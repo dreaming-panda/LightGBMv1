@@ -45,19 +45,29 @@ void MultiValBinWrapper::InitTrain(const std::vector<int>& group_feature_start,
   }
 }
 
-template <bool USE_DIST_GRAD>
+template <bool USE_DIST_GRAD, int HIST_BITS>
 void MultiValBinWrapper::HistMove(const std::vector<hist_t,
   Common::AlignmentAllocator<hist_t, kAlignedSize>>& hist_buf) {
   if (!is_use_subcol_) {
     return;
   }
   if (USE_DIST_GRAD) {
-    const int32_t* src = reinterpret_cast<const int32_t*>(hist_buf.data()) + hist_buf.size() -
-      2 * static_cast<size_t>(num_bin_aligned_);
-    #pragma omp parallel for schedule(static)
-    for (int i = 0; i < static_cast<int>(hist_move_src_.size()); ++i) {
-      std::copy_n(src + hist_move_src_[i], hist_move_size_[i],
-                  reinterpret_cast<int32_t*>(origin_hist_data_) + hist_move_dest_[i]);
+    if (HIST_BITS == 32) {
+      const int64_t* src = reinterpret_cast<const int64_t*>(hist_buf.data()) + hist_buf.size() / 2 -
+        static_cast<size_t>(num_bin_aligned_);
+      #pragma omp parallel for schedule(static)
+      for (int i = 0; i < static_cast<int>(hist_move_src_.size()); ++i) {
+        std::copy_n(src + hist_move_src_[i] / 2, hist_move_size_[i] / 2,
+                    reinterpret_cast<int64_t*>(origin_hist_data_) + hist_move_dest_[i] / 2);
+      }
+    } else if (HIST_BITS == 16) {
+      const int32_t* src = reinterpret_cast<const int32_t*>(hist_buf.data()) + hist_buf.size() / 2 -
+        static_cast<size_t>(num_bin_aligned_);
+      #pragma omp parallel for schedule(static)
+      for (int i = 0; i < static_cast<int>(hist_move_src_.size()); ++i) {
+        std::copy_n(src + hist_move_src_[i] / 2, hist_move_size_[i] / 2,
+                    reinterpret_cast<int32_t*>(origin_hist_data_) + hist_move_dest_[i] / 2);
+      }
     }
   } else {
     const hist_t* src = hist_buf.data() + hist_buf.size() -
@@ -70,13 +80,16 @@ void MultiValBinWrapper::HistMove(const std::vector<hist_t,
   }
 }
 
-template void MultiValBinWrapper::HistMove<false>(const std::vector<hist_t,
+template void MultiValBinWrapper::HistMove<false, 0>(const std::vector<hist_t,
   Common::AlignmentAllocator<hist_t, kAlignedSize>>& hist_buf);
 
-template void MultiValBinWrapper::HistMove<true>(const std::vector<hist_t,
+template void MultiValBinWrapper::HistMove<true, 16>(const std::vector<hist_t,
   Common::AlignmentAllocator<hist_t, kAlignedSize>>& hist_buf);
 
-template <bool USE_DIST_GRAD>
+template void MultiValBinWrapper::HistMove<true, 32>(const std::vector<hist_t,
+  Common::AlignmentAllocator<hist_t, kAlignedSize>>& hist_buf);
+
+template <bool USE_DIST_GRAD, int HIST_BITS>
 void MultiValBinWrapper::HistMerge(std::vector<hist_t,
   Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf) {
   int n_bin_block = 1;
@@ -84,24 +97,37 @@ void MultiValBinWrapper::HistMerge(std::vector<hist_t,
   Threading::BlockInfo<data_size_t>(num_threads_, num_bin_, 512, &n_bin_block,
                                   &bin_block_size);
   if (USE_DIST_GRAD) {
-    int32_t* dst = reinterpret_cast<int32_t*>(origin_hist_data_);
-    if (is_use_subcol_) {
-      dst = reinterpret_cast<int32_t*>(hist_buf->data()) + hist_buf->size() - 2 * static_cast<size_t>(num_bin_aligned_);
-    }
-    #pragma omp parallel for schedule(static, 1) num_threads(num_threads_)
-    for (int t = 0; t < n_bin_block; ++t) {
-      const int start = t * bin_block_size;
-      const int end = std::min(start + bin_block_size, num_bin_);
-      for (int tid = 1; tid < n_data_block_; ++tid) {
-        auto src_ptr = reinterpret_cast<const int32_t*>(hist_buf->data()) + static_cast<size_t>(num_bin_aligned_) * 2 * (tid - 1);
-        for (int i = start * 2; i < end * 2; ++i) {
-          dst[i] += src_ptr[i];
+    if (HIST_BITS == 32) {
+      int64_t* dst = reinterpret_cast<int64_t*>(origin_hist_data_);
+      if (is_use_subcol_) {
+        dst = reinterpret_cast<int64_t*>(hist_buf->data()) + hist_buf->size() / 2 - static_cast<size_t>(num_bin_aligned_);
+      }
+      #pragma omp parallel for schedule(static, 1) num_threads(num_threads_)
+      for (int t = 0; t < n_bin_block; ++t) {
+        const int start = t * bin_block_size;
+        const int end = std::min(start + bin_block_size, num_bin_);
+        for (int tid = 1; tid < n_data_block_; ++tid) {
+          auto src_ptr = reinterpret_cast<const int64_t*>(hist_buf->data()) + static_cast<size_t>(num_bin_aligned_) * (tid - 1);
+          for (int i = start; i < end; ++i) {
+            dst[i] += src_ptr[i];
+          }
         }
       }
-    }
-    for (int i = 0; i < 6000; ++i) {
-      if (dst[i << 1] < 0) {
-        Log::Warning("< 0 found i = %d grad = %d", i, dst[i << 1]);
+    } else if (HIST_BITS == 16) {
+      int32_t* dst = reinterpret_cast<int32_t*>(origin_hist_data_);
+      if (is_use_subcol_) {
+        dst = reinterpret_cast<int32_t*>(hist_buf->data()) + hist_buf->size() / 2 - static_cast<size_t>(num_bin_aligned_);
+      }
+      #pragma omp parallel for schedule(static, 1) num_threads(num_threads_)
+      for (int t = 0; t < n_bin_block; ++t) {
+        const int start = t * bin_block_size;
+        const int end = std::min(start + bin_block_size, num_bin_);
+        for (int tid = 1; tid < n_data_block_; ++tid) {
+          auto src_ptr = reinterpret_cast<const int32_t*>(hist_buf->data()) + static_cast<size_t>(num_bin_aligned_) * (tid - 1);
+          for (int i = start; i < end; ++i) {
+            dst[i] += src_ptr[i];
+          }
+        }
       }
     }
   } else {
@@ -123,10 +149,13 @@ void MultiValBinWrapper::HistMerge(std::vector<hist_t,
   }
 }
 
-template void MultiValBinWrapper::HistMerge<false>(std::vector<hist_t,
+template void MultiValBinWrapper::HistMerge<false, 0>(std::vector<hist_t,
   Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf);
 
-template void MultiValBinWrapper::HistMerge<true>(std::vector<hist_t,
+template void MultiValBinWrapper::HistMerge<true, 16>(std::vector<hist_t,
+  Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf);
+
+template void MultiValBinWrapper::HistMerge<true, 32>(std::vector<hist_t,
   Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf);
 
 void MultiValBinWrapper::ResizeHistBuf(std::vector<hist_t,

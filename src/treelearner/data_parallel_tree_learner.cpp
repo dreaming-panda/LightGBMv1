@@ -80,6 +80,7 @@ void DataParallelTreeLearner<TREELEARNER_T>::BeforeTrain() {
   }
 
   // get block start and block len for reduce scatter
+  const size_t hist_entry_size = this->config_->use_discretized_grad ? kInt32HistEntrySize : kHistEntrySize;
   reduce_scatter_size_ = 0;
   for (int i = 0; i < num_machines_; ++i) {
     block_len_[i] = 0;
@@ -88,7 +89,7 @@ void DataParallelTreeLearner<TREELEARNER_T>::BeforeTrain() {
       if (this->train_data_->FeatureBinMapper(fid)->GetMostFreqBin() == 0) {
         num_bin -= 1;
       }
-      block_len_[i] += num_bin * kHistEntrySize;
+      block_len_[i] += num_bin * hist_entry_size;
     }
     reduce_scatter_size_ += block_len_[i];
   }
@@ -107,7 +108,7 @@ void DataParallelTreeLearner<TREELEARNER_T>::BeforeTrain() {
       if (this->train_data_->FeatureBinMapper(fid)->GetMostFreqBin() == 0) {
         num_bin -= 1;
       }
-      bin_size += num_bin * kHistEntrySize;
+      bin_size += num_bin * hist_entry_size;
     }
   }
 
@@ -119,7 +120,7 @@ void DataParallelTreeLearner<TREELEARNER_T>::BeforeTrain() {
     if (this->train_data_->FeatureBinMapper(fid)->GetMostFreqBin() == 0) {
       num_bin -= 1;
     }
-    bin_size += num_bin * kHistEntrySize;
+    bin_size += num_bin * hist_entry_size;
   }
 
   // sync global data sumup info
@@ -172,18 +173,43 @@ void DataParallelTreeLearner<TREELEARNER_T>::FindBestSplits(const Tree* tree) {
     }
   }
   // construct local histograms
+  global_timer.Start("DataParallelTreeLearner::ReduceHistogram");
+  const uint8_t smaller_leaf_num_bits = this->leaf_num_bits_in_histogram_bin_[this->smaller_leaf_splits_->leaf_index()];
   #pragma omp parallel for schedule(static)
   for (int feature_index = 0; feature_index < this->num_features_; ++feature_index) {
     if (this->col_sampler_.is_feature_used_bytree()[feature_index] == false)
       continue;
     // copy to buffer
-    std::memcpy(input_buffer_.data() + buffer_write_start_pos_[feature_index],
+    if (!this->config_->use_discretized_grad) {
+      if (smaller_leaf_num_bits <= 16) {
+        std::memcpy(input_buffer_.data() + buffer_write_start_pos_[feature_index] / 2,
+                    this->smaller_leaf_histogram_array_[feature_index].RawDataInt16(),
+                    this->smaller_leaf_histogram_array_[feature_index].SizeOfInt16Histgram());
+      } else {
+        std::memcpy(input_buffer_.data() + buffer_write_start_pos_[feature_index],
+                    this->smaller_leaf_histogram_array_[feature_index].RawDataInt32(),
+                    this->smaller_leaf_histogram_array_[feature_index].SizeOfInt32Histgram());
+      }
+    } else {
+      std::memcpy(input_buffer_.data() + buffer_write_start_pos_[feature_index],
                 this->smaller_leaf_histogram_array_[feature_index].RawData(),
                 this->smaller_leaf_histogram_array_[feature_index].SizeOfHistgram());
+    }
   }
   // Reduce scatter for histogram
-  Network::ReduceScatter(input_buffer_.data(), reduce_scatter_size_, sizeof(hist_t), block_start_.data(),
+  if (!this->config_->use_discretized_grad) {
+    Network::ReduceScatter(input_buffer_.data(), reduce_scatter_size_, sizeof(hist_t), block_start_.data(),
                          block_len_.data(), output_buffer_.data(), static_cast<comm_size_t>(output_buffer_.size()), &HistogramSumReducer);
+  } else {
+    if (smaller_leaf_num_bits <= 16) {
+      Network::ReduceScatter(input_buffer_.data(), reduce_scatter_size_ / 2, sizeof(int16_t), block_start_.data(),
+                        block_len_.data(), output_buffer_.data(), static_cast<comm_size_t>(output_buffer_.size()), &Int16HistogramSumReducer);
+    } else {
+      Network::ReduceScatter(input_buffer_.data(), reduce_scatter_size_, sizeof(int_hist_t), block_start_.data(),
+                          block_len_.data(), output_buffer_.data(), static_cast<comm_size_t>(output_buffer_.size()), &Int32HistogramSumReducer);
+    }
+  }
+  global_timer.Stop("DataParallelTreeLearner::ReduceHistogram");
   this->FindBestSplitsFromHistograms(
       this->col_sampler_.is_feature_used_bytree(), true, tree);
 }
@@ -198,6 +224,7 @@ void DataParallelTreeLearner<TREELEARNER_T>::FindBestSplitsFromHistograms(const 
       this->col_sampler_.GetByNode(tree, this->larger_leaf_splits_->leaf_index());
   double smaller_leaf_parent_output = this->GetParentOutput(tree, this->smaller_leaf_splits_.get());
   double larger_leaf_parent_output = this->GetParentOutput(tree, this->larger_leaf_splits_.get());
+  const uint8_t smaller_leaf_num_bits = this->leaf_num_bits_in_histogram_bin_[this->smaller_leaf_splits_->leaf_index()];
   OMP_INIT_EX();
   #pragma omp parallel for schedule(static)
   for (int feature_index = 0; feature_index < this->num_features_; ++feature_index) {
@@ -206,6 +233,15 @@ void DataParallelTreeLearner<TREELEARNER_T>::FindBestSplitsFromHistograms(const 
     const int tid = omp_get_thread_num();
     const int real_feature_index = this->train_data_->RealFeatureIndex(feature_index);
     // restore global histograms from buffer
+    if (this->config_->use_discretized_grad) {
+      if (smaller_leaf_num_bits <= 16) {
+        this->smaller_leaf_histogram_array_[feature_index].FromMemoryInt16(
+          output_buffer_.data() + buffer_read_start_pos_[feature_index]);
+      } else {
+        this->smaller_leaf_histogram_array_[feature_index].FromMemoryInt32(
+          output_buffer_.data() + buffer_read_start_pos_[feature_index]);
+      }
+    }
     this->smaller_leaf_histogram_array_[feature_index].FromMemory(
       output_buffer_.data() + buffer_read_start_pos_[feature_index]);
 

@@ -52,5 +52,6 @@ class CUDAScoreUpdater: public ScoreUpdater {
 
 }  // namespace LightGBM
 
-#endif  // LightGBM
+#endif  // USE_CUDA
+
 #endif  // LIGHTGBM_BOOSTING_CUDA_CUDA_SCORE_UPDATER_HPP_

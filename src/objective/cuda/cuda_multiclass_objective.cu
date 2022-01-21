@@ -4,6 +4,8 @@
  */
 #include "cuda_multiclass_objective.hpp"
 
+#ifdef USE_CUDA
+
 namespace LightGBM {
 
 __device__ void SoftmaxCUDA(double* softmax_buffer, int len) {
@@ -102,3 +104,5 @@ void CUDAMulticlassSoftmax::LaunchConvertOutputCUDAKernel(
 }
 
 }  // namespace LightGBM
+
+#endif  // USE_CUDA

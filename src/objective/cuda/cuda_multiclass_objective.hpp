@@ -11,6 +11,8 @@
 
 #define GET_GRADIENTS_BLOCK_SIZE_MULTICLASS (1024)
 
+#ifdef USE_CUDA
+
 namespace LightGBM {
 
 class CUDAMulticlassSoftmax: public CUDAObjectiveInterface, public MulticlassSoftmax {
@@ -77,4 +79,5 @@ class CUDAMulticlassOVA: public CUDAObjectiveInterface, public MulticlassOVA {
 
 }  // namespace LightGBM
 
+#endif  // USE_CUDA
 #endif  // LIGHTGBM_OBJECTIVE_CUDA_CUDA_MULTICLASS_OBJECTIVE_HPP_

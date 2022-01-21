@@ -10,6 +10,8 @@
 
 #define GET_GRADIENTS_BLOCK_SIZE_XENTROPY (1024)
 
+#ifdef USE_CUDA
+
 namespace LightGBM {
 
 class CUDACrossEntropy: public CUDAObjectiveInterface, public CrossEntropy {
@@ -81,5 +83,7 @@ class CUDACrossEntropyLambda: public CUDAObjectiveInterface, public CrossEntropy
 };
 
 }  // namespace LightGBM
+
+#endif  // USE_CUDA
 
 #endif  // LIGHTGBM_OBJECTIVE_CUDA_CUDA_XENTROPY_OBJECTIVE_HPP_

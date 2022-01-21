@@ -6,6 +6,8 @@
 #include <LightGBM/cuda/cuda_algorithms.hpp>
 #include "cuda_xentropy_objective.hpp"
 
+#ifdef USE_CUDA
+
 namespace LightGBM {
 
 double CUDACrossEntropy::LaunchCalcInitScoreKernel() const {
@@ -142,3 +144,5 @@ void CUDACrossEntropyLambda::LaunchConvertOutputCUDAKernel(const data_size_t num
 }
 
 }  // namespace LightGBM
+
+#endif  // USE_CUDA
