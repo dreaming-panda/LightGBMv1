@@ -978,9 +978,9 @@ class Timer {
   }
 
 #else
-  void Start(const std::string&) {}
+  void Start(const std::string&, int = -1) {}
 
-  void Stop(const std::string&) {}
+  void Stop(const std::string&, int = -1) {}
 #endif  // TIMETAG
 
   void Print() const {
