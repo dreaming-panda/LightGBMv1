@@ -25,8 +25,8 @@ namespace LightGBM {
 
 class CUDAGradientDiscretizer: public GradientDiscretizer {
  public:
-  CUDAGradientDiscretizer(int grad_discretize_bins, int num_trees, int random_seed, bool can_lock):
-    GradientDiscretizer(grad_discretize_bins, num_trees, random_seed, can_lock) {
+  CUDAGradientDiscretizer(int grad_discretize_bins, int num_trees, int random_seed, bool can_lock, bool is_constant_hessian):
+    GradientDiscretizer(grad_discretize_bins, num_trees, random_seed, can_lock, is_constant_hessian) {
     nccl_comm_ = nullptr;
   }
 

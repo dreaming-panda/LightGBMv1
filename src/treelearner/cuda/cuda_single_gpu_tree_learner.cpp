@@ -101,7 +101,7 @@ void CUDASingleGPUTreeLearner::Init(const Dataset* train_data, bool is_constant_
     cuda_leaf_gradient_stat_buffer_.Resize(config_->num_leaves);
     cuda_leaf_hessian_stat_buffer_.Resize(config_->num_leaves);
     cuda_gradient_discretizer_.reset(new CUDAGradientDiscretizer(
-      config_->grad_discretize_bins, config_->num_iterations, config_->seed, false));
+      config_->grad_discretize_bins, config_->num_iterations, config_->seed, false, is_constant_hessian));
     cuda_gradient_discretizer_->SetNCCL(nccl_comm_);
     cuda_gradient_discretizer_->Init(num_data_);
   } else {
