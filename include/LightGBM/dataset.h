@@ -442,7 +442,9 @@ class Dataset {
   TrainingShareStates* GetShareStates(
       score_t* gradients, score_t* hessians,
       const std::vector<int8_t>& is_feature_used, bool is_constant_hessian,
-      bool force_col_wise, bool force_row_wise) const;
+      bool force_col_wise, bool force_row_wise,
+      const int grad_discretize_bins,
+      const int per_bin_div) const;
 
   LIGHTGBM_EXPORT void FinishLoad();
 
@@ -526,7 +528,7 @@ class Dataset {
 
   void FixHistogram(int feature_idx, double sum_gradient, double sum_hessian, hist_t* data) const;
 
-  template <typename PACKED_HIST_T, int HIST_BITS>
+  template <typename PACKED_HIST_BIN_T, typename PACKED_HIST_ACC_T, int HIST_BITS_BIN, int HIST_BITS_ACC>
   void FixHistogramInt(int feature_idx, int64_t sum_gradient_and_hessian, hist_t* data) const;
 
   inline data_size_t Split(int feature, const uint32_t* threshold,

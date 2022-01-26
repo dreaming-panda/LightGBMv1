@@ -9,7 +9,9 @@
 namespace LightGBM {
 
 MultiValBinWrapper::MultiValBinWrapper(MultiValBin* bin, data_size_t num_data,
-  const std::vector<int>& feature_groups_contained):
+  const std::vector<int>& feature_groups_contained,
+  const int grad_discretize_bins,
+  const int per_bin_div):
     feature_groups_contained_(feature_groups_contained) {
   num_threads_ = OMP_NUM_THREADS();
   num_data_ = num_data;
@@ -19,6 +21,8 @@ MultiValBinWrapper::MultiValBinWrapper(MultiValBin* bin, data_size_t num_data,
   }
   num_bin_ = bin->num_bin();
   num_bin_aligned_ = (num_bin_ + kAlignedSize - 1) / kAlignedSize * kAlignedSize;
+  grad_discretize_bins_ = grad_discretize_bins;
+  per_bin_div_ = per_bin_div;
 }
 
 void MultiValBinWrapper::InitTrain(const std::vector<int>& group_feature_start,
@@ -45,10 +49,10 @@ void MultiValBinWrapper::InitTrain(const std::vector<int>& group_feature_start,
   }
 }
 
-template <bool USE_DIST_GRAD, int HIST_BITS>
+template <bool USE_DIST_GRAD, int HIST_BITS, int INNER_HIST_BITS>
 void MultiValBinWrapper::HistMove(const std::vector<hist_t,
   Common::AlignmentAllocator<hist_t, kAlignedSize>>& hist_buf) {
-  if (!is_use_subcol_) {
+  if (!is_use_subcol_ && INNER_HIST_BITS != 8) {
     return;
   }
   if (USE_DIST_GRAD) {
@@ -63,10 +67,18 @@ void MultiValBinWrapper::HistMove(const std::vector<hist_t,
     } else if (HIST_BITS == 16) {
       const int32_t* src = reinterpret_cast<const int32_t*>(hist_buf.data()) + hist_buf.size() / 2 -
         static_cast<size_t>(num_bin_aligned_);
-      #pragma omp parallel for schedule(static)
-      for (int i = 0; i < static_cast<int>(hist_move_src_.size()); ++i) {
-        std::copy_n(src + hist_move_src_[i] / 2, hist_move_size_[i] / 2,
-                    reinterpret_cast<int32_t*>(origin_hist_data_) + hist_move_dest_[i] / 2);
+      if (is_use_subcol_) {
+        #pragma omp parallel for schedule(static)
+        for (int i = 0; i < static_cast<int>(hist_move_src_.size()); ++i) {
+          std::copy_n(src + hist_move_src_[i] / 2, hist_move_size_[i] / 2,
+                      reinterpret_cast<int32_t*>(origin_hist_data_) + hist_move_dest_[i] / 2);
+        }
+      } else {
+        int32_t* orig_ptr = reinterpret_cast<int32_t*>(origin_hist_data_);
+        #pragma omp parallel for schedule(static)
+        for (int i = 0; i < num_bin_; ++i) {
+          orig_ptr[i] = src[i];
+        }
       }
     }
   } else {
@@ -80,16 +92,19 @@ void MultiValBinWrapper::HistMove(const std::vector<hist_t,
   }
 }
 
-template void MultiValBinWrapper::HistMove<false, 0>(const std::vector<hist_t,
+template void MultiValBinWrapper::HistMove<false, 0, 0>(const std::vector<hist_t,
   Common::AlignmentAllocator<hist_t, kAlignedSize>>& hist_buf);
 
-template void MultiValBinWrapper::HistMove<true, 16>(const std::vector<hist_t,
+template void MultiValBinWrapper::HistMove<true, 16, 8>(const std::vector<hist_t,
   Common::AlignmentAllocator<hist_t, kAlignedSize>>& hist_buf);
 
-template void MultiValBinWrapper::HistMove<true, 32>(const std::vector<hist_t,
+template void MultiValBinWrapper::HistMove<true, 16, 16>(const std::vector<hist_t,
   Common::AlignmentAllocator<hist_t, kAlignedSize>>& hist_buf);
 
-template <bool USE_DIST_GRAD, int HIST_BITS>
+template void MultiValBinWrapper::HistMove<true, 32, 32>(const std::vector<hist_t,
+  Common::AlignmentAllocator<hist_t, kAlignedSize>>& hist_buf);
+
+template <bool USE_DIST_GRAD, int HIST_BITS, int INNER_HIST_BITS>
 void MultiValBinWrapper::HistMerge(std::vector<hist_t,
   Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf) {
   int n_bin_block = 1;
@@ -113,7 +128,7 @@ void MultiValBinWrapper::HistMerge(std::vector<hist_t,
           }
         }
       }
-    } else if (HIST_BITS == 16) {
+    } else if (HIST_BITS == 16 && INNER_HIST_BITS == 16) {
       int32_t* dst = reinterpret_cast<int32_t*>(origin_hist_data_);
       if (is_use_subcol_) {
         dst = reinterpret_cast<int32_t*>(hist_buf->data()) + hist_buf->size() / 2 - static_cast<size_t>(num_bin_aligned_);
@@ -126,6 +141,22 @@ void MultiValBinWrapper::HistMerge(std::vector<hist_t,
           auto src_ptr = reinterpret_cast<const int32_t*>(hist_buf->data()) + static_cast<size_t>(num_bin_aligned_) * (tid - 1);
           for (int i = start; i < end; ++i) {
             dst[i] += src_ptr[i];
+          }
+        }
+      }
+    } else if (HIST_BITS == 16 && INNER_HIST_BITS == 8) {
+      int32_t* dst = reinterpret_cast<int32_t*>(hist_buf->data()) + hist_buf->size() / 2 - static_cast<size_t>(num_bin_aligned_);
+      std::memset(reinterpret_cast<void*>(dst), 0, num_bin_ * kInt16HistBufferEntrySize);
+      #pragma omp parallel for schedule(static, 1) num_threads(num_threads_)
+      for (int t = 0; t < n_bin_block; ++t) {
+        const int start = t * bin_block_size;
+        const int end = std::min(start + bin_block_size, num_bin_);
+        for (int tid = 0; tid < n_data_block_; ++tid) {
+          auto src_ptr = reinterpret_cast<const int16_t*>(hist_buf->data()) + static_cast<size_t>(num_bin_aligned_) * tid;
+          for (int i = start; i < end; ++i) {
+            const int16_t packed_hist = src_ptr[i];
+            const int32_t packed_hist_int32 = (static_cast<int32_t>(static_cast<int8_t>(packed_hist >> 8)) << 16) | static_cast<int32_t>(packed_hist & 0x00ff);
+            dst[i] += packed_hist_int32;
           }
         }
       }
@@ -149,13 +180,16 @@ void MultiValBinWrapper::HistMerge(std::vector<hist_t,
   }
 }
 
-template void MultiValBinWrapper::HistMerge<false, 0>(std::vector<hist_t,
+template void MultiValBinWrapper::HistMerge<false, 0, 0>(std::vector<hist_t,
   Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf);
 
-template void MultiValBinWrapper::HistMerge<true, 16>(std::vector<hist_t,
+template void MultiValBinWrapper::HistMerge<true, 16, 8>(std::vector<hist_t,
   Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf);
 
-template void MultiValBinWrapper::HistMerge<true, 32>(std::vector<hist_t,
+template void MultiValBinWrapper::HistMerge<true, 16, 16>(std::vector<hist_t,
+  Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf);
+
+template void MultiValBinWrapper::HistMerge<true, 32, 32>(std::vector<hist_t,
   Common::AlignmentAllocator<hist_t, kAlignedSize>>* hist_buf);
 
 void MultiValBinWrapper::ResizeHistBuf(std::vector<hist_t,
@@ -463,7 +497,8 @@ void TrainingShareStates::CalcBinOffsets(const std::vector<std::unique_ptr<Featu
 
 void TrainingShareStates::SetMultiValBin(MultiValBin* bin, data_size_t num_data,
   const std::vector<std::unique_ptr<FeatureGroup>>& feature_groups,
-  bool dense_only, bool sparse_only) {
+  bool dense_only, bool sparse_only, const int grad_discretize_bins,
+  const int per_bin_div) {
   num_threads = OMP_NUM_THREADS();
   if (bin == nullptr) {
     return;
@@ -482,7 +517,7 @@ void TrainingShareStates::SetMultiValBin(MultiValBin* bin, data_size_t num_data,
   num_total_bin_ += bin->num_bin();
   num_elements_per_row_ += bin->num_element_per_row();
   multi_val_bin_wrapper_.reset(new MultiValBinWrapper(
-    bin, num_data, feature_groups_contained));
+    bin, num_data, feature_groups_contained, grad_discretize_bins, per_bin_div));
 }
 
 }  // namespace LightGBM

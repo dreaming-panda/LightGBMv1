@@ -100,12 +100,14 @@ void SerialTreeLearner::GetShareStates(const Dataset* dataset,
       share_state_.reset(dataset->GetShareStates<true, 32>(
           ordered_gradients_.data(), ordered_hessians_.data(),
           col_sampler_.is_feature_used_bytree(), is_constant_hessian,
-          config_->force_col_wise, config_->force_row_wise));
+          config_->force_col_wise, config_->force_row_wise,
+          config_->grad_discretize_bins, config_->per_bin_div));
     } else {
       share_state_.reset(dataset->GetShareStates<false, 0>(
         ordered_gradients_.data(), ordered_hessians_.data(),
         col_sampler_.is_feature_used_bytree(), is_constant_hessian,
-        config_->force_col_wise, config_->force_row_wise));
+        config_->force_col_wise, config_->force_row_wise,
+        config_->grad_discretize_bins, config_->per_bin_div));
     }
   } else {
     CHECK_NOTNULL(share_state_);
@@ -115,12 +117,14 @@ void SerialTreeLearner::GetShareStates(const Dataset* dataset,
       share_state_.reset(dataset->GetShareStates<true, 32>(
           ordered_gradients_.data(), ordered_hessians_.data(), col_sampler_.is_feature_used_bytree(),
           is_constant_hessian, share_state_->is_col_wise,
-          !share_state_->is_col_wise));
+          !share_state_->is_col_wise,
+          config_->grad_discretize_bins, config_->per_bin_div));
     } else {
       share_state_.reset(dataset->GetShareStates<false, 0>(
           ordered_gradients_.data(), ordered_hessians_.data(), col_sampler_.is_feature_used_bytree(),
           is_constant_hessian, share_state_->is_col_wise,
-          !share_state_->is_col_wise));
+          !share_state_->is_col_wise,
+          config_->grad_discretize_bins, config_->per_bin_div));
     }
   }
   CHECK_NOTNULL(share_state_);
@@ -521,7 +525,8 @@ void SerialTreeLearner::FindBestSplitsFromHistograms(
   }
 
 // find splits
-const uint8_t hist_bits = leaf_num_bits_in_histogram_bin_[smaller_leaf_splits_->leaf_index()];
+const uint8_t hist_bits_bin = leaf_num_bits_in_histogram_bin_[smaller_leaf_splits_->leaf_index()];
+const uint8_t hist_bits_acc = leaf_num_bits_in_histogram_acc_[smaller_leaf_splits_->leaf_index()];
   OMP_INIT_EX();
 #pragma omp parallel for schedule(static) num_threads(share_state_->num_threads)
   for (int feature_index = 0; feature_index < num_features_; ++feature_index) {
@@ -532,14 +537,21 @@ const uint8_t hist_bits = leaf_num_bits_in_histogram_bin_[smaller_leaf_splits_->
     const int tid = omp_get_thread_num();
     if (config_->use_discretized_grad) {
       const int64_t int_sum_gradient_and_hessian = smaller_leaf_splits_->int_sum_gradients_and_hessians();
-      if (hist_bits <= 16) {
-        train_data_->FixHistogramInt<int32_t, 16>(
+      if (hist_bits_acc <= 16) {
+        CHECK_LE(hist_bits_bin, 16);
+        train_data_->FixHistogramInt<int32_t, int32_t, 16, 16>(
             feature_index, int_sum_gradient_and_hessian,
             reinterpret_cast<hist_t*>(smaller_leaf_histogram_array_[feature_index].RawDataInt16()));
       } else {
-        train_data_->FixHistogramInt<int64_t, 32>(
-            feature_index, int_sum_gradient_and_hessian,
-            reinterpret_cast<hist_t*>(smaller_leaf_histogram_array_[feature_index].RawDataInt32()));
+        if (hist_bits_bin <= 16) {
+          train_data_->FixHistogramInt<int32_t, int64_t, 16, 32>(
+              feature_index, int_sum_gradient_and_hessian,
+              reinterpret_cast<hist_t*>(smaller_leaf_histogram_array_[feature_index].RawDataInt16()));
+        } else {
+          train_data_->FixHistogramInt<int64_t, int64_t, 32, 32>(
+              feature_index, int_sum_gradient_and_hessian,
+              reinterpret_cast<hist_t*>(smaller_leaf_histogram_array_[feature_index].RawDataInt32()));
+        }
       }
     } else {
       train_data_->FixHistogram(
@@ -591,15 +603,23 @@ const uint8_t hist_bits = leaf_num_bits_in_histogram_bin_[smaller_leaf_splits_->
     } else {
       if (config_->use_discretized_grad) {
         const int64_t int_sum_gradient_and_hessian = larger_leaf_splits_->int_sum_gradients_and_hessians();
-        const uint8_t hist_bits = leaf_num_bits_in_histogram_bin_[larger_leaf_splits_->leaf_index()];
-        if (hist_bits <= 16) {
-          train_data_->FixHistogramInt<int32_t, 16>(
+        const uint8_t hist_bits_bin = leaf_num_bits_in_histogram_bin_[larger_leaf_splits_->leaf_index()];
+        const uint8_t hist_bits_acc = leaf_num_bits_in_histogram_acc_[larger_leaf_splits_->leaf_index()];
+        if (hist_bits_acc <= 16) {
+          CHECK_LE(hist_bits_bin, 16);
+          train_data_->FixHistogramInt<int32_t, int32_t, 16, 16>(
               feature_index, int_sum_gradient_and_hessian,
               reinterpret_cast<hist_t*>(larger_leaf_histogram_array_[feature_index].RawDataInt16()));
         } else {
-          train_data_->FixHistogramInt<int64_t, 32>(
-              feature_index, int_sum_gradient_and_hessian,
-              reinterpret_cast<hist_t*>(larger_leaf_histogram_array_[feature_index].RawDataInt32()));
+          if (hist_bits_bin <= 16) {
+            train_data_->FixHistogramInt<int32_t, int64_t, 16, 32>(
+                feature_index, int_sum_gradient_and_hessian,
+                reinterpret_cast<hist_t*>(larger_leaf_histogram_array_[feature_index].RawDataInt16()));
+          } else {
+            train_data_->FixHistogramInt<int64_t, int64_t, 32, 32>(
+                feature_index, int_sum_gradient_and_hessian,
+                reinterpret_cast<hist_t*>(larger_leaf_histogram_array_[feature_index].RawDataInt32()));
+          }
         }
       } else {
         train_data_->FixHistogram(
@@ -947,12 +967,14 @@ void SerialTreeLearner::ComputeBestSplitForFeature(
   }
   SplitInfo new_split;
   if (config_->use_discretized_grad) {
-    const uint8_t hist_bits = leaf_num_bits_in_histogram_bin_[leaf_splits->leaf_index()];
+    const uint8_t hist_bits_bin = leaf_num_bits_in_histogram_bin_[leaf_splits->leaf_index()];
+    const uint8_t hist_bits_acc = leaf_num_bits_in_histogram_acc_[leaf_splits->leaf_index()];
     histogram_array_[feature_index].FindBestThresholdInt(
         leaf_splits->int_sum_gradients_and_hessians(),
         *gradient_discretizer_->grad_scale(),
         *gradient_discretizer_->hess_scale(),
-        hist_bits,
+        hist_bits_bin,
+        hist_bits_acc,
         num_data,
         constraints_->GetFeatureConstraint(leaf_splits->leaf_index(), feature_index), parent_output, &new_split);
   } else {

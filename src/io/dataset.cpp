@@ -607,7 +607,9 @@ template <bool USE_DIST_GRAD, int HIST_BITS>
 TrainingShareStates* Dataset::GetShareStates(
     score_t* gradients, score_t* hessians,
     const std::vector<int8_t>& is_feature_used, bool is_constant_hessian,
-    bool force_col_wise, bool force_row_wise) const {
+    bool force_col_wise, bool force_row_wise,
+    const int grad_discretize_bins,
+    const int per_bin_div) const {
   Common::FunctionTimer fun_timer("Dataset::TestMultiThreadingMethod",
                                   global_timer);
   if (force_col_wise && force_row_wise) {
@@ -627,7 +629,7 @@ TrainingShareStates* Dataset::GetShareStates(
     share_state->CalcBinOffsets(
       feature_groups_, &offsets, true);
     share_state->SetMultiValBin(GetMultiBinFromSparseFeatures(offsets),
-      num_data_, feature_groups_, false, true);
+      num_data_, feature_groups_, false, true, grad_discretize_bins, per_bin_div);
     share_state->is_col_wise = true;
     share_state->is_constant_hessian = is_constant_hessian;
     return share_state;
@@ -637,7 +639,7 @@ TrainingShareStates* Dataset::GetShareStates(
     share_state->CalcBinOffsets(
       feature_groups_, &offsets, false);
     share_state->SetMultiValBin(GetMultiBinFromAllFeatures(offsets), num_data_,
-      feature_groups_, false, false);
+      feature_groups_, false, false, grad_discretize_bins, per_bin_div);
     share_state->is_col_wise = false;
     share_state->is_constant_hessian = is_constant_hessian;
     return share_state;
@@ -654,14 +656,14 @@ TrainingShareStates* Dataset::GetShareStates(
     std::vector<uint32_t> col_wise_offsets;
     col_wise_state->CalcBinOffsets(feature_groups_, &col_wise_offsets, true);
     col_wise_state->SetMultiValBin(GetMultiBinFromSparseFeatures(col_wise_offsets), num_data_,
-      feature_groups_, false, true);
+      feature_groups_, false, true, grad_discretize_bins, per_bin_div);
     col_wise_init_time = std::chrono::steady_clock::now() - start_time;
 
     start_time = std::chrono::steady_clock::now();
     std::vector<uint32_t> row_wise_offsets;
     row_wise_state->CalcBinOffsets(feature_groups_, &row_wise_offsets, false);
     row_wise_state->SetMultiValBin(GetMultiBinFromAllFeatures(row_wise_offsets), num_data_,
-      feature_groups_, false, false);
+      feature_groups_, false, false, grad_discretize_bins, per_bin_div);
     row_wise_init_time = std::chrono::steady_clock::now() - start_time;
 
     uint64_t max_total_bin = std::max<uint64_t>(row_wise_state->num_hist_total_bin(),
@@ -720,17 +722,23 @@ TrainingShareStates* Dataset::GetShareStates(
 template TrainingShareStates* Dataset::GetShareStates<false, 0>(
     score_t* gradients, score_t* hessians,
     const std::vector<int8_t>& is_feature_used, bool is_constant_hessian,
-    bool force_col_wise, bool force_row_wise) const;
+    bool force_col_wise, bool force_row_wise,
+    const int grad_discretize_bins,
+    const int per_bin_div) const;
 
 template TrainingShareStates* Dataset::GetShareStates<true, 16>(
     score_t* gradients, score_t* hessians,
     const std::vector<int8_t>& is_feature_used, bool is_constant_hessian,
-    bool force_col_wise, bool force_row_wise) const;
+    bool force_col_wise, bool force_row_wise,
+    const int grad_discretize_bins,
+    const int per_bin_div) const;
 
 template TrainingShareStates* Dataset::GetShareStates<true, 32>(
     score_t* gradients, score_t* hessians,
     const std::vector<int8_t>& is_feature_used, bool is_constant_hessian,
-    bool force_col_wise, bool force_row_wise) const;
+    bool force_col_wise, bool force_row_wise,
+    const int grad_discretize_bins,
+    const int per_bin_div) const;
 
 void Dataset::CopyFeatureMapperFrom(const Dataset* dataset) {
   feature_groups_.clear();
@@ -1495,32 +1503,50 @@ void Dataset::FixHistogram(int feature_idx, double sum_gradient,
   }
 }
 
-template <typename PACKED_HIST_T, int HIST_BITS>
+template <typename PACKED_HIST_BIN_T, typename PACKED_HIST_ACC_T, int HIST_BITS_BIN, int HIST_BITS_ACC>
 void Dataset::FixHistogramInt(int feature_idx, int64_t int_sum_gradient_and_hessian, hist_t* data) const {
   const int group = feature2group_[feature_idx];
   const int sub_feature = feature2subfeature_[feature_idx];
   const BinMapper* bin_mapper =
       feature_groups_[group]->bin_mappers_[sub_feature].get();
   const int most_freq_bin = bin_mapper->GetMostFreqBin();
-  PACKED_HIST_T* data_ptr = reinterpret_cast<PACKED_HIST_T*>(data);
-  PACKED_HIST_T int_sum_gradient_and_hessian_local = HIST_BITS == 16 ?
+  PACKED_HIST_BIN_T* data_ptr = reinterpret_cast<PACKED_HIST_BIN_T*>(data);
+  PACKED_HIST_ACC_T int_sum_gradient_and_hessian_local = HIST_BITS_ACC == 16 ?
     ((static_cast<int32_t>(int_sum_gradient_and_hessian >> 32) << 16) |
     static_cast<int32_t>(int_sum_gradient_and_hessian & 0x0000ffff)) :
     int_sum_gradient_and_hessian;
   if (most_freq_bin > 0) {
     const int num_bin = bin_mapper->num_bin();
-    for (int i = 0; i < num_bin; ++i) {
-      if (i != most_freq_bin) {
-        int_sum_gradient_and_hessian_local -= data_ptr[i];
+    if (HIST_BITS_BIN == HIST_BITS_ACC) {
+      for (int i = 0; i < num_bin; ++i) {
+        if (i != most_freq_bin) {
+          int_sum_gradient_and_hessian_local -= data_ptr[i];
+        }
       }
+      data_ptr[most_freq_bin] = int_sum_gradient_and_hessian_local;
+    } else {
+      CHECK_EQ(HIST_BITS_ACC, 32);
+      CHECK_EQ(HIST_BITS_BIN, 16);
+      for (int i = 0; i < num_bin; ++i) {
+        if (i != most_freq_bin) {
+          const PACKED_HIST_BIN_T packed_hist = data_ptr[i];
+          const PACKED_HIST_ACC_T packed_hist_acc = (static_cast<int64_t>(static_cast<int16_t>(packed_hist >> 16)) << 32) |
+            static_cast<int64_t>(packed_hist & 0x0000ffff);
+          int_sum_gradient_and_hessian_local -= packed_hist_acc;
+        }
+      }
+      PACKED_HIST_BIN_T int_sum_gradient_and_hessian_local_bin =
+        (static_cast<int32_t>(int_sum_gradient_and_hessian_local >> 32) << 16) | static_cast<int32_t>(int_sum_gradient_and_hessian_local & 0x0000ffff);
+      data_ptr[most_freq_bin] = int_sum_gradient_and_hessian_local_bin;
     }
-    data_ptr[most_freq_bin] = int_sum_gradient_and_hessian_local;
   }
 }
 
-template void Dataset::FixHistogramInt<int64_t, 32>(int feature_idx, int64_t int_sum_gradient_and_hessian, hist_t* data) const;
+template void Dataset::FixHistogramInt<int64_t, int64_t, 32, 32>(int feature_idx, int64_t int_sum_gradient_and_hessian, hist_t* data) const;
 
-template void Dataset::FixHistogramInt<int32_t, 16>(int feature_idx, int64_t int_sum_gradient_and_hessian, hist_t* data) const;
+template void Dataset::FixHistogramInt<int32_t, int32_t, 16, 16>(int feature_idx, int64_t int_sum_gradient_and_hessian, hist_t* data) const;
+
+template void Dataset::FixHistogramInt<int32_t, int64_t, 16, 32>(int feature_idx, int64_t int_sum_gradient_and_hessian, hist_t* data) const;
 
 template <typename T>
 void PushVector(std::vector<T>* dest, const std::vector<T>& src) {

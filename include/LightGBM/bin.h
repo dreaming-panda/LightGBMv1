@@ -354,6 +354,15 @@ class Bin {
     const score_t* ordered_gradients, const score_t* ordered_hessians,
     hist_t* out) const = 0;
 
+  virtual void ConstructHistogramInt8(
+    const data_size_t* data_indices, data_size_t start, data_size_t end,
+    const score_t* ordered_gradients, const score_t* ordered_hessians,
+    hist_t* out) const = 0;
+
+  virtual void ConstructHistogramInt8(data_size_t start, data_size_t end,
+    const score_t* ordered_gradients, const score_t* ordered_hessians,
+    hist_t* out) const = 0;
+
   virtual void ConstructHistogramInt16(
     const data_size_t* data_indices, data_size_t start, data_size_t end,
     const score_t* ordered_gradients, const score_t* ordered_hessians,
@@ -390,6 +399,12 @@ class Bin {
 
   virtual void ConstructHistogram(data_size_t start, data_size_t end,
                                   const score_t* ordered_gradients, hist_t* out) const = 0;
+
+  virtual void ConstructHistogramInt8(const data_size_t* data_indices, data_size_t start, data_size_t end,
+                                       const score_t* ordered_gradients, hist_t* out) const = 0;
+
+  virtual void ConstructHistogramInt8(data_size_t start, data_size_t end,
+                                       const score_t* ordered_gradients, hist_t* out) const = 0;
 
   virtual void ConstructHistogramInt16(const data_size_t* data_indices, data_size_t start, data_size_t end,
                                        const score_t* ordered_gradients, hist_t* out) const = 0;
@@ -549,6 +564,23 @@ class MultiValBin {
                                               const score_t* ordered_gradients,
                                               const score_t* ordered_hessians,
                                               hist_t* out) const = 0;
+
+  virtual void ConstructHistogramInt8(const data_size_t* data_indices,
+                                      data_size_t start, data_size_t end,
+                                      const score_t* gradients,
+                                      const score_t* hessians,
+                                      hist_t* out) const = 0;
+
+  virtual void ConstructHistogramInt8(data_size_t start, data_size_t end,
+                                      const score_t* gradients,
+                                      const score_t* hessians,
+                                      hist_t* out) const = 0;
+
+  virtual void ConstructHistogramOrderedInt8(const data_size_t* data_indices,
+                                             data_size_t start, data_size_t end,
+                                             const score_t* ordered_gradients,
+                                             const score_t* ordered_hessians,
+                                             hist_t* out) const = 0;
 
   virtual void FinishLoad() = 0;
 

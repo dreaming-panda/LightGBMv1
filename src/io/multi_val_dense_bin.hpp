@@ -146,8 +146,9 @@ class MultiValDenseBin : public MultiValBin {
         const auto j_start = RowPtr(idx);
         const VAL_T* data_ptr = data_ptr_base + j_start;
         const int16_t gradient_16 = gradients_and_hessians_ptr[idx];
-        const PACKED_HIST_T gradient_packed = (static_cast<PACKED_HIST_T>(static_cast<int8_t>(gradient_16 >> 8)) << HIST_BITS) |
-          static_cast<PACKED_HIST_T>(gradient_16 & 0xff);
+        const PACKED_HIST_T gradient_packed = (HIST_BITS == 8) ? gradient_16 :
+          ((static_cast<PACKED_HIST_T>(static_cast<int8_t>(gradient_16 >> 8)) << HIST_BITS) |
+          static_cast<PACKED_HIST_T>(gradient_16 & 0xff));
         for (int j = 0; j < num_feature_; ++j) {
           const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
           const auto ti = (bin + offsets_[j]);
@@ -160,8 +161,9 @@ class MultiValDenseBin : public MultiValBin {
       const auto j_start = RowPtr(idx);
       const VAL_T* data_ptr = data_ptr_base + j_start;
       const int16_t gradient_16 = gradients_and_hessians_ptr[idx];
-      const PACKED_HIST_T gradient_packed = (static_cast<PACKED_HIST_T>(static_cast<int8_t>(gradient_16 >> 8)) << HIST_BITS) |
-        static_cast<PACKED_HIST_T>(gradient_16 & 0xff);
+      const PACKED_HIST_T gradient_packed = (HIST_BITS == 8) ? gradient_16 :
+          ((static_cast<PACKED_HIST_T>(static_cast<int8_t>(gradient_16 >> 8)) << HIST_BITS) |
+          static_cast<PACKED_HIST_T>(gradient_16 & 0xff));
       for (int j = 0; j < num_feature_; ++j) {
         const uint32_t bin = static_cast<uint32_t>(data_ptr[j]);
         const auto ti = (bin + offsets_[j]);
@@ -213,6 +215,29 @@ class MultiValDenseBin : public MultiValBin {
                                  const score_t* /*hessians*/,
                                  hist_t* out) const override {
     ConstructHistogramIntInner<true, true, true, int32_t, 16>(data_indices, start, end,
+                                                              gradients, out);
+  }
+
+  void ConstructHistogramInt8(const data_size_t* data_indices, data_size_t start,
+                          data_size_t end, const score_t* gradients,
+                          const score_t* /*hessians*/, hist_t* out) const override {
+    ConstructHistogramIntInner<true, true, false, int16_t, 8>(data_indices, start, end,
+                                                               gradients, out);
+  }
+
+  void ConstructHistogramInt8(data_size_t start, data_size_t end,
+                          const score_t* gradients, const score_t* /*hessians*/,
+                          hist_t* out) const override {
+    ConstructHistogramIntInner<false, false, false, int16_t, 8>(
+        nullptr, start, end, gradients, out);
+  }
+
+  void ConstructHistogramOrderedInt8(const data_size_t* data_indices,
+                                 data_size_t start, data_size_t end,
+                                 const score_t* gradients,
+                                 const score_t* /*hessians*/,
+                                 hist_t* out) const override {
+    ConstructHistogramIntInner<true, true, true, int16_t, 8>(data_indices, start, end,
                                                               gradients, out);
   }
 

@@ -91,7 +91,7 @@ void GradientDiscretizer::DiscretizeGradients(
     if (is_constant_hessian_) {
       hessian_scale_ = max_hessian_abs_;
     } else {
-      hessian_scale_ = max_hessian_abs_ / static_cast<double>(grad_discretize_bins_);
+      hessian_scale_ = max_hessian_abs_ / static_cast<double>(2);
     }
     inverse_gradient_scale_ = 1.0f / gradient_scale_;
     inverse_hessian_scale_ = 1.0f / hessian_scale_;

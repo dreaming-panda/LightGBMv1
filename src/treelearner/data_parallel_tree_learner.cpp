@@ -299,14 +299,15 @@ void DataParallelTreeLearner<TREELEARNER_T>::FindBestSplitsFromHistograms(const 
       this->col_sampler_.GetByNode(tree, this->larger_leaf_splits_->leaf_index());
   double smaller_leaf_parent_output = this->GetParentOutput(tree, this->smaller_leaf_splits_.get());
   double larger_leaf_parent_output = this->GetParentOutput(tree, this->larger_leaf_splits_.get());
-  const uint8_t smaller_leaf_num_bits = this->leaf_num_bits_in_histogram_bin_[this->smaller_leaf_splits_->leaf_index()];
+  const uint8_t smaller_leaf_num_bits_bin = this->leaf_num_bits_in_histogram_bin_[this->smaller_leaf_splits_->leaf_index()];
+  const uint8_t smaller_leaf_num_bits_acc = this->leaf_num_bits_in_histogram_bin_[this->smaller_leaf_splits_->leaf_index()];
 
   if (this->larger_leaf_splits_ != nullptr && this->larger_leaf_splits_->leaf_index() >= 0) {
     const int parent_index = std::min(this->smaller_leaf_splits_->leaf_index(), this->larger_leaf_splits_->leaf_index());
     const uint8_t parent_num_bits = this->node_num_bits_in_histogram_bin_[parent_index];
     const uint8_t larger_leaf_num_bits = this->leaf_num_bits_in_histogram_bin_[this->larger_leaf_splits_->leaf_index()];
     if (parent_num_bits > 16 && larger_leaf_num_bits <= 16) {
-      CHECK_LE(smaller_leaf_num_bits, 16);
+      CHECK_LE(smaller_leaf_num_bits_bin, 16);
       OMP_INIT_EX();
       #pragma omp parallel for schedule(static)
       for (int feature_index = 0; feature_index < this->num_features_; ++feature_index) {
@@ -328,7 +329,7 @@ void DataParallelTreeLearner<TREELEARNER_T>::FindBestSplitsFromHistograms(const 
     const int real_feature_index = this->train_data_->RealFeatureIndex(feature_index);
     // restore global histograms from buffer
     if (this->config_->use_discretized_grad) {
-      if (smaller_leaf_num_bits <= 16) {
+      if (smaller_leaf_num_bits_bin <= 16) {
         this->smaller_leaf_histogram_array_[feature_index].FromMemoryInt16(
           output_buffer_.data() + buffer_read_start_pos_int16_[feature_index]);
       } else {
@@ -342,16 +343,24 @@ void DataParallelTreeLearner<TREELEARNER_T>::FindBestSplitsFromHistograms(const 
 
     if (this->config_->use_discretized_grad) {
       const int64_t int_sum_gradient_and_hessian = this->smaller_leaf_splits_->int_sum_gradients_and_hessians();
-      if (smaller_leaf_num_bits <= 16) {
-        this->train_data_->template FixHistogramInt<int32_t, 16>(
+      if (smaller_leaf_num_bits_acc <= 16) {
+        CHECK_LE(smaller_leaf_num_bits_bin, 16);
+        this->train_data_->template FixHistogramInt<int32_t, int32_t, 16, 16>(
           feature_index,
           int_sum_gradient_and_hessian,
           reinterpret_cast<hist_t*>(this->smaller_leaf_histogram_array_[feature_index].RawDataInt16()));
       } else {
-        this->train_data_->template FixHistogramInt<int64_t, 32>(
-          feature_index,
-          int_sum_gradient_and_hessian,
-          reinterpret_cast<hist_t*>(this->smaller_leaf_histogram_array_[feature_index].RawDataInt32()));
+        if (smaller_leaf_num_bits_bin <= 16) {
+          this->train_data_->template FixHistogramInt<int32_t, int64_t, 16, 32>(
+            feature_index,
+            int_sum_gradient_and_hessian,
+            reinterpret_cast<hist_t*>(this->smaller_leaf_histogram_array_[feature_index].RawDataInt32()));
+        } else {
+          this->train_data_->template FixHistogramInt<int64_t, int64_t, 32, 32>(
+            feature_index,
+            int_sum_gradient_and_hessian,
+            reinterpret_cast<hist_t*>(this->smaller_leaf_histogram_array_[feature_index].RawDataInt32()));
+        }
       }
     } else {
       this->train_data_->FixHistogram(feature_index,
@@ -376,15 +385,15 @@ void DataParallelTreeLearner<TREELEARNER_T>::FindBestSplitsFromHistograms(const 
       const uint8_t parent_num_bits = this->node_num_bits_in_histogram_bin_[parent_index];
       const uint8_t larger_leaf_num_bits = this->leaf_num_bits_in_histogram_bin_[this->larger_leaf_splits_->leaf_index()];
       if (parent_num_bits <= 16) {
-        CHECK_LE(smaller_leaf_num_bits, 16);
+        CHECK_LE(smaller_leaf_num_bits_bin, 16);
         CHECK_LE(larger_leaf_num_bits, 16);
         this->larger_leaf_histogram_array_[feature_index].template Subtract<true, int32_t, int32_t, int32_t, 16, 16, 16>(
               this->smaller_leaf_histogram_array_[feature_index]);
       } else if (larger_leaf_num_bits <= 16) {
-        CHECK_LE(smaller_leaf_num_bits, 16);
+        CHECK_LE(smaller_leaf_num_bits_bin, 16);
         this->larger_leaf_histogram_array_[feature_index].template Subtract<true, int64_t, int32_t, int32_t, 32, 16, 16>(
             this->smaller_leaf_histogram_array_[feature_index], this->change_hist_bits_buffer_[feature_index].data());
-      } else if (smaller_leaf_num_bits <= 16) {
+      } else if (smaller_leaf_num_bits_bin <= 16) {
         this->larger_leaf_histogram_array_[feature_index].template Subtract<true, int64_t, int32_t, int64_t, 32, 16, 32>(
               this->smaller_leaf_histogram_array_[feature_index]);
       } else {
