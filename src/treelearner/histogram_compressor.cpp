@@ -16,11 +16,12 @@ HistogramCompressor::HistogramCompressor(const int num_threads) {
 }
 
 template <typename S_HIST_T, typename U_HIST_T>
-void HistogramCompressor::Compress(const S_HIST_T* in_buffer, uint8_t* out_buffer, uint8_t* out_bits_buffer, data_size_t num_bin, uint64_t* thread_total_half_bytes_offset) {
+void HistogramCompressor::Compress(const S_HIST_T* in_buffer, uint8_t* out_buffer, uint8_t* out_bits_buffer, data_size_t num_bin, uint32_t* thread_total_half_bytes_offset) {
   const data_size_t block_size = (num_bin + num_threads_ - 1) / num_threads_;
-  const uint64_t total_size_out_bits_buffer = (num_bin * 2 + 3) / 4;
+  const uint32_t total_size_out_bits_buffer = (num_bin * 2 + 3) / 4;
+  global_timer.Start("Compress::ComputeThreadHalfBytes");
   #pragma omp parallel for schedule(static) num_threads(num_threads_)
-  for (uint64_t i = 0; i < total_size_out_bits_buffer; ++i) {
+  for (uint32_t i = 0; i < total_size_out_bits_buffer; ++i) {
     out_bits_buffer[i] = 0;
   }
   thread_total_half_bytes_offset[0] = 0;
@@ -28,7 +29,7 @@ void HistogramCompressor::Compress(const S_HIST_T* in_buffer, uint8_t* out_buffe
   for (int thread_index = 0; thread_index < num_threads_; ++thread_index) {
     const data_size_t start = thread_index * block_size;
     const data_size_t end = std::min(start + block_size, num_bin);
-    const uint64_t thread_total_bytes = ComputeThreadHalfBytes<S_HIST_T, U_HIST_T>(
+    const uint32_t thread_total_bytes = ComputeThreadHalfBytes<S_HIST_T, U_HIST_T>(
       in_buffer,
       out_bits_buffer,
       &thread_first_bits_[thread_index],
@@ -42,6 +43,8 @@ void HistogramCompressor::Compress(const S_HIST_T* in_buffer, uint8_t* out_buffe
     }
     thread_total_half_bytes_offset[thread_index + 1] += thread_total_half_bytes_offset[thread_index];
   }
+  global_timer.Stop("Compress::ComputeThreadHalfBytes");
+  global_timer.Start("Compress::WriteThreadCompressedData");
   #pragma omp parallel for schedule(static) num_threads(num_threads_)
   for (int thread_index = 0; thread_index < num_threads_; ++thread_index) {
     const data_size_t start = thread_index * block_size;
@@ -52,34 +55,35 @@ void HistogramCompressor::Compress(const S_HIST_T* in_buffer, uint8_t* out_buffe
       start, end, thread_total_half_bytes_offset[thread_index]);
   }
   for (int thread_index = 0; thread_index < num_threads_; ++thread_index) {
-    const uint64_t cur_half_bytes = thread_total_half_bytes_offset[thread_index];
-    const uint64_t pos = cur_half_bytes / 2;
+    const uint32_t cur_half_bytes = thread_total_half_bytes_offset[thread_index];
+    const uint32_t pos = cur_half_bytes / 2;
     const uint8_t offset = cur_half_bytes % 2;
     if (offset == 1) {
       out_buffer[pos] |= thread_first_[thread_index];
     }
   }
+  global_timer.Stop("Compress::WriteThreadCompressedData");
 }
 
 template <typename S_HIST_T, typename U_HIST_T>
-uint64_t HistogramCompressor::ComputeThreadHalfBytes(
+uint32_t HistogramCompressor::ComputeThreadHalfBytes(
   const S_HIST_T* in_buffer,
   uint8_t* out_bits_buffer,
   uint8_t* thread_first_bits_buffer,
   data_size_t start_bin,
   data_size_t end_bin) {
-  int64_t prev_hess =  static_cast<int64_t>(start_bin == 0 ? 0 : static_cast<U_HIST_T>(in_buffer[(start_bin - 1) << 1]));
-  int64_t prev_grad =  static_cast<int64_t>(start_bin == 0 ? 0 : in_buffer[((start_bin - 1) << 1) + 1]);
-  uint64_t total_half_bytes = 0;
+  int32_t prev_hess =  static_cast<int32_t>(start_bin == 0 ? 0 : static_cast<U_HIST_T>(in_buffer[(start_bin - 1) << 1]));
+  int32_t prev_grad =  static_cast<int32_t>(start_bin == 0 ? 0 : in_buffer[((start_bin - 1) << 1) + 1]);
+  uint32_t total_half_bytes = 0;
   data_size_t bin = start_bin;
   *thread_first_bits_buffer = 0;
   for (; bin < (start_bin + 1) / 2 * 2; ++bin) {
     const data_size_t bin_offset = (bin << 1);
-    const int64_t hess = static_cast<int64_t>(static_cast<U_HIST_T>(in_buffer[bin_offset]));
-    const int64_t hess_diff = hess - prev_hess;
+    const int32_t hess = static_cast<int32_t>(static_cast<U_HIST_T>(in_buffer[bin_offset]));
+    const int32_t hess_diff = hess - prev_hess;
     const uint8_t hess_offset = (bin_offset % 4) << 1;
-    const int64_t grad = static_cast<int64_t>(in_buffer[bin_offset + 1]);
-    const int64_t grad_diff = grad - prev_grad;
+    const int32_t grad = static_cast<int32_t>(in_buffer[bin_offset + 1]);
+    const int32_t grad_diff = grad - prev_grad;
     const uint8_t grad_offset = ((bin_offset + 1) % 4) << 1;
     if (hess_diff >= -8 && hess_diff < 8) {
       total_half_bytes += 1;
@@ -108,39 +112,37 @@ uint64_t HistogramCompressor::ComputeThreadHalfBytes(
     prev_grad = grad;
     prev_hess = hess;
   }
+  uint8_t one_byte = 0;
   for (; bin < end_bin; ++bin) {
     const data_size_t bin_offset = (bin << 1);
-    const int64_t hess = static_cast<int64_t>(static_cast<U_HIST_T>(in_buffer[bin_offset]));
-    const int64_t hess_diff = hess - prev_hess;
-    const uint64_t hess_pos = (bin_offset / 4);
+    const int32_t hess = static_cast<int32_t>(static_cast<U_HIST_T>(in_buffer[bin_offset]));
+    const int32_t hess_diff = hess - prev_hess;
+    const uint32_t hess_pos = (bin_offset / 4);
     const uint8_t hess_offset = (bin_offset % 4) << 1;
-    const int64_t grad = static_cast<int64_t>(in_buffer[bin_offset + 1]);
-    const int64_t grad_diff = grad - prev_grad;
-    const uint64_t grad_pos = ((bin_offset + 1) / 4);
+    const int32_t grad = static_cast<int32_t>(in_buffer[bin_offset + 1]);
+    const int32_t grad_diff = grad - prev_grad;
+    const uint32_t grad_pos = ((bin_offset + 1) / 4);
     const uint8_t grad_offset = ((bin_offset + 1) % 4) << 1;
-    if (hess_diff >= -8 && hess_diff < 8) {
-      total_half_bytes += 1;
-    } else if (hess_diff >= -128 && hess_diff < 128) {
-      total_half_bytes += 2;
-      out_bits_buffer[hess_pos] |= (0x01 << hess_offset);
-    } else if (hess_diff >= -32768 && hess_diff < 32768) {
-      total_half_bytes += 4;
-      out_bits_buffer[hess_pos] |= (0x02 << hess_offset);
-    } else {
-      total_half_bytes += 8;
-      out_bits_buffer[hess_pos] |= (0x03 << hess_offset);
+    const int32_t hess_diff_pos = hess_diff >= 0 ? hess_diff : ~hess_diff;
+    uint8_t new_mask = (static_cast<uint8_t>(static_cast<bool>(hess_diff_pos & 0xfffffff8)) +
+      static_cast<uint8_t>(static_cast<bool>(hess_diff_pos & 0xffffff80)) +
+      static_cast<uint8_t>(static_cast<bool>(hess_diff_pos & 0xffff8000)));
+    one_byte |= (new_mask << hess_offset);
+    total_half_bytes += (1 << new_mask);
+    if (hess_offset == 6) {
+      out_bits_buffer[hess_pos] = one_byte;
+      one_byte = 0;
     }
-    if (grad_diff >= -8 && grad_diff < 8) {
-      total_half_bytes += 1;
-    } else if (grad_diff >= -128 && grad_diff < 128) {
-      total_half_bytes += 2;
-      out_bits_buffer[grad_pos] |= (0x01 << grad_offset);
-    } else if (grad_diff >= -32768 && grad_diff < 32768) {
-      total_half_bytes += 4;
-      out_bits_buffer[grad_pos] |= (0x02 << grad_offset);
-    } else {
-      total_half_bytes += 8;
-      out_bits_buffer[grad_pos] |= (0x03 << grad_offset);
+
+    const int32_t grad_diff_pos = grad_diff >= 0 ? grad_diff : ~grad_diff;
+    new_mask = (static_cast<uint8_t>(static_cast<bool>(grad_diff_pos & 0xfffffff8)) +
+      static_cast<uint8_t>(static_cast<bool>(grad_diff_pos & 0xffffff80)) +
+      static_cast<uint8_t>(static_cast<bool>(grad_diff_pos & 0xffff8000)));
+    one_byte |= (new_mask << grad_offset);
+    total_half_bytes += (1 << new_mask);
+    if (grad_offset == 6) {
+      out_bits_buffer[grad_pos] = one_byte;
+      one_byte = 0;
     }
     prev_grad = grad;
     prev_hess = hess;
@@ -154,28 +156,28 @@ void HistogramCompressor::WriteThreadCompressedData(const S_HIST_T* in_buffer, c
   uint8_t* thread_first_buffer,
   data_size_t start_bin,
   data_size_t end_bin,
-  uint64_t thread_start_half_bytes) {
-  int64_t prev_hess = (start_bin == 0 ? 0 : static_cast<U_HIST_T>(in_buffer[((start_bin - 1) << 1)]));
-  int64_t prev_grad = (start_bin == 0 ? 0 : in_buffer[((start_bin - 1) << 1) + 1]);
+  uint32_t thread_start_half_bytes) {
+  int32_t prev_hess = (start_bin == 0 ? 0 : static_cast<U_HIST_T>(in_buffer[((start_bin - 1) << 1)]));
+  int32_t prev_grad = (start_bin == 0 ? 0 : in_buffer[((start_bin - 1) << 1) + 1]);
 
-  uint64_t cur_half_bytes = thread_start_half_bytes;
+  uint32_t cur_half_bytes = thread_start_half_bytes;
   *thread_first_buffer = 0;
   data_size_t bin = start_bin;
   if (thread_start_half_bytes % 2 == 1) {
     const data_size_t bin_offset = (bin << 1);
-    const uint64_t hess_bits_pos = bin_offset / 4;
+    const uint32_t hess_bits_pos = bin_offset / 4;
     const uint8_t hess_bits_offset = (bin_offset % 4) << 1;
     const uint8_t hess_bits = (bits_buffer[hess_bits_pos] >> hess_bits_offset) & 0x03;
-    const int64_t hess = static_cast<int64_t>(static_cast<U_HIST_T>(in_buffer[bin_offset]));
-    const int64_t hess_diff = hess - prev_hess;
-    const uint64_t grad_bits_pos = (bin_offset + 1) / 4;
+    const int32_t hess = static_cast<int32_t>(static_cast<U_HIST_T>(in_buffer[bin_offset]));
+    const int32_t hess_diff = hess - prev_hess;
+    const uint32_t grad_bits_pos = (bin_offset + 1) / 4;
     const uint8_t grad_bits_offset = ((bin_offset + 1) % 4) << 1;
     const uint8_t grad_bits = (bits_buffer[grad_bits_pos] >> grad_bits_offset) & 0x03;
-    const int64_t grad = static_cast<int64_t>(in_buffer[bin_offset + 1]);
-    const int64_t grad_diff = grad - prev_grad;
+    const int32_t grad = static_cast<int32_t>(in_buffer[bin_offset + 1]);
+    const int32_t grad_diff = grad - prev_grad;
     prev_grad = grad;
     prev_hess = hess;
-    const uint64_t hess_pos = cur_half_bytes / 2;
+    const uint32_t hess_pos = cur_half_bytes / 2;
     if (hess_bits == 0) {
       (*thread_first_buffer) |= static_cast<uint8_t>(hess_diff << 4);
       ++cur_half_bytes;
@@ -196,7 +198,7 @@ void HistogramCompressor::WriteThreadCompressedData(const S_HIST_T* in_buffer, c
       out_buffer[hess_pos + 4] |= (static_cast<uint8_t>(hess_diff >> 28) & 0x0f);
       cur_half_bytes += 8;
     }
-    const uint64_t grad_pos = cur_half_bytes / 2;
+    const uint32_t grad_pos = cur_half_bytes / 2;
     const uint8_t grad_offset = cur_half_bytes % 2;
     if (grad_offset == 0) {
       if (grad_bits == 0) {
@@ -242,19 +244,19 @@ void HistogramCompressor::WriteThreadCompressedData(const S_HIST_T* in_buffer, c
   }
   for (; bin < end_bin; ++bin) {
     const data_size_t bin_offset = (bin << 1);
-    const uint64_t hess_bits_pos = bin_offset / 4;
+    const uint32_t hess_bits_pos = bin_offset / 4;
     const uint8_t hess_bits_offset = (bin_offset % 4) << 1;
     const uint8_t hess_bits = (bits_buffer[hess_bits_pos] >> hess_bits_offset) & 0x03;
-    const int64_t hess = static_cast<int64_t>(static_cast<U_HIST_T>(in_buffer[bin_offset]));
-    const int64_t hess_diff = hess - prev_hess;
-    const uint64_t grad_bits_pos = (bin_offset + 1) / 4;
+    const int32_t hess = static_cast<int32_t>(static_cast<U_HIST_T>(in_buffer[bin_offset]));
+    const int32_t hess_diff = hess - prev_hess;
+    const uint32_t grad_bits_pos = (bin_offset + 1) / 4;
     const uint8_t grad_bits_offset = ((bin_offset + 1) % 4) << 1;
     const uint8_t grad_bits = (bits_buffer[grad_bits_pos] >> grad_bits_offset) & 0x03;
-    const int64_t grad = static_cast<int64_t>(in_buffer[bin_offset + 1]);
-    const int64_t grad_diff = grad - prev_grad;
+    const int32_t grad = static_cast<int32_t>(in_buffer[bin_offset + 1]);
+    const int32_t grad_diff = grad - prev_grad;
     prev_grad = grad;
     prev_hess = hess;
-    const uint64_t hess_pos = cur_half_bytes / 2;
+    const uint32_t hess_pos = cur_half_bytes / 2;
     const uint8_t hess_offset = cur_half_bytes % 2;
     if (hess_offset == 1) {
       if (hess_bits == 0) {
@@ -296,7 +298,7 @@ void HistogramCompressor::WriteThreadCompressedData(const S_HIST_T* in_buffer, c
         cur_half_bytes += 8;
       }
     }
-    const uint64_t grad_pos = cur_half_bytes / 2;
+    const uint32_t grad_pos = cur_half_bytes / 2;
     const uint8_t grad_offset = cur_half_bytes % 2;
     if (grad_offset == 0) {
       if (grad_bits == 0) {
@@ -342,110 +344,110 @@ void HistogramCompressor::WriteThreadCompressedData(const S_HIST_T* in_buffer, c
 }
 
 template <typename S_HIST_T, typename U_HIST_T>
-void HistogramCompressor::Decompress(const uint8_t* in_buffer, const uint8_t* in_bits_buffer, const uint64_t* thread_half_byte_offset, data_size_t num_bin, S_HIST_T* out_buffer) {
+void HistogramCompressor::Decompress(const uint8_t* in_buffer, const uint8_t* in_bits_buffer, const uint32_t* thread_half_byte_offset, data_size_t num_bin, S_HIST_T* out_buffer) {
   const data_size_t block_size = (num_bin + num_threads_ - 1) / num_threads_;
   #pragma omp parallel for schedule(static, 1) num_threads(num_threads_)
   for (int thread_index = 0; thread_index < num_threads_; ++thread_index) {
     const data_size_t start = thread_index * block_size;
     const data_size_t end = std::min(start + block_size, num_bin);
-    const uint64_t half_byte_start = thread_half_byte_offset[thread_index];
-    uint64_t cur_half_byte = half_byte_start;
-    int64_t prev_grad = 0;
-    int64_t prev_hess = 0;
-    int64_t grad = 0;
-    int64_t hess = 0;
+    const uint32_t half_byte_start = thread_half_byte_offset[thread_index];
+    uint32_t cur_half_byte = half_byte_start;
+    int32_t prev_grad = 0;
+    int32_t prev_hess = 0;
+    int32_t grad = 0;
+    int32_t hess = 0;
     for (data_size_t bin = start; bin < end; ++bin) {
       const data_size_t bin_offset = (bin << 1);
-      const uint64_t hess_bits_pos = bin_offset / 4;
+      const uint32_t hess_bits_pos = bin_offset / 4;
       const uint8_t hess_bits_offset = (bin_offset % 4) << 1;
       const uint8_t hess_bits = (in_bits_buffer[hess_bits_pos] >> hess_bits_offset) & 0x03;
       const uint8_t hess_offset = cur_half_byte % 2;
-      const uint64_t hess_pos = cur_half_byte / 2;
+      const uint32_t hess_pos = cur_half_byte / 2;
       if (hess_offset == 1) {
         if (hess_bits == 0) {
-          hess = static_cast<int64_t>(static_cast<int8_t>(in_buffer[hess_pos] & 0xf0)) >> 4;
+          hess = static_cast<int32_t>(static_cast<int8_t>(in_buffer[hess_pos] & 0xf0)) >> 4;
           ++cur_half_byte;
         } else if (hess_bits == 1) {
-          hess = static_cast<int64_t>(static_cast<uint8_t>(in_buffer[hess_pos] >> 4) & 0x0f) |
-            static_cast<int64_t>(static_cast<int8_t>(in_buffer[hess_pos + 1] << 4));
+          hess = static_cast<int32_t>(static_cast<uint8_t>(in_buffer[hess_pos] >> 4) & 0x0f) |
+            static_cast<int32_t>(static_cast<int8_t>(in_buffer[hess_pos + 1] << 4));
           cur_half_byte += 2;
         } else if (hess_bits == 2) {
-          hess = static_cast<int64_t>(static_cast<uint8_t>(in_buffer[hess_pos] >> 4) & 0x0f) |
-            (static_cast<int64_t>(static_cast<uint8_t>(in_buffer[hess_pos + 1])) << 4) |
-            (static_cast<int64_t>(static_cast<int8_t>(in_buffer[hess_pos + 2] << 4)) << 8);
+          hess = static_cast<int32_t>(static_cast<uint8_t>(in_buffer[hess_pos] >> 4) & 0x0f) |
+            (static_cast<int32_t>(static_cast<uint8_t>(in_buffer[hess_pos + 1])) << 4) |
+            (static_cast<int32_t>(static_cast<int8_t>(in_buffer[hess_pos + 2] << 4)) << 8);
           cur_half_byte += 4;
         } else if (hess_bits == 3) {
-          hess = static_cast<int64_t>(static_cast<uint8_t>(in_buffer[hess_pos] >> 4) & 0x0f) |
-            (static_cast<int64_t>(static_cast<uint8_t>(in_buffer[hess_pos + 1])) << 4) |
-            (static_cast<int64_t>(static_cast<uint8_t>(in_buffer[hess_pos + 2])) << 12) |
-            (static_cast<int64_t>(static_cast<uint8_t>(in_buffer[hess_pos + 3])) << 20) |
-            (static_cast<int64_t>(static_cast<int8_t>(in_buffer[hess_pos + 4] << 4)) << 24);
+          hess = static_cast<int32_t>(static_cast<uint8_t>(in_buffer[hess_pos] >> 4) & 0x0f) |
+            (static_cast<int32_t>(static_cast<uint8_t>(in_buffer[hess_pos + 1])) << 4) |
+            (static_cast<int32_t>(static_cast<uint8_t>(in_buffer[hess_pos + 2])) << 12) |
+            (static_cast<int32_t>(static_cast<uint8_t>(in_buffer[hess_pos + 3])) << 20) |
+            (static_cast<int32_t>(static_cast<int8_t>(in_buffer[hess_pos + 4] << 4)) << 24);
           cur_half_byte += 8;
         }
       } else {
         if (hess_bits == 0) {
-          hess = static_cast<int64_t>(static_cast<int8_t>(in_buffer[hess_pos] << 4)) >> 4;
+          hess = static_cast<int32_t>(static_cast<int8_t>(in_buffer[hess_pos] << 4)) >> 4;
           cur_half_byte += 1;
         } else if (hess_bits == 1) {
-          hess = static_cast<int64_t>(static_cast<int8_t>(in_buffer[hess_pos]));
+          hess = static_cast<int32_t>(static_cast<int8_t>(in_buffer[hess_pos]));
           cur_half_byte += 2;
         } else if (hess_bits == 2) {
-          hess = static_cast<int64_t>(static_cast<uint8_t>(in_buffer[hess_pos])) |
-            (static_cast<int64_t>(static_cast<int8_t>(in_buffer[hess_pos + 1])) << 8);
+          hess = static_cast<int32_t>(static_cast<uint8_t>(in_buffer[hess_pos])) |
+            (static_cast<int32_t>(static_cast<int8_t>(in_buffer[hess_pos + 1])) << 8);
           cur_half_byte += 4;
         } else if (hess_bits == 3) {
-          hess = static_cast<int64_t>(static_cast<uint8_t>(in_buffer[hess_pos])) |
-            (static_cast<int64_t>(static_cast<uint8_t>(in_buffer[hess_pos + 1])) << 8) |
-            (static_cast<int64_t>(static_cast<uint8_t>(in_buffer[hess_pos + 2])) << 16) |
-            (static_cast<int64_t>(static_cast<int8_t>(in_buffer[hess_pos + 3])) << 24);
+          hess = static_cast<int32_t>(static_cast<uint8_t>(in_buffer[hess_pos])) |
+            (static_cast<int32_t>(static_cast<uint8_t>(in_buffer[hess_pos + 1])) << 8) |
+            (static_cast<int32_t>(static_cast<uint8_t>(in_buffer[hess_pos + 2])) << 16) |
+            (static_cast<int32_t>(static_cast<int8_t>(in_buffer[hess_pos + 3])) << 24);
           cur_half_byte += 8;
         }
       }
       hess += prev_hess;
       prev_hess = hess;
       out_buffer[bin_offset] = static_cast<U_HIST_T>(hess);
-      const uint64_t grad_bits_pos = (bin_offset + 1) / 4;
+      const uint32_t grad_bits_pos = (bin_offset + 1) / 4;
       const uint8_t grad_bits_offset = ((bin_offset + 1) % 4) << 1;
       const uint8_t grad_bits = (in_bits_buffer[grad_bits_pos] >> grad_bits_offset) & 0x03;
       const uint8_t grad_offset = cur_half_byte % 2;
-      const uint64_t grad_pos = cur_half_byte / 2;
+      const uint32_t grad_pos = cur_half_byte / 2;
       if (grad_offset == 1) {
         if (grad_bits == 0) {
-          grad = static_cast<int64_t>(static_cast<int8_t>(in_buffer[grad_pos] & 0xf0)) >> 4;
+          grad = static_cast<int32_t>(static_cast<int8_t>(in_buffer[grad_pos] & 0xf0)) >> 4;
           ++cur_half_byte;
         } else if (grad_bits == 1) {
-          grad = static_cast<int64_t>(static_cast<uint8_t>(in_buffer[grad_pos] >> 4) & 0x0f) |
-            static_cast<int64_t>(static_cast<int8_t>(in_buffer[grad_pos + 1] << 4));
+          grad = static_cast<int32_t>(static_cast<uint8_t>(in_buffer[grad_pos] >> 4) & 0x0f) |
+            static_cast<int32_t>(static_cast<int8_t>(in_buffer[grad_pos + 1] << 4));
           cur_half_byte += 2;
         } else if (grad_bits == 2) {
-          grad = static_cast<int64_t>(static_cast<uint8_t>(in_buffer[grad_pos] >> 4) & 0x0f) |
-            (static_cast<int64_t>(static_cast<uint8_t>(in_buffer[grad_pos + 1])) << 4) |
-            (static_cast<int64_t>(static_cast<int8_t>(in_buffer[grad_pos + 2] << 4)) << 8);
+          grad = static_cast<int32_t>(static_cast<uint8_t>(in_buffer[grad_pos] >> 4) & 0x0f) |
+            (static_cast<int32_t>(static_cast<uint8_t>(in_buffer[grad_pos + 1])) << 4) |
+            (static_cast<int32_t>(static_cast<int8_t>(in_buffer[grad_pos + 2] << 4)) << 8);
           cur_half_byte += 4;
         } else if (grad_bits == 3) {
-          grad = static_cast<int64_t>(static_cast<uint8_t>(in_buffer[grad_pos] >> 4) & 0x0f) |
-            (static_cast<int64_t>(static_cast<uint8_t>(in_buffer[grad_pos + 1])) << 4) |
-            (static_cast<int64_t>(static_cast<uint8_t>(in_buffer[grad_pos + 2])) << 12) |
-            (static_cast<int64_t>(static_cast<uint8_t>(in_buffer[grad_pos + 3])) << 20) |
-            (static_cast<int64_t>(static_cast<int8_t>(in_buffer[grad_pos + 4] << 4)) << 24);
+          grad = static_cast<int32_t>(static_cast<uint8_t>(in_buffer[grad_pos] >> 4) & 0x0f) |
+            (static_cast<int32_t>(static_cast<uint8_t>(in_buffer[grad_pos + 1])) << 4) |
+            (static_cast<int32_t>(static_cast<uint8_t>(in_buffer[grad_pos + 2])) << 12) |
+            (static_cast<int32_t>(static_cast<uint8_t>(in_buffer[grad_pos + 3])) << 20) |
+            (static_cast<int32_t>(static_cast<int8_t>(in_buffer[grad_pos + 4] << 4)) << 24);
           cur_half_byte += 8;
         }
       } else {
         if (grad_bits == 0) {
-          grad = static_cast<int64_t>(static_cast<int8_t>(in_buffer[grad_pos] << 4)) >> 4;
+          grad = static_cast<int32_t>(static_cast<int8_t>(in_buffer[grad_pos] << 4)) >> 4;
           cur_half_byte += 1;
         } else if (grad_bits == 1) {
-          grad = static_cast<int64_t>(static_cast<int8_t>(in_buffer[grad_pos]));
+          grad = static_cast<int32_t>(static_cast<int8_t>(in_buffer[grad_pos]));
           cur_half_byte += 2;
         } else if (grad_bits == 2) {
-          grad = static_cast<int64_t>(static_cast<uint8_t>(in_buffer[grad_pos])) |
-            (static_cast<int64_t>(static_cast<int8_t>(in_buffer[grad_pos + 1])) << 8);
+          grad = static_cast<int32_t>(static_cast<uint8_t>(in_buffer[grad_pos])) |
+            (static_cast<int32_t>(static_cast<int8_t>(in_buffer[grad_pos + 1])) << 8);
           cur_half_byte += 4;
         } else if (grad_bits == 3) {
-          grad = static_cast<int64_t>(static_cast<uint8_t>(in_buffer[grad_pos])) |
-            (static_cast<int64_t>(static_cast<uint8_t>(in_buffer[grad_pos + 1])) << 8) |
-            (static_cast<int64_t>(static_cast<uint8_t>(in_buffer[grad_pos + 2])) << 16) |
-            (static_cast<int64_t>(static_cast<int8_t>(in_buffer[grad_pos + 3])) << 24);
+          grad = static_cast<int32_t>(static_cast<uint8_t>(in_buffer[grad_pos])) |
+            (static_cast<int32_t>(static_cast<uint8_t>(in_buffer[grad_pos + 1])) << 8) |
+            (static_cast<int32_t>(static_cast<uint8_t>(in_buffer[grad_pos + 2])) << 16) |
+            (static_cast<int32_t>(static_cast<int8_t>(in_buffer[grad_pos + 3])) << 24);
           cur_half_byte += 8;
         }
       }
@@ -477,44 +479,47 @@ void HistogramCompressor::Decompress(const uint8_t* in_buffer, const uint8_t* in
 
 void HistogramCompressor::Test() {
   const size_t test_len = 500000;
-  std::vector<int32_t> int32_test_array(test_len * 2);
+  std::vector<int16_t> int16_test_array(test_len * 2);
   std::mt19937 rand_eng(0);
-  const int32_t num_range = 10000;
+  const int16_t num_range = 10000;
   std::vector<double> start_prob(num_range, 1.0f / num_range);
-  std::discrete_distribution<int32_t> dist_start(start_prob.begin(), start_prob.end());
-  const int32_t diff_range = 400;
+  std::discrete_distribution<int16_t> dist_start(start_prob.begin(), start_prob.end());
+  const int16_t diff_range = 40;
   std::vector<double> diff_prob(diff_range, 1.0f / diff_range);
-  std::discrete_distribution<int32_t> dist_diff(diff_prob.begin(), diff_prob.end());
-  int32_t grad = -5000;//dist_start(rand_eng);
-  int32_t hess = std::abs(dist_diff(rand_eng));
+  std::discrete_distribution<int16_t> dist_diff(diff_prob.begin(), diff_prob.end());
+  int16_t grad = dist_start(rand_eng);
+  int16_t hess = std::abs(dist_diff(rand_eng));
   for (size_t i = 0; i < test_len; ++i) {
-    int32_t grad_diff = dist_diff(rand_eng) - 200;
-    int32_t hess_diff = dist_diff(rand_eng) - 200;
-    int32_test_array[(i << 1) + 1] = grad;
-    int32_test_array[(i << 1)] = hess;
+    int16_t grad_diff = dist_diff(rand_eng) - 20;
+    int16_t hess_diff = dist_diff(rand_eng) - 20;
+    int16_test_array[(i << 1) + 1] = grad;
+    int16_test_array[(i << 1)] = hess;
     grad = grad + grad_diff;
     hess = std::abs(hess + hess_diff);
   }
   std::vector<uint8_t> bits((test_len * 2 + 3) / 4, 0);
   std::vector<uint8_t> out_buffer(test_len * 2 * 8, 0);
   const int num_threads = num_threads_;
-  std::vector<uint64_t> thread_total_half_bytes_offset(num_threads + 1, 0);
-  std::vector<int32_t> result(test_len * 2, 0);
+  std::vector<uint32_t> thread_total_half_bytes_offset(num_threads + 1, 0);
+  std::vector<int16_t> result(test_len * 2, 0);
   auto start = std::chrono::steady_clock::now();
   for (int i = 0; i < 10000; ++i) {
-    Compress<int32_t, uint32_t>(int32_test_array.data(), out_buffer.data(), bits.data(), test_len, thread_total_half_bytes_offset.data());
-    Decompress<int32_t, uint32_t>(out_buffer.data(), bits.data(), thread_total_half_bytes_offset.data(), static_cast<data_size_t>(test_len), result.data());
+    Compress<int16_t, uint16_t>(int16_test_array.data(), out_buffer.data(), bits.data(), test_len, thread_total_half_bytes_offset.data());
+    global_timer.Start("Decompress");
+    Decompress<int16_t, uint16_t>(out_buffer.data(), bits.data(), thread_total_half_bytes_offset.data(), static_cast<data_size_t>(test_len), result.data());
+    global_timer.Stop("Decompress");
   }
   auto end = std::chrono::steady_clock::now();
   Log::Warning("compression and depression finished in %.10f seconds", static_cast<std::chrono::duration<double>>(end - start).count());
   for (size_t i = 0; i < test_len; ++i) {
     //Log::Warning("i = %d, grad = %d, hess = %d, grad hat = %d, hess hat = %d",
-    //  i, int32_test_array[(i << 1) + 1], int32_test_array[(i << 1)],
+    //  i, int16_test_array[(i << 1) + 1], int16_test_array[(i << 1)],
     //    result[(i << 1) + 1], result[(i << 1)]);
-    CHECK_EQ(int32_test_array[(i << 1) + 1], result[(i << 1) + 1]);
-    CHECK_EQ(static_cast<uint32_t>(int32_test_array[(i << 1)]), static_cast<uint32_t>(result[(i << 1)]));
+    CHECK_EQ(int16_test_array[(i << 1) + 1], result[(i << 1) + 1]);
+    CHECK_EQ(static_cast<uint16_t>(int16_test_array[(i << 1)]), static_cast<uint16_t>(result[(i << 1)]));
   }
   Log::Warning("finish decompress, total half bytes = %ld", thread_total_half_bytes_offset.back());
+  global_timer.Print();
 }
 
 }  // namespace LightGBM
