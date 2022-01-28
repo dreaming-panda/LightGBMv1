@@ -7,8 +7,6 @@
 #include <random>
 #include <chrono>
 
-int test_bin = 312;
-
 namespace LightGBM {
 
 HistogramCompressor::HistogramCompressor(const int num_threads) {
