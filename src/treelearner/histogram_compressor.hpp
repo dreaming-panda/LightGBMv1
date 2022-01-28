@@ -15,10 +15,10 @@ class HistogramCompressor {
   HistogramCompressor(const int num_threads);
 
   template <typename S_HIST_T, typename U_HIST_T>
-  void Compress(const S_HIST_T* in_buffer, uint8_t* out_buffer, uint8_t* out_bits_buffer, data_size_t num_bin, uint32_t* thread_total_half_bytes_offset);
+  void Compress(const S_HIST_T* in_buffer, uint8_t* out_buffer, data_size_t num_bin);
 
   template <typename S_HIST_T, typename U_HIST_T>
-  void Decompress(const uint8_t* in_buffer, const uint8_t* in_bits_buffer, const uint32_t* thread_half_byte_offset, data_size_t num_bin, S_HIST_T* out_buffer);
+  void Decompress(const uint8_t* in_buffer, data_size_t num_bin, S_HIST_T* out_buffer);
 
   void Test();
 
@@ -39,6 +39,7 @@ class HistogramCompressor {
 
   std::vector<uint8_t> thread_first_bits_;
   std::vector<uint8_t> thread_first_;
+  std::vector<uint32_t> thread_total_half_bytes_offset_;
   int num_threads_;
 };
 

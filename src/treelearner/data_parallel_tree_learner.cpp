@@ -226,7 +226,6 @@ void DataParallelTreeLearner<TREELEARNER_T>::FindBestSplits(const Tree* tree) {
   const int smaller_leaf_index = this->smaller_leaf_splits_->leaf_index();
   const data_size_t local_data_on_smaller_leaf = this->data_partition_->leaf_count(smaller_leaf_index);
   if (local_data_on_smaller_leaf <= 0) {
-  Log::Warning("DataParallelTreeLearner<TREELEARNER_T>::FindBestSplits step 0.5");
     // clear histogram buffer before synchronizing
     // otherwise histogram contents from the previous iteration will be sent
     #pragma omp parallel for schedule(static)
@@ -273,14 +272,14 @@ void DataParallelTreeLearner<TREELEARNER_T>::FindBestSplits(const Tree* tree) {
   }
   // Reduce scatter for histogram
   if (!this->config_->use_discretized_grad) {
-    Network::ReduceScatter(input_buffer_.data(), reduce_scatter_size_, sizeof(hist_t), block_start_.data(),
+    Network::ReduceScatter<false, 0>(input_buffer_.data(), reduce_scatter_size_, sizeof(hist_t), block_start_.data(),
                            block_len_.data(), output_buffer_.data(), static_cast<comm_size_t>(output_buffer_.size()), &HistogramSumReducer);
   } else {
     if (smaller_leaf_num_bits <= 16) {
-      Network::ReduceScatter(input_buffer_.data(), reduce_scatter_size_int16_, sizeof(int16_t), block_start_int16_.data(),
+      Network::ReduceScatter<true, 16>(input_buffer_.data(), reduce_scatter_size_int16_, sizeof(int16_t), block_start_int16_.data(),
                              block_len_int16_.data(), output_buffer_.data(), static_cast<comm_size_t>(output_buffer_.size()), &Int16HistogramSumReducer);
     } else {
-      Network::ReduceScatter(input_buffer_.data(), reduce_scatter_size_, sizeof(int_hist_t), block_start_.data(),
+      Network::ReduceScatter<true, 32>(input_buffer_.data(), reduce_scatter_size_, sizeof(int_hist_t), block_start_.data(),
                              block_len_.data(), output_buffer_.data(), static_cast<comm_size_t>(output_buffer_.size()), &Int32HistogramSumReducer);
     }
   }

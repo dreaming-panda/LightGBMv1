@@ -87,7 +87,7 @@ void Network::Allreduce(char* input, comm_size_t input_size, int type_size, char
   }
   block_len_[num_machines_ - 1] = input_size - block_start_[num_machines_ - 1];
   // do reduce scatter
-  ReduceScatter(input, input_size, type_size, block_start_.data(), block_len_.data(), output, input_size, reducer);
+  ReduceScatter<false, 0>(input, input_size, type_size, block_start_.data(), block_len_.data(), output, input_size, reducer);
   // do all gather
   Allgather(output, block_start_.data(), block_len_.data(), output, input_size);
 }
@@ -229,6 +229,7 @@ void Network::AllgatherRing(char* input, const comm_size_t* block_start, const c
   }
 }
 
+template <bool USE_COMPRESS, int HIST_BITS>
 void Network::ReduceScatter(char* input, comm_size_t input_size, int type_size,
                             const comm_size_t* block_start, const comm_size_t* block_len, char* output,
                             comm_size_t output_size, const ReduceFunction& reducer) {
@@ -240,23 +241,40 @@ void Network::ReduceScatter(char* input, comm_size_t input_size, int type_size,
   }
   const comm_size_t kRingThreshold = 10 * 1024 * 1024;  // 10MB
   if (recursive_halving_map_.is_power_of_2 || input_size < kRingThreshold) {
-    ReduceScatterRecursiveHalving(input, input_size, type_size, block_start, block_len, output, output_size, reducer);
+    ReduceScatterRecursiveHalving<USE_COMPRESS, HIST_BITS>(input, input_size, type_size, block_start, block_len, output, output_size, reducer);
   } else {
-    ReduceScatterRing(input, input_size, type_size, block_start, block_len, output, output_size, reducer);
+    ReduceScatterRing<USE_COMPRESS, HIST_BITS>(input, input_size, type_size, block_start, block_len, output, output_size, reducer);
   }
 }
 
+template void Network::ReduceScatter<true, 32>(char* input, comm_size_t input_size, int type_size,
+                            const comm_size_t* block_start, const comm_size_t* block_len, char* output,
+                            comm_size_t output_size, const ReduceFunction& reducer);
+
+template void Network::ReduceScatter<true, 16>(char* input, comm_size_t input_size, int type_size,
+                            const comm_size_t* block_start, const comm_size_t* block_len, char* output,
+                            comm_size_t output_size, const ReduceFunction& reducer);
+
+template void Network::ReduceScatter<true, 8>(char* input, comm_size_t input_size, int type_size,
+                            const comm_size_t* block_start, const comm_size_t* block_len, char* output,
+                            comm_size_t output_size, const ReduceFunction& reducer);
+
+template void Network::ReduceScatter<false, 0>(char* input, comm_size_t input_size, int type_size,
+                            const comm_size_t* block_start, const comm_size_t* block_len, char* output,
+                            comm_size_t output_size, const ReduceFunction& reducer);
+
+template <bool USE_COMPRESS, int HIST_BITS>
 void Network::ReduceScatterRecursiveHalving(char* input, comm_size_t input_size, int type_size,
                                             const comm_size_t* block_start, const comm_size_t* block_len, char* output,
                                             comm_size_t, const ReduceFunction& reducer) {
   if (!recursive_halving_map_.is_power_of_2) {
     if (recursive_halving_map_.type == RecursiveHalvingNodeType::Other) {
       // send local data to neighbor first
-      linkers_->Send(recursive_halving_map_.neighbor, input, input_size);
+      linkers_->Send<USE_COMPRESS, HIST_BITS>(recursive_halving_map_.neighbor, input, input_size);
     } else if (recursive_halving_map_.type == RecursiveHalvingNodeType::GroupLeader) {
       // receive neighbor data first
       int need_recv_cnt = input_size;
-      linkers_->Recv(recursive_halving_map_.neighbor, output, need_recv_cnt);
+      linkers_->Recv<USE_COMPRESS, HIST_BITS>(recursive_halving_map_.neighbor, output, need_recv_cnt);
       // reduce
       reducer(output, input, type_size, input_size);
     }
@@ -278,7 +296,7 @@ void Network::ReduceScatterRecursiveHalving(char* input, comm_size_t input_size,
         need_recv_cnt += block_len[recv_block_start + j];
       }
       // send and recv at same time
-      linkers_->SendRecv(target, input + block_start[send_block_start], send_size, target, output, need_recv_cnt);
+      linkers_->SendRecv<USE_COMPRESS, HIST_BITS>(target, input + block_start[send_block_start], send_size, target, output, need_recv_cnt);
       // reduce
       reducer(output, input + block_start[recv_block_start], type_size, need_recv_cnt);
     }
@@ -286,13 +304,13 @@ void Network::ReduceScatterRecursiveHalving(char* input, comm_size_t input_size,
   if (!recursive_halving_map_.is_power_of_2) {
     if (recursive_halving_map_.type == RecursiveHalvingNodeType::GroupLeader) {
       // send result to neighbor
-      linkers_->Send(recursive_halving_map_.neighbor,
+      linkers_->Send<USE_COMPRESS, HIST_BITS>(recursive_halving_map_.neighbor,
                      input + block_start[recursive_halving_map_.neighbor],
                      block_len[recursive_halving_map_.neighbor]);
     } else if (recursive_halving_map_.type == RecursiveHalvingNodeType::Other) {
       // receive result from neighbor
       int need_recv_cnt = block_len[rank_];
-      linkers_->Recv(recursive_halving_map_.neighbor, output, need_recv_cnt);
+      linkers_->Recv<USE_COMPRESS, HIST_BITS>(recursive_halving_map_.neighbor, output, need_recv_cnt);
       return;
     }
   }
@@ -300,6 +318,7 @@ void Network::ReduceScatterRecursiveHalving(char* input, comm_size_t input_size,
   std::memcpy(output, input + block_start[rank_], block_len[rank_]);
 }
 
+template <bool USE_COMPRESS, int HIST_BITS>
 void Network::ReduceScatterRing(char* input, comm_size_t, int type_size,
                                 const comm_size_t* block_start, const comm_size_t* block_len, char* output,
                                 comm_size_t, const ReduceFunction& reducer) {
@@ -308,7 +327,7 @@ void Network::ReduceScatterRing(char* input, comm_size_t, int type_size,
   int out_block = in_rank;
   int in_block = (in_rank - 1 + num_machines_) % num_machines_;
   for (int i = 1; i < num_machines_; ++i) {
-    linkers_->SendRecv(out_rank, input + block_start[out_block], block_len[out_block],
+    linkers_->SendRecv<USE_COMPRESS, HIST_BITS>(out_rank, input + block_start[out_block], block_len[out_block],
                        in_rank, output, block_len[in_block]);
     reducer(output, input + block_start[in_block], type_size, block_len[in_block]);
     out_block = (out_block - 1 + num_machines_) % num_machines_;

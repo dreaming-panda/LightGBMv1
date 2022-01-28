@@ -161,6 +161,7 @@ class Network {
   * \param output_size size of output data
   * \param reducer Reduce function
   */
+  template <bool USE_COMPRESS, int HIST_BITS>
   static void ReduceScatter(char* input, comm_size_t input_size, int type_size,
                             const comm_size_t* block_start, const comm_size_t* block_len, char* output, comm_size_t output_size,
                             const ReduceFunction& reducer);
@@ -281,10 +282,12 @@ class Network {
 
   static void AllgatherRing(char* input, const comm_size_t* block_start, const comm_size_t* block_len, char* output, comm_size_t all_size);
 
+  template <bool USE_COMPRESS, int HIST_BITS>
   static void ReduceScatterRecursiveHalving(char* input, comm_size_t input_size, int type_size,
                                             const comm_size_t* block_start, const comm_size_t* block_len, char* output, comm_size_t output_size,
                                             const ReduceFunction& reducer);
 
+  template <bool USE_COMPRESS, int HIST_BITS>
   static void ReduceScatterRing(char* input, comm_size_t input_size, int type_size,
                                 const comm_size_t* block_start, const comm_size_t* block_len, char* output, comm_size_t output_size,
                                 const ReduceFunction& reducer);

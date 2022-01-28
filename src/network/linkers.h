@@ -18,6 +18,8 @@
 #include <thread>
 #include <vector>
 
+#include "../src/treelearner/histogram_compressor.hpp"
+
 #ifdef USE_SOCKET
 #include "socket_wrapper.hpp"
 #endif
@@ -54,8 +56,10 @@ class Linkers {
   * \param data Pointer of receive data
   * \param len Recv size, will block until receive len size of data
   */
+  template <bool USE_COMPRESS = false, int HIST_BITS = 0>
   inline void Recv(int rank, char* data, int len) const;
 
+  template <bool USE_COMPRESS = false, int HIST_BITS = 0>
   inline void Recv(int rank, char* data, int64_t len) const;
 
   /*!
@@ -64,8 +68,10 @@ class Linkers {
   * \param data Pointer of send data
   * \param len Send size
   */
+  template <bool USE_COMPRESS = false, int HIST_BITS = 0>
   inline void Send(int rank, char* data, int len) const;
 
+  template <bool USE_COMPRESS = false, int HIST_BITS = 0>
   inline void Send(int rank, char* data, int64_t len) const;
   /*!
   * \brief Send and Recv at same time, blocking
@@ -76,9 +82,11 @@ class Linkers {
   * \param recv_data
   * \param recv_len
   */
+  template <bool USE_COMPRESS = false, int HIST_BITS = 0>
   inline void SendRecv(int send_rank, char* send_data, int send_len,
                        int recv_rank, char* recv_data, int recv_len);
 
+  template <bool USE_COMPRESS = false, int HIST_BITS = 0>
   inline void SendRecv(int send_rank, char* send_data, int64_t send_len,
                        int recv_rank, char* recv_data, int64_t recv_len);
   /*!
@@ -184,6 +192,7 @@ class Linkers {
   std::vector<std::unique_ptr<TcpSocket>> linkers_;
   /*! \brief Local socket listener */
   std::unique_ptr<TcpSocket> listener_;
+  mutable std::vector<uint32_t> buffer_;
   #endif  // USE_SOCKET
 };
 
@@ -204,32 +213,35 @@ inline const RecursiveHalvingMap& Linkers::recursive_halving_map() {
   return recursive_halving_map_;
 }
 
+template <bool USE_COMPRESS, int HIST_BITS>
 inline void Linkers::Recv(int rank, char* data, int64_t len) const {
   int64_t used = 0;
   do {
     int cur_size = static_cast<int>(std::min<int64_t>(len - used, INT32_MAX));
-    Recv(rank, data + used, cur_size);
+    Recv<USE_COMPRESS, HIST_BITS>(rank, data + used, cur_size);
     used += cur_size;
   } while (used < len);
 }
 
+template <bool USE_COMPRESS, int HIST_BITS>
 inline void Linkers::Send(int rank, char* data, int64_t len) const {
   int64_t used = 0;
   do {
     int cur_size = static_cast<int>(std::min<int64_t>(len - used, INT32_MAX));
-    Send(rank, data + used, cur_size);
+    Send<USE_COMPRESS, HIST_BITS>(rank, data + used, cur_size);
     used += cur_size;
   } while (used < len);
 }
 
+template <bool USE_COMPRESS, int HIST_BITS>
 inline void Linkers::SendRecv(int send_rank, char* send_data, int64_t send_len,
                               int recv_rank, char* recv_data, int64_t recv_len) {
   auto start_time = std::chrono::high_resolution_clock::now();
   std::thread send_worker(
     [this, send_rank, send_data, send_len]() {
-    Send(send_rank, send_data, send_len);
+    Send<USE_COMPRESS, HIST_BITS>(send_rank, send_data, send_len);
   });
-  Recv(recv_rank, recv_data, recv_len);
+  Recv<USE_COMPRESS, HIST_BITS>(recv_rank, recv_data, recv_len);
   send_worker.join();
   // wait for send complete
   auto end_time = std::chrono::high_resolution_clock::now();
@@ -239,39 +251,130 @@ inline void Linkers::SendRecv(int send_rank, char* send_data, int64_t send_len,
 
 #ifdef USE_SOCKET
 
+template <bool USE_COMPRESS, int HIST_BITS>
 inline void Linkers::Recv(int rank, char* data, int len) const {
-  int recv_cnt = 0;
-  while (recv_cnt < len) {
-    recv_cnt += linkers_[rank]->Recv(data + recv_cnt,
+  if (!USE_COMPRESS) {
+    int recv_cnt = 0;
+    while (recv_cnt < len) {
+      recv_cnt += linkers_[rank]->Recv(data + recv_cnt,
+        // len - recv_cnt
+        std::min(len - recv_cnt, SocketConfig::kMaxReceiveSize));
+    }
+  } else {
+    const int num_threads = OMP_NUM_THREADS();
+    buffer_.resize(2 * len * 20);
+    linkers_[rank]->Recv(
+      reinterpret_cast<char*>(buffer_.data()),
       // len - recv_cnt
-      std::min(len - recv_cnt, SocketConfig::kMaxReceiveSize));
+      std::min(4, SocketConfig::kMaxReceiveSize));
+    const int compressed_len = static_cast<int>(buffer_[0]) + (num_threads + 1) * sizeof(uint32_t);
+    int recv_cnt = 0;
+    while (recv_cnt < compressed_len) {
+      recv_cnt += linkers_[rank]->Recv(
+        reinterpret_cast<char*>(buffer_.data() + 1),
+        // len - recv_cnt
+        std::min(compressed_len - recv_cnt, SocketConfig::kMaxReceiveSize));
+    }
+
+    HistogramCompressor hc(num_threads);
+    if (HIST_BITS == 32) {
+      hc.Decompress<int32_t, uint32_t>(
+        reinterpret_cast<const uint8_t*>(buffer_.data()),
+        len / sizeof(int32_t) / 2,
+        reinterpret_cast<int32_t*>(data));
+      {
+        const int num_bin = len / sizeof(int32_t) / 2;
+        const int64_t* hist_ptr = reinterpret_cast<const int64_t*>(data);
+        for (int bin = 0; bin < num_bin; ++bin) {
+          const int64_t grad_hess = hist_ptr[bin];
+          Log::Warning("receiving bin %d grad %d hess %d", bin, static_cast<int32_t>(grad_hess >> 32), static_cast<uint32_t>(grad_hess & 0x00000000ffffffff));
+        }
+      }
+    } else if (HIST_BITS == 16) {
+      hc.Decompress<int16_t, uint16_t>(
+        reinterpret_cast<const uint8_t*>(buffer_.data()),
+        len / sizeof(int16_t) / 2,
+        reinterpret_cast<int16_t*>(data));
+
+      {
+        const int num_bin = len / sizeof(int16_t) / 2;
+        const int32_t* hist_ptr = reinterpret_cast<const int32_t*>(data);
+        for (int bin = 0; bin < num_bin; ++bin) {
+          const int32_t grad_hess = hist_ptr[bin];
+          Log::Warning("receiving bin %d grad %d hess %d", bin, static_cast<int16_t>(grad_hess >> 16), static_cast<uint16_t>(grad_hess & 0x0000ffff));
+        }
+      }
+    }
   }
 }
 
+template <bool USE_COMPRESS, int HIST_BITS>
 inline void Linkers::Send(int rank, char* data, int len) const {
   if (len <= 0) {
     return;
   }
-  int send_cnt = 0;
-  while (send_cnt < len) {
-    send_cnt += linkers_[rank]->Send(data + send_cnt, len - send_cnt);
+  if (!USE_COMPRESS) { 
+    int send_cnt = 0;
+    while (send_cnt < len) {
+      send_cnt += linkers_[rank]->Send(data + send_cnt, len - send_cnt);
+    }
+  } else {
+    buffer_.resize(2 * len * 20);
+    const int num_threads = OMP_NUM_THREADS();
+    HistogramCompressor hc(num_threads);
+    if (HIST_BITS == 32) {
+      {
+        const int num_bin = len / sizeof(int32_t) / 2;
+        const int64_t* hist_ptr = reinterpret_cast<const int64_t*>(data);
+        for (int bin = 0; bin < num_bin; ++bin) {
+          const int64_t grad_hess = hist_ptr[bin];
+          Log::Warning("sending bin %d grad %d hess %d", bin, static_cast<int32_t>(grad_hess >> 32), static_cast<uint32_t>(grad_hess & 0x00000000ffffffff));
+        }
+      }
+
+      hc.Compress<int32_t, uint32_t>(
+        reinterpret_cast<const int32_t*>(data),
+        reinterpret_cast<uint8_t*>(buffer_.data()),
+        len / sizeof(int32_t) / 2);
+    } else if (HIST_BITS == 16) {
+      {
+        const int num_bin = len / sizeof(int16_t) / 2;
+        const int32_t* hist_ptr = reinterpret_cast<const int32_t*>(data);
+        for (int bin = 0; bin < num_bin; ++bin) {
+          const int32_t grad_hess = hist_ptr[bin];
+          Log::Warning("sending bin %d grad %d hess %d", bin, static_cast<int16_t>(grad_hess >> 16), static_cast<uint16_t>(grad_hess & 0x0000ffff));
+        }
+      }
+
+      hc.Compress<int16_t, uint16_t>(
+        reinterpret_cast<const int16_t*>(data),
+        reinterpret_cast<uint8_t*>(buffer_.data()),
+        len / sizeof(int16_t) / 2);
+    }
+    len = static_cast<int>(buffer_[0] + sizeof(uint32_t) + (num_threads + 1) * sizeof(uint32_t));
+    data = reinterpret_cast<char*>(buffer_.data());
+    int send_cnt = 0;
+    while (send_cnt < len) {
+      send_cnt += linkers_[rank]->Send(data + send_cnt, len - send_cnt);
+    }
   }
 }
 
+template <bool USE_COMPRESS, int HIST_BITS>
 inline void Linkers::SendRecv(int send_rank, char* send_data, int send_len,
                               int recv_rank, char* recv_data, int recv_len) {
   auto start_time = std::chrono::high_resolution_clock::now();
   if (send_len < SocketConfig::kSocketBufferSize) {
     // if buffer is enough, send will non-blocking
-    Send(send_rank, send_data, send_len);
-    Recv(recv_rank, recv_data, recv_len);
+    Send<USE_COMPRESS, HIST_BITS>(send_rank, send_data, send_len);
+    Recv<USE_COMPRESS, HIST_BITS>(recv_rank, recv_data, recv_len);
   } else {
     // if buffer is not enough, use another thread to send, since send will be blocking
     std::thread send_worker(
       [this, send_rank, send_data, send_len]() {
-      Send(send_rank, send_data, send_len);
+      Send<USE_COMPRESS, HIST_BITS>(send_rank, send_data, send_len);
     });
-    Recv(recv_rank, recv_data, recv_len);
+    Recv<USE_COMPRESS, HIST_BITS>(recv_rank, recv_data, recv_len);
     send_worker.join();
   }
   // wait for send complete
