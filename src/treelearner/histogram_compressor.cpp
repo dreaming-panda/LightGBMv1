@@ -7,6 +7,8 @@
 #include <random>
 #include <chrono>
 
+int test_bin = 312;
+
 namespace LightGBM {
 
 HistogramCompressor::HistogramCompressor(const int num_threads) {
@@ -113,6 +115,8 @@ uint32_t HistogramCompressor::ComputeThreadHalfBytes(
     prev_hess = hess;
   }
   uint8_t one_byte = 0;
+  uint32_t grad_pos = 0;
+  uint8_t grad_offset = 0;
   for (; bin < end_bin; ++bin) {
     const data_size_t bin_offset = (bin << 1);
     const int32_t hess = static_cast<int32_t>(static_cast<U_HIST_T>(in_buffer[bin_offset]));
@@ -121,8 +125,8 @@ uint32_t HistogramCompressor::ComputeThreadHalfBytes(
     const uint8_t hess_offset = (bin_offset % 4) << 1;
     const int32_t grad = static_cast<int32_t>(in_buffer[bin_offset + 1]);
     const int32_t grad_diff = grad - prev_grad;
-    const uint32_t grad_pos = ((bin_offset + 1) / 4);
-    const uint8_t grad_offset = ((bin_offset + 1) % 4) << 1;
+    grad_pos = ((bin_offset + 1) / 4);
+    grad_offset = ((bin_offset + 1) % 4) << 1;
     const int32_t hess_diff_pos = hess_diff >= 0 ? hess_diff : ~hess_diff;
     uint8_t new_mask = (static_cast<uint8_t>(static_cast<bool>(hess_diff_pos & 0xfffffff8)) +
       static_cast<uint8_t>(static_cast<bool>(hess_diff_pos & 0xffffff80)) +
@@ -146,6 +150,9 @@ uint32_t HistogramCompressor::ComputeThreadHalfBytes(
     }
     prev_grad = grad;
     prev_hess = hess;
+  }
+  if (grad_offset != 6) {
+    out_bits_buffer[grad_pos] = one_byte;
   }
   return total_half_bytes;
 }
@@ -478,20 +485,20 @@ void HistogramCompressor::Decompress(const uint8_t* in_buffer, const uint8_t* in
 }
 
 void HistogramCompressor::Test() {
-  const size_t test_len = 500000;
+  const size_t test_len = 12424;
   std::vector<int16_t> int16_test_array(test_len * 2);
   std::mt19937 rand_eng(0);
-  const int16_t num_range = 10000;
+  const int16_t num_range = 100;
   std::vector<double> start_prob(num_range, 1.0f / num_range);
   std::discrete_distribution<int16_t> dist_start(start_prob.begin(), start_prob.end());
-  const int16_t diff_range = 40;
+  const int16_t diff_range = 100;
   std::vector<double> diff_prob(diff_range, 1.0f / diff_range);
   std::discrete_distribution<int16_t> dist_diff(diff_prob.begin(), diff_prob.end());
   int16_t grad = dist_start(rand_eng);
-  int16_t hess = std::abs(dist_diff(rand_eng));
+  int16_t hess = std::abs(dist_start(rand_eng));
   for (size_t i = 0; i < test_len; ++i) {
-    int16_t grad_diff = dist_diff(rand_eng) - 20;
-    int16_t hess_diff = dist_diff(rand_eng) - 20;
+    int16_t grad_diff = dist_diff(rand_eng) - 50;
+    int16_t hess_diff = dist_diff(rand_eng) - 50;
     int16_test_array[(i << 1) + 1] = grad;
     int16_test_array[(i << 1)] = hess;
     grad = grad + grad_diff;
@@ -510,11 +517,37 @@ void HistogramCompressor::Test() {
     global_timer.Stop("Decompress");
   }
   auto end = std::chrono::steady_clock::now();
+  std::vector<data_size_t> num_data_per_type(4);
+  for (size_t i = 0; i < test_len * 2; ++i) {
+    const size_t pos = (i / 4);
+    const uint8_t offset = ((i % 4) << 1);
+    ++num_data_per_type[(bits[pos] >> offset) & 0x03];
+  }
+  for (size_t i = 0; i < num_data_per_type.size(); ++i) {
+    Log::Warning("num_data_per_type[%d] = %d", i, num_data_per_type[i]);
+  }
   Log::Warning("compression and depression finished in %.10f seconds", static_cast<std::chrono::duration<double>>(end - start).count());
+  Log::Warning("finish decompress, total half bytes = %ld", thread_total_half_bytes_offset.back());
+  size_t total_bytes = thread_total_half_bytes_offset.back() / 2 + test_len / 2;
+  Log::Warning("compressed bytes = %ld", total_bytes);
+  Log::Warning("compress ratio = %f", static_cast<double>(total_bytes) / (2 * test_len * sizeof(int16_t)));
   for (size_t i = 0; i < test_len; ++i) {
-    //Log::Warning("i = %d, grad = %d, hess = %d, grad hat = %d, hess hat = %d",
-    //  i, int16_test_array[(i << 1) + 1], int16_test_array[(i << 1)],
-    //    result[(i << 1) + 1], result[(i << 1)]);
+    if (int16_test_array[(i << 1) + 1] != result[(i << 1) + 1] ||
+       int16_test_array[(i << 1)] != result[(i << 1)]) {
+      if (i > 1) {
+        Log::Warning("i = %d, grad = %d, hess = %d, grad hat = %d, hess hat = %d",
+        i - 2, int16_test_array[((i - 2) << 1) + 1], int16_test_array[((i - 2) << 1)],
+          result[((i - 2) << 1) + 1], result[((i - 2) << 1)]);
+      }
+      if (i > 0) {
+        Log::Warning("i = %d, grad = %d, hess = %d, grad hat = %d, hess hat = %d",
+        i - 1, int16_test_array[((i - 1) << 1) + 1], int16_test_array[((i - 1) << 1)],
+          result[((i - 1) << 1) + 1], result[((i - 1) << 1)]);
+      }
+      Log::Warning("i = %d, grad = %d, hess = %d, grad hat = %d, hess hat = %d",
+        i, int16_test_array[(i << 1) + 1], int16_test_array[(i << 1)],
+          result[(i << 1) + 1], result[(i << 1)]);
+    }
     CHECK_EQ(int16_test_array[(i << 1) + 1], result[(i << 1) + 1]);
     CHECK_EQ(static_cast<uint16_t>(int16_test_array[(i << 1)]), static_cast<uint16_t>(result[(i << 1)]));
   }
