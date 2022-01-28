@@ -282,28 +282,11 @@ inline void Linkers::Recv(int rank, char* data, int len) const {
         reinterpret_cast<const uint8_t*>(buffer_.data()),
         len / sizeof(int32_t) / 2,
         reinterpret_cast<int32_t*>(data));
-      {
-        const int num_bin = len / sizeof(int32_t) / 2;
-        const int64_t* hist_ptr = reinterpret_cast<const int64_t*>(data);
-        for (int bin = 0; bin < num_bin; ++bin) {
-          const int64_t grad_hess = hist_ptr[bin];
-          Log::Warning("receiving bin %d grad %d hess %d", bin, static_cast<int32_t>(grad_hess >> 32), static_cast<uint32_t>(grad_hess & 0x00000000ffffffff));
-        }
-      }
     } else if (HIST_BITS == 16) {
       hc.Decompress<int16_t, uint16_t>(
         reinterpret_cast<const uint8_t*>(buffer_.data()),
         len / sizeof(int16_t) / 2,
         reinterpret_cast<int16_t*>(data));
-
-      {
-        const int num_bin = len / sizeof(int16_t) / 2;
-        const int32_t* hist_ptr = reinterpret_cast<const int32_t*>(data);
-        for (int bin = 0; bin < num_bin; ++bin) {
-          const int32_t grad_hess = hist_ptr[bin];
-          Log::Warning("receiving bin %d grad %d hess %d", bin, static_cast<int16_t>(grad_hess >> 16), static_cast<uint16_t>(grad_hess & 0x0000ffff));
-        }
-      }
     }
   }
 }
@@ -323,29 +306,11 @@ inline void Linkers::Send(int rank, char* data, int len) const {
     const int num_threads = OMP_NUM_THREADS();
     HistogramCompressor hc(num_threads);
     if (HIST_BITS == 32) {
-      {
-        const int num_bin = len / sizeof(int32_t) / 2;
-        const int64_t* hist_ptr = reinterpret_cast<const int64_t*>(data);
-        for (int bin = 0; bin < num_bin; ++bin) {
-          const int64_t grad_hess = hist_ptr[bin];
-          Log::Warning("sending bin %d grad %d hess %d", bin, static_cast<int32_t>(grad_hess >> 32), static_cast<uint32_t>(grad_hess & 0x00000000ffffffff));
-        }
-      }
-
       hc.Compress<int32_t, uint32_t>(
         reinterpret_cast<const int32_t*>(data),
         reinterpret_cast<uint8_t*>(buffer_.data()),
         len / sizeof(int32_t) / 2);
     } else if (HIST_BITS == 16) {
-      {
-        const int num_bin = len / sizeof(int16_t) / 2;
-        const int32_t* hist_ptr = reinterpret_cast<const int32_t*>(data);
-        for (int bin = 0; bin < num_bin; ++bin) {
-          const int32_t grad_hess = hist_ptr[bin];
-          Log::Warning("sending bin %d grad %d hess %d", bin, static_cast<int16_t>(grad_hess >> 16), static_cast<uint16_t>(grad_hess & 0x0000ffff));
-        }
-      }
-
       hc.Compress<int16_t, uint16_t>(
         reinterpret_cast<const int16_t*>(data),
         reinterpret_cast<uint8_t*>(buffer_.data()),

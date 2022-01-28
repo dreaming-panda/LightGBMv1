@@ -1038,6 +1038,9 @@ struct Config {
   // desc = the presumed factor used to divide data on leaf into bins
   int per_bin_div = 100;
 
+  // desc = whether to compress the integer histograms in communications of distributed training
+  bool use_compressed_histogram_distributed = false;
+
   #pragma endregion
 
   #pragma endregion

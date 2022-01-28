@@ -1085,11 +1085,11 @@ void SerialTreeLearner::RenewIntGradTreeOutput(Tree* tree) const {
 
 void SerialTreeLearner::SetNumBitsInHistogramBin(const int left_leaf_index, const int right_leaf_index) {
   if (right_leaf_index == -1) {
-    //if (!config_->use_discretized_grad) {
+    if (!config_->use_discretized_grad) {
       leaf_num_bits_in_histogram_bin_[left_leaf_index] = 32;
       leaf_num_bits_in_histogram_acc_[left_leaf_index] = 32;
       return;
-    //}
+    }
     const data_size_t num_data_in_left_leaf = GetGlobalDataCountInLeaf(left_leaf_index);
     const uint64_t max_stat = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins);
     const uint64_t max_stat_per_bin = static_cast<uint64_t>(num_data_in_left_leaf) * static_cast<uint64_t>(config_->grad_discretize_bins)
@@ -1109,7 +1109,7 @@ void SerialTreeLearner::SetNumBitsInHistogramBin(const int left_leaf_index, cons
       leaf_num_bits_in_histogram_acc_[left_leaf_index] = 32;
     }
   } else {
-    //if (!config_->use_discretized_grad) {
+    if (!config_->use_discretized_grad) {
       node_num_bits_in_histogram_bin_[left_leaf_index] = 32;
       leaf_num_bits_in_histogram_bin_[left_leaf_index] = 32;
       leaf_num_bits_in_histogram_bin_[right_leaf_index] = 32;
@@ -1117,7 +1117,7 @@ void SerialTreeLearner::SetNumBitsInHistogramBin(const int left_leaf_index, cons
       leaf_num_bits_in_histogram_acc_[left_leaf_index] = 32;
       leaf_num_bits_in_histogram_acc_[right_leaf_index] = 32;
       return;
-    //}
+    }
     const data_size_t num_data_in_left_leaf =
       smaller_leaf_splits_->leaf_index() == left_leaf_index ?
         GetGlobalDataCountInLeaf(smaller_leaf_splits_->leaf_index()) :

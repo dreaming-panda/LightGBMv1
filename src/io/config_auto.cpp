@@ -307,6 +307,7 @@ const std::unordered_set<std::string>& Config::parameter_set() {
   "grad_discretize_bins",
   "discretized_grad_renew",
   "per_bin_div",
+  "use_compressed_histogram_distributed",
   "num_gpu",
   });
   return params;
@@ -643,6 +644,8 @@ void Config::GetMembersFromString(const std::unordered_map<std::string, std::str
 
   GetInt(params, "per_bin_div", &per_bin_div);
 
+  GetBool(params, "use_compressed_histogram_distributed", &use_compressed_histogram_distributed);
+
   GetInt(params, "num_gpu", &num_gpu);
   CHECK_GT(num_gpu, 0);
 }
@@ -758,6 +761,7 @@ std::string Config::SaveMembersToString() const {
   str_buf << "[grad_discretize_bins: " << grad_discretize_bins << "]\n";
   str_buf << "[discretized_grad_renew: " << discretized_grad_renew << "]\n";
   str_buf << "[per_bin_div: " << per_bin_div << "]\n";
+  str_buf << "[use_compressed_histogram_distributed: " << use_compressed_histogram_distributed << "]\n";
   str_buf << "[num_gpu: " << num_gpu << "]\n";
   return str_buf.str();
 }

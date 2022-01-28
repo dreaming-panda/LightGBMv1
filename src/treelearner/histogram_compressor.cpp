@@ -24,7 +24,7 @@ void HistogramCompressor::Compress(const S_HIST_T* in_buffer, uint8_t* out_buffe
   uint32_t* out_thread_info = reinterpret_cast<uint32_t*>(out_buffer + 4);
   out_buffer += 4 + 4 * (num_threads_ + 1);
   uint8_t* out_bits_buffer = (out_buffer) + 2 * num_bin * 8;
-  global_timer.Start("Compress::ComputeThreadHalfBytes");
+  global_timer.Start("HistogramCompressor::Compress::ComputeThreadHalfBytes");
   #pragma omp parallel for schedule(static) num_threads(num_threads_)
   for (uint32_t i = 0; i < total_size_out_bits_buffer; ++i) {
     out_bits_buffer[i] = 0;
@@ -48,8 +48,8 @@ void HistogramCompressor::Compress(const S_HIST_T* in_buffer, uint8_t* out_buffe
     }
     thread_total_half_bytes_offset_[thread_index + 1] += thread_total_half_bytes_offset_[thread_index];
   }
-  global_timer.Stop("Compress::ComputeThreadHalfBytes");
-  global_timer.Start("Compress::WriteThreadCompressedData");
+  global_timer.Stop("HistogramCompressor::Compress::ComputeThreadHalfBytes");
+  global_timer.Start("HistogramCompressor::Compress::WriteThreadCompressedData");
   #pragma omp parallel for schedule(static) num_threads(num_threads_)
   for (int thread_index = 0; thread_index < num_threads_; ++thread_index) {
     const data_size_t start = thread_index * block_size;
@@ -80,7 +80,7 @@ void HistogramCompressor::Compress(const S_HIST_T* in_buffer, uint8_t* out_buffe
     out_thread_info[thread_index] = thread_total_half_bytes_offset_[thread_index];
   }
   *out_len = (thread_total_half_bytes_offset_.back() + 1) / 2 + static_cast<uint32_t>(num_bytes_for_bits);
-  global_timer.Stop("Compress::WriteThreadCompressedData");
+  global_timer.Stop("HistogramCompressor::Compress::WriteThreadCompressedData");
 }
 
 template <typename S_HIST_T, typename U_HIST_T>
@@ -368,6 +368,7 @@ void HistogramCompressor::WriteThreadCompressedData(const S_HIST_T* in_buffer, c
 
 template <typename S_HIST_T, typename U_HIST_T>
 void HistogramCompressor::Decompress(const uint8_t* in_buffer, data_size_t num_bin, S_HIST_T* out_buffer) {
+  global_timer.Start("HistogramCompressor::Decompress");
   const data_size_t block_size = (num_bin + num_threads_ - 1) / num_threads_;
   const uint32_t* thread_total_half_bytes_offset = reinterpret_cast<const uint32_t*>(in_buffer + 4);
   in_buffer += 4;
@@ -502,6 +503,7 @@ void HistogramCompressor::Decompress(const uint8_t* in_buffer, data_size_t num_b
       out_buffer[bin_offset] = static_cast<U_HIST_T>(static_cast<U_HIST_T>(out_buffer[bin_offset]) + static_cast<U_HIST_T>(hess_offset));
     }
   }
+  global_timer.Stop("HistogramCompressor::Decompress");
 }
 
 template void HistogramCompressor::Compress<int32_t, uint32_t>(const int32_t* in_buffer, uint8_t* out_buffer, data_size_t num_bin);
