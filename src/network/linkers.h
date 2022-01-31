@@ -193,6 +193,7 @@ class Linkers {
   /*! \brief Local socket listener */
   std::unique_ptr<TcpSocket> listener_;
   mutable std::vector<uint32_t> buffer_;
+  mutable std::vector<uint32_t> send_buffer_;
   #endif  // USE_SOCKET
 };
 
@@ -255,26 +256,58 @@ template <bool USE_COMPRESS, int HIST_BITS>
 inline void Linkers::Recv(int rank, char* data, int len) const {
   if (!USE_COMPRESS) {
     int recv_cnt = 0;
+    if (HIST_BITS == -1) {
+      global_timer.Start("Recv time -1");
+    }
     while (recv_cnt < len) {
       recv_cnt += linkers_[rank]->Recv(data + recv_cnt,
         // len - recv_cnt
         std::min(len - recv_cnt, SocketConfig::kMaxReceiveSize));
     }
+    if (HIST_BITS == -1) {
+      global_timer.Stop("Recv time -1");
+    }
   } else {
-    const int num_threads = OMP_NUM_THREADS();
-    buffer_.resize(2 * len * 20);
-    linkers_[rank]->Recv(
-      reinterpret_cast<char*>(buffer_.data()),
-      // len - recv_cnt
-      std::min(4, SocketConfig::kMaxReceiveSize));
-    const int compressed_len = static_cast<int>(buffer_[0]) + (num_threads + 1) * sizeof(uint32_t);
+    int num_threads = OMP_NUM_THREADS();
+    //Log::Warning("in recv num_threads = %d", num_threads);
+    if (2 * static_cast<size_t>(len) * 20 > buffer_.size()) {
+      buffer_.resize(2 * len * 20);
+    }
     int recv_cnt = 0;
+    int header_len = sizeof(uint32_t) * 2;
+    global_timer.Start("Recv time");
+    while (recv_cnt < header_len) {
+      recv_cnt += linkers_[rank]->Recv(
+        reinterpret_cast<char*>(buffer_.data()) + recv_cnt,
+        // len - recv_cnt
+        std::min(header_len - recv_cnt, SocketConfig::kMaxReceiveSize));
+    }
+    num_threads = static_cast<int>(*(reinterpret_cast<const uint32_t*>(buffer_.data() + 1)));
+
+    //const uint32_t* count_ptr = reinterpret_cast<const uint32_t*>(buffer_.data());
+
+    int thread_info_len = sizeof(uint32_t) * (num_threads + 1);
+    recv_cnt = 0;
+    while (recv_cnt < thread_info_len) {
+      recv_cnt += linkers_[rank]->Recv(
+        reinterpret_cast<char*>(buffer_.data()) + header_len + recv_cnt,
+        // len - recv_cnt
+        std::min(thread_info_len - recv_cnt, SocketConfig::kMaxReceiveSize));
+    }
+
+    /*for (int i = 0; i < num_threads + 3; ++i) {
+      Log::Warning("recv count_ptr[%d] = %d", i, count_ptr[i]);
+    }*/
+
+    const int compressed_len = static_cast<int>(buffer_[0]);
+    recv_cnt = 0;
     while (recv_cnt < compressed_len) {
       recv_cnt += linkers_[rank]->Recv(
-        reinterpret_cast<char*>(buffer_.data() + 1),
+        reinterpret_cast<char*>(buffer_.data()) + header_len + thread_info_len + recv_cnt,
         // len - recv_cnt
         std::min(compressed_len - recv_cnt, SocketConfig::kMaxReceiveSize));
     }
+    global_timer.Stop("Recv time");
 
     HistogramCompressor hc(num_threads);
     if (HIST_BITS == 32) {
@@ -296,32 +329,55 @@ inline void Linkers::Send(int rank, char* data, int len) const {
   if (len <= 0) {
     return;
   }
-  if (!USE_COMPRESS) { 
+  if (!USE_COMPRESS) {
     int send_cnt = 0;
+    if (HIST_BITS == -1) {
+      global_timer.Start("Send time -1");
+    }
     while (send_cnt < len) {
       send_cnt += linkers_[rank]->Send(data + send_cnt, len - send_cnt);
     }
+    if (HIST_BITS == -1) {
+      global_timer.Stop("Send time -1");
+    }
   } else {
-    buffer_.resize(2 * len * 20);
-    const int num_threads = OMP_NUM_THREADS();
+    //Log::Warning("size = %ld", 2 * static_cast<size_t>(len) * 20);
+    if (2 * static_cast<size_t>(len) * 20 > send_buffer_.size()) {
+      send_buffer_.resize(2 * len * 20);
+    }
+    const int num_threads = 16;
+    //Log::Warning("in send num_threads = %d", num_threads);
     HistogramCompressor hc(num_threads);
     if (HIST_BITS == 32) {
       hc.Compress<int32_t, uint32_t>(
         reinterpret_cast<const int32_t*>(data),
-        reinterpret_cast<uint8_t*>(buffer_.data()),
+        reinterpret_cast<uint8_t*>(send_buffer_.data()),
         len / sizeof(int32_t) / 2);
     } else if (HIST_BITS == 16) {
       hc.Compress<int16_t, uint16_t>(
         reinterpret_cast<const int16_t*>(data),
-        reinterpret_cast<uint8_t*>(buffer_.data()),
+        reinterpret_cast<uint8_t*>(send_buffer_.data()),
         len / sizeof(int16_t) / 2);
+    } else {
+      Log::Fatal("Unknwon HIST_BITS = %d", HIST_BITS);
     }
-    len = static_cast<int>(buffer_[0] + sizeof(uint32_t) + (num_threads + 1) * sizeof(uint32_t));
-    data = reinterpret_cast<char*>(buffer_.data());
+    //const int old_len = len;
+    len = static_cast<int>(send_buffer_[0] + 2 * sizeof(uint32_t) + (num_threads + 1) * sizeof(uint32_t));
+    //Log::Warning("compress ratio = %f", static_cast<double>(len) / static_cast<double>(old_len));
+    data = reinterpret_cast<char*>(send_buffer_.data());
+
+    /*const uint32_t* count_ptr = reinterpret_cast<const uint32_t*>(send_buffer_.data());
+    for (int i = 0; i < num_threads + 3; ++i) {
+      Log::Warning("send count_ptr[%d] = %d", i, count_ptr[i]);
+    }*/
+
     int send_cnt = 0;
+    global_timer.Start("Send time");
+    //linkers_[rank]->Send(data, send_cnt);
     while (send_cnt < len) {
       send_cnt += linkers_[rank]->Send(data + send_cnt, len - send_cnt);
     }
+    global_timer.Stop("Send time");
   }
 }
 

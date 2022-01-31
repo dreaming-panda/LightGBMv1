@@ -263,6 +263,10 @@ template void Network::ReduceScatter<false, 0>(char* input, comm_size_t input_si
                             const comm_size_t* block_start, const comm_size_t* block_len, char* output,
                             comm_size_t output_size, const ReduceFunction& reducer);
 
+template void Network::ReduceScatter<false, -1>(char* input, comm_size_t input_size, int type_size,
+                            const comm_size_t* block_start, const comm_size_t* block_len, char* output,
+                            comm_size_t output_size, const ReduceFunction& reducer);
+
 template <bool USE_COMPRESS, int HIST_BITS>
 void Network::ReduceScatterRecursiveHalving(char* input, comm_size_t input_size, int type_size,
                                             const comm_size_t* block_start, const comm_size_t* block_len, char* output,
