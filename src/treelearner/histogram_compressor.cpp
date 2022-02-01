@@ -20,7 +20,6 @@ template <typename S_HIST_T, typename U_HIST_T>
 void HistogramCompressor::Compress(const S_HIST_T* in_buffer, uint8_t* out_buffer, data_size_t num_bin) {
   const data_size_t block_size = (num_bin + num_threads_ - 1) / num_threads_;
   const uint32_t total_size_out_bits_buffer = (num_bin * 2 + 3) / 4;
-  //const uint8_t* old_outer_buffer = out_buffer;
   uint32_t* out_len = reinterpret_cast<uint32_t*>(out_buffer);
   uint32_t* out_num_threads = reinterpret_cast<uint32_t*>(out_buffer + 4);
   uint32_t* out_thread_info = reinterpret_cast<uint32_t*>(out_buffer + 8);
@@ -83,12 +82,6 @@ void HistogramCompressor::Compress(const S_HIST_T* in_buffer, uint8_t* out_buffe
   }
   *out_len = (thread_total_half_bytes_offset_.back() + 1) / 2 + static_cast<uint32_t>(num_bytes_for_bits);
   *out_num_threads = static_cast<uint32_t>(num_threads_);
-  /*Log::Warning("out_len = %d", (thread_total_half_bytes_offset_.back() + 1) / 2 + static_cast<uint32_t>(num_bytes_for_bits));
-  Log::Warning("out_num_threads = %d", num_threads_);
-  const uint32_t* out_buffer_ptr = reinterpret_cast<const uint32_t*>(old_outer_buffer);
-  for (int i = 0; i < 19; ++i) {
-    Log::Warning("out_buffer_ptr[%d] = %d", i, out_buffer_ptr[i]);
-  }*/
   global_timer.Stop("HistogramCompressor::Compress::WriteThreadCompressedData");
 }
 
@@ -379,10 +372,6 @@ template <typename S_HIST_T, typename U_HIST_T>
 void HistogramCompressor::Decompress(const uint8_t* in_buffer, data_size_t num_bin, S_HIST_T* out_buffer) {
   global_timer.Start("HistogramCompressor::Decompress");
   const int num_threads = static_cast<int>(*reinterpret_cast<const uint32_t*>(in_buffer + 4));
-  /*const uint32_t* count_ptr = reinterpret_cast<const uint32_t*>(in_buffer);
-  for (int i = 0; i < 19; ++i) {
-    Log::Warning("in decompress count_ptr[%d] = %d", i, count_ptr[i]);
-  }*/
   num_threads_ = num_threads;
   const data_size_t block_size = (num_bin + num_threads_ - 1) / num_threads_;
   const uint32_t* thread_total_half_bytes_offset = reinterpret_cast<const uint32_t*>(in_buffer + 8);

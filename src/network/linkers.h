@@ -269,7 +269,6 @@ inline void Linkers::Recv(int rank, char* data, int len) const {
     }
   } else {
     int num_threads = OMP_NUM_THREADS();
-    //Log::Warning("in recv num_threads = %d", num_threads);
     if (2 * static_cast<size_t>(len) * 20 > buffer_.size()) {
       buffer_.resize(2 * len * 20);
     }
@@ -284,8 +283,6 @@ inline void Linkers::Recv(int rank, char* data, int len) const {
     }
     num_threads = static_cast<int>(*(reinterpret_cast<const uint32_t*>(buffer_.data() + 1)));
 
-    //const uint32_t* count_ptr = reinterpret_cast<const uint32_t*>(buffer_.data());
-
     int thread_info_len = sizeof(uint32_t) * (num_threads + 1);
     recv_cnt = 0;
     while (recv_cnt < thread_info_len) {
@@ -294,10 +291,6 @@ inline void Linkers::Recv(int rank, char* data, int len) const {
         // len - recv_cnt
         std::min(thread_info_len - recv_cnt, SocketConfig::kMaxReceiveSize));
     }
-
-    /*for (int i = 0; i < num_threads + 3; ++i) {
-      Log::Warning("recv count_ptr[%d] = %d", i, count_ptr[i]);
-    }*/
 
     const int compressed_len = static_cast<int>(buffer_[0]);
     recv_cnt = 0;
@@ -341,12 +334,10 @@ inline void Linkers::Send(int rank, char* data, int len) const {
       global_timer.Stop("Send time -1");
     }
   } else {
-    //Log::Warning("size = %ld", 2 * static_cast<size_t>(len) * 20);
     if (2 * static_cast<size_t>(len) * 20 > send_buffer_.size()) {
       send_buffer_.resize(2 * len * 20);
     }
     const int num_threads = 16;
-    //Log::Warning("in send num_threads = %d", num_threads);
     HistogramCompressor hc(num_threads);
     if (HIST_BITS == 32) {
       hc.Compress<int32_t, uint32_t>(
@@ -361,19 +352,11 @@ inline void Linkers::Send(int rank, char* data, int len) const {
     } else {
       Log::Fatal("Unknwon HIST_BITS = %d", HIST_BITS);
     }
-    //const int old_len = len;
     len = static_cast<int>(send_buffer_[0] + 2 * sizeof(uint32_t) + (num_threads + 1) * sizeof(uint32_t));
-    //Log::Warning("compress ratio = %f", static_cast<double>(len) / static_cast<double>(old_len));
     data = reinterpret_cast<char*>(send_buffer_.data());
-
-    /*const uint32_t* count_ptr = reinterpret_cast<const uint32_t*>(send_buffer_.data());
-    for (int i = 0; i < num_threads + 3; ++i) {
-      Log::Warning("send count_ptr[%d] = %d", i, count_ptr[i]);
-    }*/
 
     int send_cnt = 0;
     global_timer.Start("Send time");
-    //linkers_[rank]->Send(data, send_cnt);
     while (send_cnt < len) {
       send_cnt += linkers_[rank]->Send(data + send_cnt, len - send_cnt);
     }
