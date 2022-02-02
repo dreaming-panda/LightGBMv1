@@ -43,6 +43,22 @@ class HistogramCompressor {
   int num_threads_;
 };
 
+class HistogramCompressorV2 {
+ public:
+  HistogramCompressorV2(const int num_threads);
+
+  template <typename S_HIST_T, typename U_HIST_T>
+  void Compress(const S_HIST_T* in_buffer, uint32_t* int_buffer, uint8_t* out_buffer, data_size_t num_bin);
+
+  template <typename S_HIST_T, typename U_HIST_T>
+  void Decompress(const uint8_t* in_buffer, data_size_t num_bin, uint32_t* int_buffer, S_HIST_T* out_buffer);
+
+  void Test();
+
+ private:
+  int num_threads_;
+};
+
 }  // namespace LightGBM
 
 #endif  // LIGHTGBM_TREELEARNER_HISTOGRAM_COMPRESSOR_HPP_
