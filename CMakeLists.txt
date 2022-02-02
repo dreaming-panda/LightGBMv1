@@ -101,6 +101,10 @@ include_directories(${EIGEN_DIR})
 # See https://gitlab.com/libeigen/eigen/-/blob/master/COPYING.README
 ADD_DEFINITIONS(-DEIGEN_MPL2_ONLY)
 
+SET(FASTPFOR_DIR "${PROJECT_SOURCE_DIR}/external_libs/FastPFor")
+#include_directories((${FASTPFOR_DIR}/headers))
+add_subdirectory(${FASTPFOR_DIR})
+
 if(__BUILD_FOR_R)
     find_package(LibR REQUIRED)
     message(STATUS "LIBR_EXECUTABLE: ${LIBR_EXECUTABLE}")
@@ -421,6 +425,9 @@ if(USE_SWIG)
       COMMAND "${Java_JAR_EXECUTABLE}" -cf lightgbmlib.jar com)
   endif()
 endif(USE_SWIG)
+
+target_link_libraries(lightgbm ${FASTPFOR_DIR}/build/libFastPFOR.a)
+target_link_libraries(_lightgbm ${FASTPFOR_DIR}/build/libFastPFOR.a)
 
 if(USE_MPI)
   TARGET_LINK_LIBRARIES(lightgbm ${MPI_CXX_LIBRARIES})

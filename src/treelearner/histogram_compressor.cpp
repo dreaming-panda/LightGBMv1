@@ -6,8 +6,11 @@
 #include "histogram_compressor.hpp"
 #include <random>
 #include <chrono>
+#include "../external_libs/FastPFor/headers/codecfactory.h"
 
 namespace LightGBM {
+
+using namespace FastPForLib;
 
 HistogramCompressor::HistogramCompressor(const int num_threads) {
   num_threads_ = num_threads > 0 ? num_threads : OMP_NUM_THREADS();
@@ -584,6 +587,196 @@ void HistogramCompressor::Test() {
       CHECK_EQ(static_cast<uint16_t>(int16_test_array[(i << 1)]), static_cast<uint16_t>(result[(i << 1)]));
     }
   }
+  global_timer.Print();
+}
+
+HistogramCompressorV2::HistogramCompressorV2(const int num_threads) {
+  num_threads_ = num_threads;
+}
+
+template <typename S_HIST_T, typename U_HIST_T>
+void HistogramCompressorV2::Compress(const S_HIST_T* in_buffer, uint32_t* int_buffer, uint8_t* out_buffer, data_size_t num_bin) {
+  uint8_t* sign_bits = reinterpret_cast<uint8_t*>(int_buffer + 2 * num_bin);
+  const U_HIST_T* in_buffer_unsigned = reinterpret_cast<const U_HIST_T*>(in_buffer);
+  #pragma omp parallel for schedule(static) num_threads(num_threads_)
+  for (int bin = 0; bin < num_bin; ++bin) {
+    const int bin_offset = (bin << 1);
+    const int32_t grad_diff = bin == 0 ? static_cast<int32_t>(in_buffer[bin_offset + 1]) :
+      static_cast<int32_t>(in_buffer[bin_offset + 1]) - static_cast<int32_t>(in_buffer[bin_offset - 1]);
+    const int32_t hess_diff = bin == 0 ? static_cast<int32_t>(in_buffer_unsigned[bin_offset]) :
+      static_cast<int32_t>(in_buffer[bin_offset]) - static_cast<int32_t>(in_buffer[bin_offset - 2]);
+    if (grad_diff < 0) {
+      int_buffer[bin_offset + 1] = static_cast<uint32_t>(~grad_diff);
+      sign_bits[bin_offset + 1] = 1;
+    } else {
+      int_buffer[bin_offset + 1] = static_cast<uint32_t>(grad_diff);
+      sign_bits[bin_offset + 1] = 0;
+    }
+    if (hess_diff < 0) {
+      int_buffer[bin_offset] = static_cast<uint32_t>(~hess_diff);
+      sign_bits[bin_offset] = 1;
+    } else {
+      int_buffer[bin_offset] = static_cast<uint32_t>(hess_diff);
+      sign_bits[bin_offset] = 0;
+    }
+  }
+  IntegerCODEC &codec = *CODECFactory::getFromName("simdfastpfor256");
+  uint32_t* compressed_len_ptr = reinterpret_cast<uint32_t*>(out_buffer);
+  uint32_t* out_buffer_true = compressed_len_ptr + 1;
+  size_t compressed_len = static_cast<size_t>(2 * num_bin);
+  codec.encodeArray(int_buffer, 2 * num_bin, out_buffer_true, compressed_len);
+  *compressed_len_ptr = static_cast<uint32_t>(compressed_len);
+  uint8_t* out_sign_bits = reinterpret_cast<uint8_t*>(out_buffer_true + compressed_len);
+  #pragma omp parallel for schedule(static) num_threads(num_threads_)
+  for (int bin = 0; bin < 2 * num_bin; ++bin) {
+    out_sign_bits[bin] = sign_bits[bin];
+  }
+}
+
+template <typename S_HIST_T, typename U_HIST_T>
+void HistogramCompressorV2::Decompress(const uint8_t* in_buffer, data_size_t num_bin, uint32_t* int_buffer, S_HIST_T* out_buffer) {
+  const uint32_t* compressed_len_ptr = reinterpret_cast<const uint32_t*>(in_buffer);
+  const uint32_t* compressed_data = compressed_len_ptr + 1;
+  U_HIST_T* out_buffer_unsigned = reinterpret_cast<U_HIST_T*>(out_buffer);
+  const uint8_t* signed_bits = reinterpret_cast<const uint8_t*>(reinterpret_cast<const uint32_t*>(in_buffer) + (*compressed_len_ptr) + 1);
+  IntegerCODEC &codec = *CODECFactory::getFromName("simdfastpfor256");
+  size_t decompressed_len = 2 * static_cast<size_t>(num_bin);
+  codec.decodeArray(compressed_data, *compressed_len_ptr, int_buffer, decompressed_len);
+  const data_size_t block_size = (num_bin + num_threads_ - 1) / num_threads_;
+  #pragma omp parallel for schedule(static, 1) num_threads(num_threads_)
+  for (int thread_index = 0; thread_index < num_threads_; ++thread_index) {
+    const data_size_t block_start = thread_index * block_size;
+    const data_size_t block_end = std::min(block_start + block_size, num_bin);
+    const data_size_t bin_offset = (block_start << 1);
+    const uint8_t grad_signed_bit = signed_bits[bin_offset + 1];
+    const uint8_t hess_signed_bit = signed_bits[bin_offset];
+    const uint32_t unsigned_grad_diff = int_buffer[bin_offset + 1];
+    const uint32_t unsigned_hess_diff = int_buffer[bin_offset];
+    int32_t grad = (grad_signed_bit == 0 ? static_cast<int32_t>(unsigned_grad_diff) : static_cast<int32_t>(~unsigned_grad_diff));
+    int32_t hess = (hess_signed_bit == 0 ? static_cast<int32_t>(unsigned_hess_diff) : static_cast<int32_t>(~unsigned_hess_diff));
+    out_buffer[bin_offset] = hess;
+    out_buffer[bin_offset + 1] = grad;
+    for (data_size_t bin = block_start + 1; bin < block_end; ++bin) {
+      const data_size_t bin_offset = (bin << 1);
+      const uint8_t grad_signed_bit = signed_bits[bin_offset + 1];
+      const uint8_t hess_signed_bit = signed_bits[bin_offset];
+      const uint32_t unsigned_grad_diff = int_buffer[bin_offset + 1];
+      const uint32_t unsigned_hess_diff = int_buffer[bin_offset];
+      grad += (grad_signed_bit == 0 ? static_cast<int32_t>(unsigned_grad_diff) : static_cast<int32_t>(~unsigned_grad_diff));
+      hess += (hess_signed_bit == 0 ? static_cast<int32_t>(unsigned_hess_diff) : static_cast<int32_t>(~unsigned_hess_diff));
+      out_buffer[bin_offset] = hess;
+      out_buffer[bin_offset + 1] = grad;
+    }
+  }
+  std::vector<int32_t> thread_grad_base(num_threads_ + 1, 0);
+  std::vector<uint32_t> thread_hess_base(num_threads_ + 1, 0);
+  for (int thread_index = 1; thread_index < num_threads_ + 1; ++thread_index) {
+    const data_size_t start = (thread_index - 1) * block_size;
+    const data_size_t end = std::min(start + block_size, num_bin) - 1;
+    const data_size_t bin_offset = (end << 1);
+    thread_grad_base[thread_index] += thread_grad_base[thread_index - 1] + out_buffer[bin_offset + 1];
+    thread_hess_base[thread_index] += thread_hess_base[thread_index - 1] + out_buffer[bin_offset];
+  }
+  #pragma omp parallel for schedule(static, 1) num_threads(num_threads_)
+  for (int thread_index = 0; thread_index < num_threads_; ++thread_index) {
+    if (thread_index > 0) {
+      const data_size_t block_start = thread_index * block_size;
+      const data_size_t block_end = std::min(block_start + block_size, num_bin);
+      const S_HIST_T grad_base = thread_grad_base[thread_index];
+      const S_HIST_T hess_base = thread_hess_base[thread_index];
+      for (data_size_t bin = block_start; bin < block_end; ++bin) {
+        const data_size_t bin_offset = (bin << 1);
+        out_buffer_unsigned[bin_offset] = static_cast<U_HIST_T>(out_buffer[bin_offset] + hess_base);
+        out_buffer[bin_offset + 1] = out_buffer[bin_offset + 1] + grad_base;
+      }
+    }
+  }
+  /*for (int bin = 0; bin < num_bin; ++bin) {
+    const int bin_offset = (bin << 1);
+    const uint32_t unsigned_grad_diff = int_buffer[bin_offset + 1];
+    const uint8_t grad_signed_bit = signed_bits[bin_offset + 1];
+    if (grad_signed_bit == 1) {
+      out_buffer[bin_offset + 1] = static_cast<S_HIST_T>(~unsigned_grad_diff);
+    } else {
+      out_buffer[bin_offset + 1] = static_cast<S_HIST_T>(unsigned_grad_diff);
+    }
+    const uint32_t unsigned_hess_diff = int_buffer[bin_offset];
+    const uint8_t hess_signed_bit = signed_bits[bin_offset];
+    if (hess_signed_bit == 1) {
+      out_buffer[bin_offset] = static_cast<S_HIST_T>(~unsigned_hess_diff);
+    } else {
+      out_buffer[bin_offset] = static_cast<S_HIST_T>(unsigned_hess_diff);
+    }
+  }*/
+  if (decompressed_len != 2 * static_cast<size_t>(num_bin)) {
+    Log::Warning("decompressed_len = %d, 2 * num_bin = %d", decompressed_len, 2 * num_bin);
+  }
+  CHECK_EQ(decompressed_len, 2 * static_cast<size_t>(num_bin));
+}
+
+template void HistogramCompressorV2::Compress<int32_t, uint32_t>(const int32_t* in_buffer, uint32_t* int_buffer, uint8_t* out_buffer, data_size_t num_bin);
+
+template void HistogramCompressorV2::Compress<int16_t, uint16_t>(const int16_t* in_buffer, uint32_t* int_buffer, uint8_t* out_buffer, data_size_t num_bin);
+
+template void HistogramCompressorV2::Decompress<int32_t, uint32_t>(const uint8_t* in_buffer, data_size_t num_bin, uint32_t* int_buffer, int32_t* out_buffer);
+
+template void HistogramCompressorV2::Decompress<int16_t, uint16_t>(const uint8_t* in_buffer, data_size_t num_bin, uint32_t* int_buffer, int16_t* out_buffer);
+
+void HistogramCompressorV2::Test() {
+  const size_t test_len = 500000;
+  std::vector<int16_t> int16_test_array(test_len * 2);
+  std::mt19937 rand_eng(0);
+  const int16_t num_range = 100;
+  std::vector<double> start_prob(num_range, 1.0f / num_range);
+  std::discrete_distribution<int16_t> dist_start(start_prob.begin(), start_prob.end());
+  const int16_t diff_range = 100;
+  std::vector<double> diff_prob(diff_range, 1.0f / diff_range);
+  std::discrete_distribution<int16_t> dist_diff(diff_prob.begin(), diff_prob.end());
+  std::vector<uint8_t> out_buffer(test_len * 2 * 20, 0);
+  std::vector<uint32_t> int_buffer(test_len * 2 * 20, 0);
+  std::vector<int16_t> result(test_len * 2, 0);
+    int16_t grad = dist_start(rand_eng);
+    int16_t hess = std::abs(dist_start(rand_eng));
+    for (size_t i = 0; i < test_len; ++i) {
+      int16_t grad_diff = dist_diff(rand_eng) - 50;
+      int16_t hess_diff = dist_diff(rand_eng) - 50;
+      int16_test_array[(i << 1) + 1] = grad;
+      int16_test_array[(i << 1)] = hess;
+      grad = grad + grad_diff;
+      hess = std::abs(hess + hess_diff);
+    }
+  auto start = std::chrono::steady_clock::now();
+  for (int i = 0; i < 6000; ++i) {
+    Compress<int16_t, uint16_t>(int16_test_array.data(), int_buffer.data(), out_buffer.data(), test_len);
+    global_timer.Start("Decompress");
+    Decompress<int16_t, uint16_t>(out_buffer.data(), static_cast<data_size_t>(test_len), int_buffer.data(), result.data());
+    global_timer.Stop("Decompress");
+  }
+    auto end = std::chrono::steady_clock::now();
+    Log::Warning("compression and depression finished in %.10f seconds", static_cast<std::chrono::duration<double>>(end - start).count());
+    const size_t total_bytes = static_cast<size_t>(*(reinterpret_cast<const uint32_t*>(out_buffer.data())));
+    Log::Warning("compressed bytes = %ld", total_bytes);
+    Log::Warning("compress ratio = %f", static_cast<double>(total_bytes) * sizeof(uint32_t) / (2 * test_len * sizeof(int16_t)));
+    for (size_t i = 0; i < test_len; ++i) {
+      if (int16_test_array[(i << 1) + 1] != result[(i << 1) + 1] ||
+        int16_test_array[(i << 1)] != result[(i << 1)]) {
+        if (i > 1) {
+          Log::Warning("i = %d, grad = %d, hess = %d, grad hat = %d, hess hat = %d",
+          i - 2, int16_test_array[((i - 2) << 1) + 1], int16_test_array[((i - 2) << 1)],
+            result[((i - 2) << 1) + 1], result[((i - 2) << 1)]);
+        }
+        if (i > 0) {
+          Log::Warning("i = %d, grad = %d, hess = %d, grad hat = %d, hess hat = %d",
+          i - 1, int16_test_array[((i - 1) << 1) + 1], int16_test_array[((i - 1) << 1)],
+            result[((i - 1) << 1) + 1], result[((i - 1) << 1)]);
+        }
+        Log::Warning("i = %d, grad = %d, hess = %d, grad hat = %d, hess hat = %d",
+          i, int16_test_array[(i << 1) + 1], int16_test_array[(i << 1)],
+            result[(i << 1) + 1], result[(i << 1)]);
+      }
+      CHECK_EQ(int16_test_array[(i << 1) + 1], result[(i << 1) + 1]);
+      CHECK_EQ(static_cast<uint16_t>(int16_test_array[(i << 1)]), static_cast<uint16_t>(result[(i << 1)]));
+    }
   global_timer.Print();
 }
 
