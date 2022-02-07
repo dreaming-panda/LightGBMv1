@@ -224,16 +224,26 @@ Tree* CUDASingleGPUTreeLearner::Train(const score_t* gradients,
     }
     global_timer.Stop("CUDASingleGPUTreeLearner::NCCLReduceHistogram", nccl_thread_index_);
 
+    uint8_t parent_num_bits_bin = 0;
+    uint8_t smaller_num_bits_bin = 0;
+    uint8_t larger_num_bits_bin = 0;
     if (larger_leaf_index_ != -1) {
       const int parent_leaf_index = std::min(smaller_leaf_index_, larger_leaf_index_);
-      cuda_histogram_constructor_->SubtractHistogramForLeaf(
-        cuda_smaller_leaf_splits_->GetCUDAStruct(),
-        cuda_larger_leaf_splits_->GetCUDAStruct(),
-        config_->use_discretized_grad,
-        node_num_bits_in_histogram_bin_[parent_leaf_index],
-        leaf_num_bits_in_histogram_bin_[smaller_leaf_index_],
-        leaf_num_bits_in_histogram_bin_[larger_leaf_index_]);
+      parent_num_bits_bin = node_num_bits_in_histogram_bin_[parent_leaf_index];
+      smaller_num_bits_bin = leaf_num_bits_in_histogram_bin_[smaller_leaf_index_];
+      larger_num_bits_bin = leaf_num_bits_in_histogram_bin_[larger_leaf_index_];
+    } else {
+      parent_num_bits_bin = leaf_num_bits_in_histogram_bin_[0];
+      smaller_num_bits_bin = leaf_num_bits_in_histogram_bin_[0];
+      larger_num_bits_bin = leaf_num_bits_in_histogram_bin_[0];
     }
+    cuda_histogram_constructor_->SubtractHistogramForLeaf(
+      cuda_smaller_leaf_splits_->GetCUDAStruct(),
+      cuda_larger_leaf_splits_->GetCUDAStruct(),
+      config_->use_discretized_grad,
+      parent_num_bits_bin,
+      smaller_num_bits_bin,
+      larger_num_bits_bin);
 
     global_timer.Start("CUDASingleGPUTreeLearner::FindBestSplitsForLeaf", nccl_thread_index_);
     const uint8_t smaller_leaf_num_bits_bin = leaf_num_bits_in_histogram_bin_[smaller_leaf_index_];
