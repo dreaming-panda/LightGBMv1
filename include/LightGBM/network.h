@@ -13,6 +13,8 @@
 #include <memory>
 #include <vector>
 
+#include "../src/treelearner/histogram_compressor.hpp"
+
 namespace LightGBM {
 
 /*! \brief forward declaration */
@@ -313,6 +315,7 @@ class Network {
   /*! \brief Funcs*/
   static THREAD_LOCAL ReduceScatterFunction reduce_scatter_ext_fun_;
   static THREAD_LOCAL AllgatherFunction allgather_ext_fun_;
+  static std::unique_ptr<HistogramCompressorV3> histogram_compressor_;
 };
 
 }  // namespace LightGBM

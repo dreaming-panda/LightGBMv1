@@ -192,10 +192,6 @@ class Linkers {
   std::vector<std::unique_ptr<TcpSocket>> linkers_;
   /*! \brief Local socket listener */
   std::unique_ptr<TcpSocket> listener_;
-  mutable std::vector<uint32_t> buffer_;
-  mutable std::vector<uint32_t> int_buffer_;
-  mutable std::vector<uint32_t> send_buffer_;
-  mutable std::vector<uint32_t> int_send_buffer_;
   #endif  // USE_SOCKET
 };
 
@@ -270,48 +266,25 @@ inline void Linkers::Recv(int rank, char* data, int len) const {
       global_timer.Stop("Recv time -1");
     }
   } else {
-    int num_threads = OMP_NUM_THREADS();
-    if (2 * static_cast<size_t>(len) * 20 > buffer_.size()) {
-      buffer_.resize(2 * len * 20);
-      int_buffer_.resize(2 * len * 20);
-    }
-    const int num_bin = HIST_BITS == 32 ?
-      static_cast<int>(len / sizeof(int32_t) / 2) :
-      static_cast<int>(len / sizeof(int16_t) / 2);
     int recv_cnt = 0;
     int header_len = sizeof(uint32_t);
     global_timer.Start("Recv time");
     while (recv_cnt < header_len) {
       recv_cnt += linkers_[rank]->Recv(
-        reinterpret_cast<char*>(buffer_.data()) + recv_cnt,
+        data + recv_cnt,
         // len - recv_cnt
         std::min(header_len - recv_cnt, SocketConfig::kMaxReceiveSize));
     }
 
-    const int compressed_len = static_cast<int>(buffer_[0]) * sizeof(uint32_t) + num_bin * 2 * sizeof(uint8_t);
+    const int compressed_len = static_cast<int>((reinterpret_cast<const uint32_t*>(data))[0]);
     recv_cnt = 0;
     while (recv_cnt < compressed_len) {
       recv_cnt += linkers_[rank]->Recv(
-        reinterpret_cast<char*>(buffer_.data()) + header_len + recv_cnt,
+        data + header_len + recv_cnt,
         // len - recv_cnt
         std::min(compressed_len - recv_cnt, SocketConfig::kMaxReceiveSize));
     }
     global_timer.Stop("Recv time");
-
-    HistogramCompressorV2 hc(num_threads);
-    if (HIST_BITS == 32) {
-      hc.Decompress<int32_t, uint32_t>(
-        reinterpret_cast<const uint8_t*>(buffer_.data()),
-        len / sizeof(int32_t) / 2,
-        int_buffer_.data(),
-        reinterpret_cast<int32_t*>(data));
-    } else if (HIST_BITS == 16) {
-      hc.Decompress<int16_t, uint16_t>(
-        reinterpret_cast<const uint8_t*>(buffer_.data()),
-        len / sizeof(int16_t) / 2,
-        int_buffer_.data(),
-        reinterpret_cast<int16_t*>(data));
-    }
   }
 }
 
@@ -320,51 +293,15 @@ inline void Linkers::Send(int rank, char* data, int len) const {
   if (len <= 0) {
     return;
   }
-  if (!USE_COMPRESS) {
-    int send_cnt = 0;
-    if (HIST_BITS == -1) {
-      global_timer.Start("Send time -1");
-    }
-    while (send_cnt < len) {
-      send_cnt += linkers_[rank]->Send(data + send_cnt, len - send_cnt);
-    }
-    if (HIST_BITS == -1) {
-      global_timer.Stop("Send time -1");
-    }
-  } else {
-    if (2 * static_cast<size_t>(len) * 20 > send_buffer_.size()) {
-      send_buffer_.resize(2 * len * 20);
-      int_send_buffer_.resize(2 * len * 20);
-    }
-    const int num_threads = 16;
-    HistogramCompressorV2 hc(num_threads);
-    const int num_bin = HIST_BITS == 32 ?
-      static_cast<int>(len / sizeof(int32_t) / 2) :
-      static_cast<int>(len / sizeof(int16_t) / 2);
-    if (HIST_BITS == 32) {
-      hc.Compress<int32_t, uint32_t>(
-        reinterpret_cast<const int32_t*>(data),
-        int_send_buffer_.data(),
-        reinterpret_cast<uint8_t*>(send_buffer_.data()),
-        len / sizeof(int32_t) / 2);
-    } else if (HIST_BITS == 16) {
-      hc.Compress<int16_t, uint16_t>(
-        reinterpret_cast<const int16_t*>(data),
-        int_send_buffer_.data(),
-        reinterpret_cast<uint8_t*>(send_buffer_.data()),
-        len / sizeof(int16_t) / 2);
-    } else {
-      Log::Fatal("Unknwon HIST_BITS = %d", HIST_BITS);
-    }
-    len = static_cast<int>(send_buffer_[0] * sizeof(uint32_t) + num_bin * 2 * sizeof(uint8_t) + sizeof(uint32_t));
-    data = reinterpret_cast<char*>(send_buffer_.data());
-
-    int send_cnt = 0;
-    global_timer.Start("Send time");
-    while (send_cnt < len) {
-      send_cnt += linkers_[rank]->Send(data + send_cnt, len - send_cnt);
-    }
-    global_timer.Stop("Send time");
+  int send_cnt = 0;
+  if (HIST_BITS == -1) {
+    global_timer.Start("Send time -1");
+  }
+  while (send_cnt < len) {
+    send_cnt += linkers_[rank]->Send(data + send_cnt, len - send_cnt);
+  }
+  if (HIST_BITS == -1) {
+    global_timer.Stop("Send time -1");
   }
 }
 
