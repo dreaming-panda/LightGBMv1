@@ -89,6 +89,7 @@ class CUDAGradientDiscretizer: public GradientDiscretizer {
     CopyFromHostToCUDADevice<score_t>(gradient_random_values_.RawData(), gradient_random_values.data(), gradient_random_values.size(), __FILE__, __LINE__);
     CopyFromHostToCUDADevice<score_t>(hessian_random_values_.RawData(), hessian_random_values.data(), hessian_random_values.size(), __FILE__, __LINE__);
     CopyFromHostToCUDADevice<int>(random_values_use_start_.RawData(), random_values_use_start.data(), random_values_use_start.size(), __FILE__, __LINE__);
+    iter_ = 0;
   }
 
  protected:
@@ -102,7 +103,6 @@ class CUDAGradientDiscretizer: public GradientDiscretizer {
   CUDAVector<score_t> gradient_random_values_;
   CUDAVector<score_t> hessian_random_values_;
   int num_reduce_blocks_;
-  int grad_discretize_bins_;
   int iter_;
   int num_trees_;
   int random_seed_;

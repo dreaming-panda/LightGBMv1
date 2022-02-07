@@ -79,8 +79,10 @@ void GradientDiscretizer::DiscretizeGradients(
         max_hessian = thread_max_hessian[thread_id];
       }
     }
-    max_gradient = Network::GlobalSyncUpByMax(max_gradient);
-    max_hessian = Network::GlobalSyncUpByMax(max_hessian);
+    if (Network::num_machines() > 1) {
+      max_gradient = Network::GlobalSyncUpByMax(max_gradient);
+      max_hessian = Network::GlobalSyncUpByMax(max_hessian);
+    }
     // TODO(shiyu1994): fix this for more objectives
     if (max_gradient >= 0.99f && max_hessian >= 0.248f && can_lock_) {
       boundary_locked_ = true;
