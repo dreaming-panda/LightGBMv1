@@ -57,7 +57,6 @@ void Network::Init(int num_machines, int rank,
     reduce_scatter_ext_fun_ = reduce_scatter_ext_fun;
     allgather_ext_fun_ = allgather_ext_fun;
     Log::Info("Local rank: %d, total number of machines: %d", rank_, num_machines_);
-    Log::Warning("error !!! unexpected init");
   }
 }
 
@@ -282,12 +281,11 @@ void Network::ReduceScatterRecursiveHalving(char* input, comm_size_t input_size,
       // send local data to neighbor first
       if (HIST_BITS == 16) {
         histogram_compressor_->Compress<int16_t, uint16_t>(input, input_size / sizeof(int16_t) / 2);
+        input_size = static_cast<comm_size_t>(reinterpret_cast<const uint32_t*>(input)[0]);
       } else if (HIST_BITS == 32) {
         histogram_compressor_->Compress<int32_t, uint32_t>(input, input_size / sizeof(int32_t) / 2);
-      } else {
-        Log::Fatal("Unknown HIST_BITS = %d", HIST_BITS);
+        input_size = static_cast<comm_size_t>(reinterpret_cast<const uint32_t*>(input)[0]);
       }
-      input_size = static_cast<comm_size_t>(reinterpret_cast<const uint32_t*>(input)[0]);
       linkers_->Send<USE_COMPRESS, HIST_BITS>(recursive_halving_map_.neighbor, input, input_size);
     } else if (recursive_halving_map_.type == RecursiveHalvingNodeType::GroupLeader) {
       // receive neighbor data first
@@ -297,8 +295,6 @@ void Network::ReduceScatterRecursiveHalving(char* input, comm_size_t input_size,
         histogram_compressor_->Decompress<int16_t, uint16_t>(output, need_recv_cnt / sizeof(int16_t) / 2);
       } else if (HIST_BITS == 32) {
         histogram_compressor_->Decompress<int32_t, uint32_t>(output, need_recv_cnt / sizeof(int32_t) / 2);
-      } else {
-        Log::Fatal("Unknown HIST_BITS = %d", HIST_BITS);
       }
       // reduce
       global_timer.Start("ReduceScatterRecursiveHalving::reduce");
@@ -325,19 +321,28 @@ void Network::ReduceScatterRecursiveHalving(char* input, comm_size_t input_size,
       // send and recv at same time
       if (HIST_BITS == 16) {
         histogram_compressor_->Compress<int16_t, uint16_t>(input + block_start[send_block_start], send_size / sizeof(int16_t) / 2);
+        send_size = static_cast<comm_size_t>(reinterpret_cast<const uint32_t*>(input + block_start[send_block_start])[0]);
       } else if (HIST_BITS == 32) {
+        /*const int32_t* grads = reinterpret_cast<const int32_t*>(input + block_start[send_block_start]);
+        const uint32_t* hesss = reinterpret_cast<const uint32_t*>(input + block_start[send_block_start]);
+        for (int bin = 0; bin < static_cast<int>(send_size / sizeof(int32_t) / 2); ++bin) {
+          const int bin_offset = (bin << 1);
+          Log::Warning("sending bin %d grad %d, hess %d", bin, grads[bin_offset + 1], hesss[bin_offset]);
+        }*/
         histogram_compressor_->Compress<int32_t, uint32_t>(input + block_start[send_block_start], send_size / sizeof(int32_t) / 2);
-      } else {
-        Log::Fatal("Unknown HIST_BITS = %d", HIST_BITS);
+        send_size = static_cast<comm_size_t>(reinterpret_cast<const uint32_t*>(input + block_start[send_block_start])[0]);
       }
-      send_size = static_cast<comm_size_t>(reinterpret_cast<const uint32_t*>(input)[0]);
       linkers_->SendRecv<USE_COMPRESS, HIST_BITS>(target, input + block_start[send_block_start], send_size, target, output, need_recv_cnt);
       if (HIST_BITS == 16) {
         histogram_compressor_->Decompress<int16_t, uint16_t>(output, need_recv_cnt / sizeof(int16_t) / 2);
       } else if (HIST_BITS == 32) {
         histogram_compressor_->Decompress<int32_t, uint32_t>(output, need_recv_cnt / sizeof(int32_t) / 2);
-      } else {
-        Log::Fatal("Unknown HIST_BITS = %d", HIST_BITS);
+        /*const int32_t* grads = reinterpret_cast<const int32_t*>(output);
+        const uint32_t* hesss = reinterpret_cast<const uint32_t*>(output);
+        for (int bin = 0; bin < static_cast<int>(need_recv_cnt / sizeof(int32_t) / 2); ++bin) {
+          const int bin_offset = (bin << 1);
+          Log::Warning("receiving bin %d grad %d, hess %d", bin, grads[bin_offset + 1], hesss[bin_offset]);
+        }*/
       }
       // reduce
       global_timer.Start("ReduceScatterRecursiveHalving::reduce");
@@ -348,14 +353,14 @@ void Network::ReduceScatterRecursiveHalving(char* input, comm_size_t input_size,
   if (!recursive_halving_map_.is_power_of_2) {
     if (recursive_halving_map_.type == RecursiveHalvingNodeType::GroupLeader) {
       // send result to neighbor
+      comm_size_t send_size = block_len[recursive_halving_map_.neighbor];
       if (HIST_BITS == 16) {
         histogram_compressor_->Compress<int16_t, uint16_t>(input + block_start[recursive_halving_map_.neighbor], block_len[recursive_halving_map_.neighbor] / sizeof(int16_t) / 2);
+        send_size = static_cast<comm_size_t>(reinterpret_cast<const uint32_t*>(input + block_start[recursive_halving_map_.neighbor])[0]);
       } else if (HIST_BITS == 32) {
         histogram_compressor_->Compress<int32_t, uint32_t>(input + block_start[recursive_halving_map_.neighbor], block_len[recursive_halving_map_.neighbor] / sizeof(int32_t) / 2);
-      } else {
-        Log::Fatal("Unknown HIST_BITS = %d", HIST_BITS);
+        send_size = static_cast<comm_size_t>(reinterpret_cast<const uint32_t*>(input + block_start[recursive_halving_map_.neighbor])[0]);
       }
-      comm_size_t send_size = static_cast<comm_size_t>(reinterpret_cast<const uint32_t*>(input)[0]);
       linkers_->Send<USE_COMPRESS, HIST_BITS>(recursive_halving_map_.neighbor,
                      input + block_start[recursive_halving_map_.neighbor],
                      send_size);
@@ -367,8 +372,6 @@ void Network::ReduceScatterRecursiveHalving(char* input, comm_size_t input_size,
         histogram_compressor_->Decompress<int16_t, uint16_t>(output, need_recv_cnt / sizeof(int16_t) / 2);
       } else if (HIST_BITS == 32) {
         histogram_compressor_->Decompress<int32_t, uint32_t>(output, need_recv_cnt / sizeof(int32_t) / 2);
-      } else {
-        Log::Fatal("Unknown HIST_BITS = %d", HIST_BITS);
       }
       return;
     }
@@ -386,21 +389,20 @@ void Network::ReduceScatterRing(char* input, comm_size_t, int type_size,
   int out_block = in_rank;
   int in_block = (in_rank - 1 + num_machines_) % num_machines_;
   for (int i = 1; i < num_machines_; ++i) {
+    comm_size_t send_size = block_len[out_block];
     if (HIST_BITS == 16) {
       histogram_compressor_->Compress<int16_t, uint16_t>(input + block_start[out_block], block_len[out_block] / sizeof(int16_t) / 2);
+      send_size = static_cast<comm_size_t>(reinterpret_cast<const uint32_t*>(input + block_start[out_block])[0]);
     } else if (HIST_BITS == 32) {
       histogram_compressor_->Compress<int32_t, uint32_t>(input + block_start[out_block], block_len[out_block] / sizeof(int32_t) / 2);
-    } else {
-      Log::Fatal("Unknown HIST_BITS = %d", HIST_BITS);
+      send_size = static_cast<comm_size_t>(reinterpret_cast<const uint32_t*>(input + block_start[out_block])[0]);
     }
-    linkers_->SendRecv<USE_COMPRESS, HIST_BITS>(out_rank, input + block_start[out_block], block_len[out_block],
+    linkers_->SendRecv<USE_COMPRESS, HIST_BITS>(out_rank, input + block_start[out_block], send_size,
                        in_rank, output, block_len[in_block]);
     if (HIST_BITS == 16) {
       histogram_compressor_->Decompress<int16_t, uint16_t>(output, block_len[in_block] / sizeof(int16_t) / 2);
     } else if (HIST_BITS == 32) {
       histogram_compressor_->Decompress<int32_t, uint32_t>(output, block_len[in_block] / sizeof(int32_t) / 2);
-    } else {
-      Log::Fatal("Unknown HIST_BITS = %d", HIST_BITS);
     }
     global_timer.Start("ReduceScatterRing::reduce");
     reducer(output, input + block_start[in_block], type_size, block_len[in_block]);

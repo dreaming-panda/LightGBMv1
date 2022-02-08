@@ -87,11 +87,9 @@ class DataParallelTreeLearner: public TREELEARNER_T {
   /*! \brief Number of machines of this parallel task */
   int num_machines_;
   /*! \brief Buffer for network send */
-  std::vector<uint32_t> input_buffer_;
-  char* input_buffer_ptr_;
+  std::vector<char, Common::AlignmentAllocator<uint32_t, 32>> input_buffer_;
   /*! \brief Buffer for network receive */
-  std::vector<uint32_t> output_buffer_;
-  char* output_buffer_ptr_;
+  std::vector<char, Common::AlignmentAllocator<uint32_t, 32>> output_buffer_;
   /*! \brief different machines will aggregate histograms for different features,
        use this to mark local aggregate features*/
   std::vector<bool> is_feature_aggregated_;
@@ -209,12 +207,12 @@ class VotingParallelTreeLearner: public TREELEARNER_T {
 };
 
 // To-do: reduce the communication cost by using bitset to communicate.
-inline void SyncUpGlobalBestSplit(char* input_buffer_, char* output_buffer_, SplitInfo* smaller_best_split, SplitInfo* larger_best_split, int max_cat_threshold) {
+inline void SyncUpGlobalBestSplit(char* input_buffer, char* output_buffer, SplitInfo* smaller_best_split, SplitInfo* larger_best_split, int max_cat_threshold) {
   // sync global best info
   int size = SplitInfo::Size(max_cat_threshold);
-  smaller_best_split->CopyTo(input_buffer_);
-  larger_best_split->CopyTo(input_buffer_ + size);
-  Network::Allreduce(input_buffer_, size * 2, size, output_buffer_,
+  smaller_best_split->CopyTo(input_buffer);
+  larger_best_split->CopyTo(input_buffer + size);
+  Network::Allreduce(input_buffer, size * 2, size, output_buffer,
                      [] (const char* src, char* dst, int size, comm_size_t len) {
     comm_size_t used_size = 0;
     LightSplitInfo p1, p2;
@@ -230,8 +228,8 @@ inline void SyncUpGlobalBestSplit(char* input_buffer_, char* output_buffer_, Spl
     }
   });
   // copy back
-  smaller_best_split->CopyFrom(output_buffer_);
-  larger_best_split->CopyFrom(output_buffer_ + size);
+  smaller_best_split->CopyFrom(output_buffer);
+  larger_best_split->CopyFrom(output_buffer + size);
 }
 
 }  // namespace LightGBM

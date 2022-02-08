@@ -73,7 +73,7 @@ class HistogramCompressorV3 {
 
  private:
   int num_threads_;
-  std::vector<uint32_t> diff_buffer_;
+  std::vector<uint32_t, Common::AlignmentAllocator<uint32_t, 32>> diff_buffer_;
   std::vector<uint8_t> bit_buffer_;
   std::vector<uint8_t> thread_end_bit_buffer_;
   std::vector<uint32_t> thread_diff_encode_offset_;

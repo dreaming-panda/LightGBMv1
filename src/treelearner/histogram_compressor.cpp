@@ -788,6 +788,7 @@ HistogramCompressorV3::HistogramCompressorV3(const int num_threads) {
 
 template <typename S_HIST_T, typename U_HIST_T>
 void HistogramCompressorV3::Compress(char* in_buffer, data_size_t num_bin) {
+  global_timer.Start("HistogramCompressorV3::Compress");
   if (diff_buffer_.size() < static_cast<size_t>(2 * num_bin)) {
     diff_buffer_.resize(2 * num_bin, 0);
     encode_buffer_.resize(2 * num_bin, 0);
@@ -798,11 +799,17 @@ void HistogramCompressorV3::Compress(char* in_buffer, data_size_t num_bin) {
   }
   S_HIST_T* in_buffer_signed = reinterpret_cast<S_HIST_T*>(in_buffer);
   const U_HIST_T* in_buffer_unsigend = reinterpret_cast<const U_HIST_T*>(in_buffer);
-  const int block_size = (num_bin + num_threads_ - 1) / num_threads_;
+  int block_size = (num_bin + num_threads_ - 1) / num_threads_;
+  // block_size must be even to use simdfastpfor256
+  block_size += (block_size % 2);
   #pragma omp parallel for schedule(static, 1) num_threads(num_threads_)
   for (int thread_index = 0; thread_index < num_threads_; ++thread_index) {
     const data_size_t block_start = block_size * thread_index;
     const data_size_t block_end = std::min(block_start + block_size, num_bin);
+    if (block_start >= block_end) {
+      thread_diff_encode_offset_[thread_index + 1] = 0;
+      continue;
+    }
     int32_t prev_grad = 0;
     int32_t prev_hess = 0;
     const data_size_t remainder_bin = block_end % 4;
@@ -893,7 +900,11 @@ void HistogramCompressorV3::Compress(char* in_buffer, data_size_t num_bin) {
     const data_size_t remainder_bin = block_end % 4;
     if (remainder_bin > 0) {
       const data_size_t buffer_pos = ((block_end - remainder_bin) << 1) / 8;
-      bit_buffer_[buffer_pos] |= thread_end_bit_buffer_[thread_index];
+      if (thread_index != num_threads_ - 1) {
+        bit_buffer_[buffer_pos] |= thread_end_bit_buffer_[thread_index];
+      } else {
+        bit_buffer_[buffer_pos] = thread_end_bit_buffer_[thread_index];
+      }
     }
   }
   uint32_t total_encoded_bytes =
@@ -933,11 +944,13 @@ void HistogramCompressorV3::Compress(char* in_buffer, data_size_t num_bin) {
   for (uint32_t i = 0; i < bits_len; ++i) {
     in_buffer_as_out_bits[i] = bit_buffer_[i];
   }
-  in_buffer_as_out[0] = bits_len * sizeof(uint8_t) + (header_and_diff_encode_len) * sizeof(uint32_t);
+  in_buffer_as_out[0] = bits_len * sizeof(uint8_t) + (header_and_diff_encode_len + 1) * sizeof(uint32_t);
+  global_timer.Stop("HistogramCompressorV3::Compress");
 }
 
 template <typename S_HIST_T, typename U_HIST_T>
 void HistogramCompressorV3::Decompress(char* in_buffer, data_size_t num_bin) {
+  global_timer.Start("HistogramCompressorV3::Decompress");
   const uint32_t bits_len = static_cast<uint32_t>((num_bin * 2 + 7) / 8);
   if (diff_buffer_.size() < static_cast<size_t>(2 * num_bin)) {
     diff_buffer_.resize(2 * num_bin, 0);
@@ -952,7 +965,9 @@ void HistogramCompressorV3::Decompress(char* in_buffer, data_size_t num_bin) {
   for (int thread_index = 0; thread_index < num_threads_ + 1; ++thread_index) {
     thread_diff_encode_offset_[thread_index] = in_buffer_as_encode[thread_index + 1];
   }
-  const int block_size = (num_bin + num_threads_ - 1) / num_threads_;
+  int block_size = (num_bin + num_threads_ - 1) / num_threads_;
+  // block_size must be even to use simdfastpfor256
+  block_size += (block_size % 2);
   in_buffer_as_encode += (2 + num_threads_);
   const uint8_t* in_buffer_as_encode_bits = reinterpret_cast<const uint8_t*>(in_buffer_as_encode + thread_diff_encode_offset_.back());
   if (thread_diff_encode_offset_.back() > encode_buffer_.size()) {
@@ -976,6 +991,9 @@ void HistogramCompressorV3::Decompress(char* in_buffer, data_size_t num_bin) {
   for (int thread_index = 0; thread_index < num_threads_; ++thread_index) {
     const data_size_t block_start = block_size * thread_index;
     const data_size_t block_end = std::min(block_start + block_size, num_bin);
+    if (block_start >= block_end) {
+      continue;
+    }
     uint32_t* diff_buffer_ptr = diff_buffer_.data() + 2 * block_start;
     const uint32_t thread_encode_start = thread_diff_encode_offset_[thread_index];
     const uint32_t thread_encode_end = thread_diff_encode_offset_[thread_index + 1];
@@ -1023,6 +1041,7 @@ void HistogramCompressorV3::Decompress(char* in_buffer, data_size_t num_bin) {
       in_buffer_signed[bin_offset + 1] = static_cast<S_HIST_T>(grad);
     }
   }
+  global_timer.Stop("HistogramCompressorV3::Decompress");
 }
 
 template void HistogramCompressorV3::Compress<int32_t, uint32_t>(char* in_buffer, data_size_t num_bin);

@@ -252,23 +252,17 @@ inline void Linkers::SendRecv(int send_rank, char* send_data, int64_t send_len,
 
 template <bool USE_COMPRESS, int HIST_BITS>
 inline void Linkers::Recv(int rank, char* data, int len) const {
+  global_timer.Start("Recv time");
   if (!USE_COMPRESS) {
     int recv_cnt = 0;
-    if (HIST_BITS == -1) {
-      global_timer.Start("Recv time -1");
-    }
     while (recv_cnt < len) {
       recv_cnt += linkers_[rank]->Recv(data + recv_cnt,
         // len - recv_cnt
         std::min(len - recv_cnt, SocketConfig::kMaxReceiveSize));
     }
-    if (HIST_BITS == -1) {
-      global_timer.Stop("Recv time -1");
-    }
   } else {
     int recv_cnt = 0;
     int header_len = sizeof(uint32_t);
-    global_timer.Start("Recv time");
     while (recv_cnt < header_len) {
       recv_cnt += linkers_[rank]->Recv(
         data + recv_cnt,
@@ -277,15 +271,14 @@ inline void Linkers::Recv(int rank, char* data, int len) const {
     }
 
     const int compressed_len = static_cast<int>((reinterpret_cast<const uint32_t*>(data))[0]);
-    recv_cnt = 0;
     while (recv_cnt < compressed_len) {
       recv_cnt += linkers_[rank]->Recv(
-        data + header_len + recv_cnt,
+        data + recv_cnt,
         // len - recv_cnt
         std::min(compressed_len - recv_cnt, SocketConfig::kMaxReceiveSize));
     }
-    global_timer.Stop("Recv time");
   }
+  global_timer.Stop("Recv time");
 }
 
 template <bool USE_COMPRESS, int HIST_BITS>
@@ -293,16 +286,12 @@ inline void Linkers::Send(int rank, char* data, int len) const {
   if (len <= 0) {
     return;
   }
+  global_timer.Start("Send time");
   int send_cnt = 0;
-  if (HIST_BITS == -1) {
-    global_timer.Start("Send time -1");
-  }
   while (send_cnt < len) {
     send_cnt += linkers_[rank]->Send(data + send_cnt, len - send_cnt);
   }
-  if (HIST_BITS == -1) {
-    global_timer.Stop("Send time -1");
-  }
+  global_timer.Stop("Send time");
 }
 
 template <bool USE_COMPRESS, int HIST_BITS>
