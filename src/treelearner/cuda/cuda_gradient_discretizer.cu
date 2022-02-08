@@ -122,6 +122,7 @@ void CUDAGradientDiscretizer::DiscretizeGradients(
     grad_max_block_buffer_.RawData(),
     hess_min_block_buffer_.RawData(),
     hess_max_block_buffer_.RawData());
+    SynchronizeCUDADevice(__FILE__, __LINE__);
   ReduceBlockMinMaxKernel<<<1, CUDA_GRADIENT_DISCRETIZER_BLOCK_SIZE>>>(
     num_reduce_blocks_,
     grad_discretize_bins_,
@@ -129,6 +130,7 @@ void CUDAGradientDiscretizer::DiscretizeGradients(
     grad_max_block_buffer_.RawData(),
     hess_min_block_buffer_.RawData(),
     hess_max_block_buffer_.RawData());
+    SynchronizeCUDADevice(__FILE__, __LINE__);
   if (nccl_comm_ != nullptr) {
     SynchronizeCUDADevice(__FILE__, __LINE__);
     cudaStream_t cuda_stream;
@@ -162,6 +164,7 @@ void CUDAGradientDiscretizer::DiscretizeGradients(
     hessian_random_values_.RawData(),
     grad_discretize_bins_,
     discretized_gradients_and_hessians_.RawData());
+    SynchronizeCUDADevice(__FILE__, __LINE__);
   ++iter_;
 }
 
