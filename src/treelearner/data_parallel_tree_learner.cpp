@@ -248,6 +248,7 @@ void DataParallelTreeLearner<TREELEARNER_T>::FindBestSplits(const Tree* tree) {
   }
   // construct local histograms
   global_timer.Start("DataParallelTreeLearner::ReduceHistogram");
+  global_timer.Start("DataParallelTreeLearner::ReduceHistogram::Copy");
   const uint8_t smaller_leaf_num_bits = this->leaf_num_bits_in_histogram_bin_[this->smaller_leaf_splits_->leaf_index()];
   #pragma omp parallel for schedule(static)
   for (int feature_index = 0; feature_index < this->num_features_; ++feature_index) {
@@ -270,8 +271,10 @@ void DataParallelTreeLearner<TREELEARNER_T>::FindBestSplits(const Tree* tree) {
                 this->smaller_leaf_histogram_array_[feature_index].SizeOfHistgram());
     }
   }
+  global_timer.Stop("DataParallelTreeLearner::ReduceHistogram::Copy");
   // Reduce scatter for histogram
   //Log::Warning("Before reduce scatter");
+  global_timer.Start("DataParallelTreeLearner::ReduceHistogram::ReduceScatter");
   if (!this->config_->use_discretized_grad) {
     Network::ReduceScatter<false, -1>(input_buffer_.data(), reduce_scatter_size_, sizeof(hist_t), block_start_.data(),
                            block_len_.data(), output_buffer_.data(), static_cast<comm_size_t>(output_buffer_.size()), &HistogramSumReducer);
@@ -294,6 +297,7 @@ void DataParallelTreeLearner<TREELEARNER_T>::FindBestSplits(const Tree* tree) {
       }
     }
   }
+  global_timer.Stop("DataParallelTreeLearner::ReduceHistogram::ReduceScatter");
   //Log::Warning("After reduce scatter");
   global_timer.Stop("DataParallelTreeLearner::ReduceHistogram");
   this->FindBestSplitsFromHistograms(

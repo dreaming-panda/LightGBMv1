@@ -103,9 +103,6 @@ class CUDAGradientDiscretizer: public GradientDiscretizer {
   CUDAVector<score_t> gradient_random_values_;
   CUDAVector<score_t> hessian_random_values_;
   int num_reduce_blocks_;
-  int iter_;
-  int num_trees_;
-  int random_seed_;
   ncclComm_t* nccl_comm_;
 };
 

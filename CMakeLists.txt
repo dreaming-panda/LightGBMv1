@@ -102,7 +102,6 @@ include_directories(${EIGEN_DIR})
 ADD_DEFINITIONS(-DEIGEN_MPL2_ONLY)
 
 SET(FASTPFOR_DIR "${PROJECT_SOURCE_DIR}/external_libs/FastPFor")
-#include_directories((${FASTPFOR_DIR}/headers))
 add_subdirectory(${FASTPFOR_DIR})
 
 if(__BUILD_FOR_R)
@@ -426,8 +425,8 @@ if(USE_SWIG)
   endif()
 endif(USE_SWIG)
 
-target_link_libraries(lightgbm ${FASTPFOR_DIR}/build/libFastPFOR.a)
-target_link_libraries(_lightgbm ${FASTPFOR_DIR}/build/libFastPFOR.a)
+target_link_libraries(lightgbm FastPFOR)
+target_link_libraries(_lightgbm FastPFOR)
 
 if(USE_CUDA)
   target_link_libraries(lightgbm /usr/local/cuda/lib64/libcudart_static.a)
