@@ -429,6 +429,11 @@ endif(USE_SWIG)
 target_link_libraries(lightgbm ${FASTPFOR_DIR}/build/libFastPFOR.a)
 target_link_libraries(_lightgbm ${FASTPFOR_DIR}/build/libFastPFOR.a)
 
+if(USE_CUDA)
+  target_link_libraries(lightgbm /usr/local/cuda/lib64/libcudart_static.a)
+  target_link_libraries(_lightgbm /usr/local/cuda/lib64/libcudart_static.a)
+endif(USE_CUDA)
+
 if(USE_MPI)
   TARGET_LINK_LIBRARIES(lightgbm ${MPI_CXX_LIBRARIES})
   TARGET_LINK_LIBRARIES(_lightgbm ${MPI_CXX_LIBRARIES})

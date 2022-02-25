@@ -734,6 +734,17 @@ void CUDASingleGPUTreeLearner::NCCLReduceHistogram() {
   CUDASUCCESS_OR_FATAL(cudaStreamSynchronize(nccl_stream_));
 }
 
+/*void CUDASingleGPUTreeLearner::DumpHistogram(const int leaf_index) const {
+  const hist_t* hist = cuda_histogram_constructor_->cuda_hist_pointer() +
+        leaf_to_hist_index_map_[leaf_index] * num_total_bin_ * 2;
+  std::vector<hist_t> host_histogram(2 * num_total_bin_, 0.0f);
+  CopyFromCUDADeviceToHost<hist_t>(host_histogram.data(), hist, 2 * num_total_bin_, __FILE__, __LINE__);
+  std::ofstream fout(std::string("histogram_") + std::to_string(gpu_device_id_) + std::string("_") + std::to_string(leaf_index));
+  for (int bin = 0; bin < num_total_bin_; ++bin) {
+    fout << bin << " " << "grad" << " " << host_histogram[2 * bin] << " hess " << host_histogram[2 * bin + 1] << std::endl;
+  }
+}*/
+
 void CUDASingleGPUTreeLearner::SetNumBitsInHistogramBin(const int left_leaf_index, const int right_leaf_index) {
   if (right_leaf_index == -1) {
     if (!config_->use_discretized_grad) {

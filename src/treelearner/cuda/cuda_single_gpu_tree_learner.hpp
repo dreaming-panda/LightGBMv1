@@ -79,6 +79,8 @@ class CUDASingleGPUTreeLearner: public SerialTreeLearner {
 
   void SetNumBitsInHistogramBin(const int left_leaf_index, const int right_leaf_index) override;
 
+  void DumpHistogram(const int leaf_index) const;
+
   // GPU device ID
   int gpu_device_id_;
   // number of threads on CPU

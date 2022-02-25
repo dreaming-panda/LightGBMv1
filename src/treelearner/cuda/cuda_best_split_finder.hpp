@@ -107,7 +107,9 @@ class CUDABestSplitFinder {
     const int smaller_leaf_index, \
     const int larger_leaf_index, \
     const bool is_smaller_leaf_valid, \
-    const bool is_larger_leaf_valid
+    const bool is_larger_leaf_valid, \
+    const data_size_t global_num_data_in_smaller_leaf, \
+    const data_size_t global_num_data_in_larger_leaf
 
   void LaunchFindBestSplitsForLeafKernel(LaunchFindBestSplitsForLeafKernel_PARAMS);
 
@@ -134,7 +136,9 @@ class CUDABestSplitFinder {
   const uint8_t smaller_num_bits_in_histogram_bins, \
   const uint8_t larger_num_bits_in_histogram_bins, \
   const uint8_t smaller_num_bits_in_histogram_acc, \
-  const uint8_t larger_num_bits_in_histogram_acc
+  const uint8_t larger_num_bits_in_histogram_acc, \
+  const data_size_t global_num_data_in_smaller_leaf, \
+  const data_size_t global_num_data_in_larger_leaf
 
   void LaunchFindBestSplitsDiscretizedForLeafKernel(LaunchFindBestSplitsDiscretizedForLeafKernel_PARAMS);
 

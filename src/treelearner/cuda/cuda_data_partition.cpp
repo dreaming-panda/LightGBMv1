@@ -306,7 +306,6 @@ void CUDADataPartition::CalcBlockDim(const data_size_t num_data_in_leaf) {
   const int min_num_blocks = num_data_in_leaf <= 100 ? 1 : 80;
   const int num_blocks = std::max(min_num_blocks, (num_data_in_leaf + SPLIT_INDICES_BLOCK_SIZE_DATA_PARTITION - 1) / SPLIT_INDICES_BLOCK_SIZE_DATA_PARTITION);
   int split_indices_block_size_data_partition = (num_data_in_leaf + num_blocks - 1) / num_blocks - 1;
-  CHECK_GT(split_indices_block_size_data_partition, 0);
   int split_indices_block_size_data_partition_aligned = 1;
   while (split_indices_block_size_data_partition > 0) {
     split_indices_block_size_data_partition_aligned <<= 1;
